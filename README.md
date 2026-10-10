@@ -34,6 +34,25 @@ DAROM/
 └── requirements.txt
 ```
 
+## Git Submission Policy
+
+The root `.gitignore` uses an allowlist. Only `src/`, `assets/`,
+`sumo_files/`, `sumo_new/`, `models/`, and the explicitly listed root files
+are eligible for new Git tracking. New root files or directories must be
+added to the allowlist intentionally. Under `models/`, only the two existing
+pretrained checkpoints in `GRU-uniform-delay/` are allowed.
+
+AI workspace directories (`.codex/`, `.claude/`, `.cursor/`, `.agents/`),
+local agent instructions (`AGENTS.md`, `CLAUDE.md`), temporary directories
+(`tmp/`, `temp/`, `scratch/`, `artifacts/`), caches, credentials, and generated
+training or simulation output are ignored even within allowed directories.
+Store AI scratch work in these ignored directories: ordinary files placed
+directly in an allowed source or asset directory can still be tracked.
+
+Before committing, inspect `git status --short` and `git diff --cached`.
+Ignore rules do not affect files already tracked by Git, and `git add -f`
+can bypass them.
+
 ## Installation
 
 **Requirements**: Python 3.10+, [SUMO](https://sumo.dlr.de/) ≥ 1.18
@@ -53,6 +72,30 @@ pip install -r requirements.txt
 # Set SUMO_HOME (add to ~/.bashrc for persistence)
 export SUMO_HOME=/usr/share/sumo
 ```
+
+## Antwerp traffic routes
+
+`sumo_new/Antwerp_easy.rou.xml`, `Antwerp_medium.rou.xml`, and
+`Antwerp_hard.rou.xml` define 1-hour background demand of 1,800, 3,456,
+and 7,108 vehicles, respectively. To run one scenario, pass its route file
+to SUMO, for example:
+
+```bash
+sumo -c sumo_new/Antwerp.sumocfg --route-files sumo_new/Antwerp_hard.rou.xml
+```
+
+The origin mix, vehicle lengths, and OD seed come from the Antwerp detector
+data on 2022-09-05 from 11:30 to 12:30. Matched trajectories are balanced
+to observed origin counts and to the proportions of the three mapped exit
+counts. Detector `3849` (`L4e`) has no verified D1/D2/D3 mapping in the
+three-exit network; its observations are retained in origin totals, and
+their destinations are projected onto the three mapped exits. The four
+vehicle types use the paper's disjoint length ranges; cars and vans are
+combined because the supplied length data cannot separate them. These
+files contain background traffic only, not a controlled `ego` vehicle.
+The existing network speed limit remains 13.89 m/s, so its simulated speed
+and congestion should be calibrated before using these scenarios to assess
+policy performance.
 
 ## Training
 
