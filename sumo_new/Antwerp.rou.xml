@@ -1,0 +1,108 @@
+<routes>
+
+    <vType id="motorbike" vClass="motorcycle" length="1.0" width="0.8" maxSpeed="45.0" accel="5.0" decel="7.0" sigma="0.5" color="cyan" guiShape="motorcycle" maxSpeedLat="1.5" minGapLat="0.2" latAlignment="arbitrary"/>
+
+    <vType id="car" vClass="passenger" length="5.0" width="1.8" maxSpeed="45.0" accel="2.6" decel="4.5" sigma="0.5" color="yellow" guiShape="passenger/sedan" maxSpeedLat="1.0" minGapLat="0.4" latAlignment="center"/>
+
+    <vType id="Vans" vClass="passenger" length="6.0" width="2.0" maxSpeed="30.0" accel="1.8" decel="4.0" sigma="0.5" color="orange" guiShape="passenger/van" maxSpeedLat="0.8" minGapLat="0.4" latAlignment="center"/>
+
+    <vType id="lorry" vClass="truck" length="8.0" width="2.4" maxSpeed="25.0" accel="1.2" decel="3.5" sigma="0.5" color="red" guiShape="truck" maxSpeedLat="0.6" minGapLat="0.5" latAlignment="center"/>
+
+    <vType id="truck_heavy" vClass="trailer" length="13.0" width="2.5" maxSpeed="22.0" accel="1.0" decel="3.0" sigma="0.5" color="blue" guiShape="truck/trailer" maxSpeedLat="0.4" minGapLat="0.6" latAlignment="center"/>
+
+
+    <flow id="motorbike_flow_1" type="motorbike" begin="0" end="3600" vehsPerHour="100" from="O1" to="D1" />
+
+    <flow id="motorbike_flow_2" type="motorbike" begin="0" end="3600" vehsPerHour="100" from="O1" to="D2" />
+
+    <flow id="motorbike_flow_3" type="motorbike" begin="0" end="3600" vehsPerHour="100" from="O1" to="D3" />
+
+    <flow id="motorbike_flow_4" type="motorbike" begin="0" end="3600" vehsPerHour="100" from="O2" to="D1" />
+
+    <flow id="motorbike_flow_5" type="motorbike" begin="0" end="3600" vehsPerHour="100" from="O2" to="D2" />
+
+    <flow id="motorbike_flow_6" type="motorbike" begin="0" end="3600" vehsPerHour="100" from="O2" to="D3" />
+
+    <flow id="motorbike_flow_7" type="motorbike" begin="0" end="3600" vehsPerHour="100" from="O3" to="D1" />
+
+    <flow id="motorbike_flow_8" type="motorbike" begin="0" end="3600" vehsPerHour="100" from="O3" to="D2" />
+
+    <flow id="motorbike_flow_9" type="motorbike" begin="0" end="3600" vehsPerHour="100" from="O3" to="D3" />
+
+
+    <flow id="car_flow_1" type="car" begin="0" end="3600" vehsPerHour="3600" from="O1" to="D1" />
+
+    <flow id="car_flow_2" type="car" begin="0" end="3600" vehsPerHour="3600" from="O1" to="D2" />
+
+    <flow id="car_flow_3" type="car" begin="0" end="3600" vehsPerHour="3600" from="O1" to="D3" />
+
+    <flow id="car_flow_4" type="car" begin="0" end="3600" vehsPerHour="3600" from="O2" to="D1" />
+
+    <flow id="car_flow_5" type="car" begin="0" end="3600" vehsPerHour="3600" from="O2" to="D2" />
+
+    <flow id="car_flow_6" type="car" begin="0" end="3600" vehsPerHour="3600" from="O2" to="D3" />
+
+    <flow id="car_flow_7" type="car" begin="0" end="3600" vehsPerHour="3600" from="O3" to="D1" />
+
+    <flow id="car_flow_8" type="car" begin="0" end="3600" vehsPerHour="3600" from="O3" to="D2" />
+
+    <flow id="car_flow_9" type="car" begin="0" end="3600" vehsPerHour="3600" from="O3" to="D3" />
+
+
+    <flow id="Vans_flow_1" type="Vans" begin="0" end="3600" vehsPerHour="600" from="O1" to="D1" />
+
+    <flow id="Vans_flow_2" type="Vans" begin="0" end="3600" vehsPerHour="600" from="O1" to="D2" />
+
+    <flow id="Vans_flow_3" type="Vans" begin="0" end="3600" vehsPerHour="600" from="O1" to="D3" />
+
+    <flow id="Vans_flow_4" type="Vans" begin="0" end="3600" vehsPerHour="600" from="O2" to="D1" />
+
+    <flow id="Vans_flow_5" type="Vans" begin="0" end="3600" vehsPerHour="600" from="O2" to="D2" />
+
+    <flow id="Vans_flow_6" type="Vans" begin="0" end="3600" vehsPerHour="600" from="O2" to="D3" />
+
+    <flow id="Vans_flow_7" type="Vans" begin="0" end="3600" vehsPerHour="600" from="O3" to="D1" />
+
+    <flow id="Vans_flow_8" type="Vans" begin="0" end="3600" vehsPerHour="600" from="O3" to="D2" />
+
+    <flow id="Vans_flow_9" type="Vans" begin="0" end="3600" vehsPerHour="600" from="O3" to="D3" />
+
+
+    <flow id="lorry_flow_1" type="lorry" begin="0" end="3600" vehsPerHour="1000" from="O1" to="D1" />
+
+    <flow id="lorry_flow_2" type="lorry" begin="0" end="3600" vehsPerHour="1000" from="O1" to="D2" />
+
+    <flow id="lorry_flow_3" type="lorry" begin="0" end="3600" vehsPerHour="1000" from="O1" to="D3" />
+
+    <flow id="lorry_flow_4" type="lorry" begin="0" end="3600" vehsPerHour="1000" from="O2" to="D1" />
+
+    <flow id="lorry_flow_5" type="lorry" begin="0" end="3600" vehsPerHour="1000" from="O2" to="D2" />
+
+    <flow id="lorry_flow_6" type="lorry" begin="0" end="3600" vehsPerHour="1000" from="O2" to="D3" />
+
+    <flow id="lorry_flow_7" type="lorry" begin="0" end="3600" vehsPerHour="1000" from="O3" to="D1" />
+
+    <flow id="lorry_flow_8" type="lorry" begin="0" end="3600" vehsPerHour="1000" from="O3" to="D2" />
+
+    <flow id="lorry_flow_9" type="lorry" begin="0" end="3600" vehsPerHour="1000" from="O3" to="D3" />
+    
+
+    <flow id="truckheavy_flow_1" type="truck_heavy" begin="0" end="3600" vehsPerHour="400" from="O1" to="D1" />
+
+    <flow id="truckheavy_flow_2" type="truck_heavy" begin="0" end="3600" vehsPerHour="400" from="O1" to="D2" />
+
+    <flow id="truckheavy_flow_3" type="truck_heavy" begin="0" end="3600" vehsPerHour="400" from="O1" to="D3" />
+
+    <flow id="truckheavy_flow_4" type="truck_heavy" begin="0" end="3600" vehsPerHour="400" from="O2" to="D1" />
+
+    <flow id="truckheavy_flow_5" type="truck_heavy" begin="0" end="3600" vehsPerHour="400" from="O2" to="D2" />
+
+    <flow id="truckheavy_flow_6" type="truck_heavy" begin="0" end="3600" vehsPerHour="400" from="O2" to="D3" />
+
+    <flow id="truckheavy_flow_7" type="truck_heavy" begin="0" end="3600" vehsPerHour="400" from="O3" to="D1" />
+
+    <flow id="truckheavy_flow_8" type="truck_heavy" begin="0" end="3600" vehsPerHour="400" from="O3" to="D2" />
+
+    <flow id="truckheavy_flow_9" type="truck_heavy" begin="0" end="3600" vehsPerHour="400" from="O3" to="D3" />
+
+</routes>

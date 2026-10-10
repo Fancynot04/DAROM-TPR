@@ -1,0 +1,13 @@
+<configuration>
+    <input>
+        <net-file value="Antwerp.net.xml"/>
+        <route-files value="Antwerp.rou.xml"/>
+	    <additional-files value="Antwerp.add.xml"/>
+    </input>
+    <time>
+        <begin value="0"/>
+        <end value="3600"/>
+        <step-length value="0.1"/>
+    </time>
+    <lateral-resolution value="0.8" />
+</configuration>

@@ -1,0 +1,40 @@
+# macOS and local editor settings
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python caches, virtual environments, and build output
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local credentials (keep shareable example files)
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Generated training logs and experimental checkpoints
+wandb/
+runs/
+logs/
+outputs/
+multirun/
+models_experiments/
+*.log
+# The pretrained checkpoints in models/ are intentionally included.
+
+# Generated SUMO simulation results
+tripinfo.xml
+E1_DS*_L*.xml
