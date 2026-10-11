@@ -200,7 +200,8 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   In three-density TraCI probes this
   eliminated the observed misses of `E75_1` vehicles during the O3 merge;
   fixed-action comparisons reached a mainline lane with `--safety` in all
-  three scenarios. These probes do not establish a trained policy's safety.
+  three scenarios before ego lane-mode restoration. These probes do not
+  establish a trained policy's safety and need rerunning under lane mode 0.
 - [x] Connect the five Table IV input ablations to Hard-scenario training and
   independent evaluation. All retain the GRU input shape and separate safety
   input; five 3-step training and evaluation smoke runs loaded their matching
@@ -217,11 +218,19 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   same seed without consuming SUMO's or global NumPy's random stream.
 - [x] Check the legacy 32 m/s ego guard against Antwerp speeds. With seed
   579071 and a continuous +5 acceleration command, ego reached D1 in all
-  three scenarios; its maximum speed was 14.36 m/s and the guard never fired.
+  three scenarios under the previous automatic lane mode; its maximum speed
+  was 14.36 m/s and the guard never fired. Recheck route completion under the
+  current lane mode before using these runs as reachability evidence.
 - [x] Check ego acceleration against its `car_van` type. All three routes set
   `accel=2.6` and `decel=4.5`; an Easy-scenario TraCI probe measured +2.6
   m/s² from a +5 command and −4.5 m/s² from a −5 command, without an
   emergency-stop outcome.
+- [x] Restore the upstream ego-only lane-control setting. The original DAROM
+  disables SUMO's autonomous ego lane changes with `laneChangeMode=0`; Antwerp
+  now does the same while retaining the `car_van` type and speed mode 31. A
+  same-seed TraCI probe showed no spontaneous lane changes under mode 0 and
+  confirmed that an explicit policy lane request still works in the E75 merge
+  zone. A new 3-step Hard training smoke run saved a checkpoint successfully.
 
 **Retained choices and recorded differences**
 
@@ -246,6 +255,12 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   Antwerp background vehicles; a sampled `car_van` retained `tau=1.0`, type
   maximum speed 45 m/s, and speed mode 31. Define any driver-profile groups
   separately if a future experiment needs them.
+- Upstream also sets ego `speedMode=96`, but Antwerp keeps `speedMode=31` and
+  the `car_van` acceleration/deceleration values. Changing lane mode does not
+  change these physical parameters; the upstream speed-mode difference remains
+  deliberate and should be evaluated separately. SUMO lane mode 0 also skips
+  gap-safety checks for explicit TraCI lane requests, so policy collisions and
+  the optional safety controller must be assessed under this setting.
 - The policy action range remains −5 to +5 m/s². SUMO limits realized ego
   acceleration to the `car_van` type values in the measured probe, while the
   existing jerk reward uses the commanded action. Keep this reward convention
@@ -276,8 +291,12 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   split visible beside the table rates. Generate the corresponding Fig. 5
   training curves. No full Antwerp model training or Table IV evaluation has
   been completed yet.
-- [ ] Decide how much route-aware lane control belongs to the policy before
-  scaling training. `E77_0` connects only to D3; `E82_0`–`E82_2` connect to
+- [ ] Retrain the `full` baseline and five variants from scratch under ego
+  lane mode 0; the pre-restoration 256-step and 10,000-step pilot checkpoints
+  used SUMO's automatic lane mode and cannot measure the revised policy task.
+  Rerun the three-density fixed-action and safety probes under this mode.
+- [ ] Assess route-aware lane guidance after the policy-controlled baseline.
+  `E77_0` connects only to D3; `E82_0`–`E82_2` connect to
   D2, while `E82_3`–`E82_5` connect to D1. One baseline training episode ended
   with an ego emergency stop on `E77_0`; its per-step lane actions were not
   recorded, so the source of that lane choice is unknown. Keep emergency stops
@@ -302,6 +321,8 @@ steps (9,900 updates). Its three independent complete episodes at seeds
 579072–579074 yielded two D1 arrivals and one merged timeout, with no ego
 collision or emergency stop. Three episodes are insufficient for a Table IV
 performance claim; pilot models and logs remain under `tmp/ai/`.
+All of these checkpoints were trained before ego lane mode 0 was restored, so
+their arrival rates are historical and must not be treated as current results.
 
 Deterministic traces of the 10,000-step `full` checkpoint at seeds 579073 and
 579074 show a parsed lane-change action of zero on every step. SUMO still
@@ -311,6 +332,10 @@ entered `:J107_0_0`. There it advanced only 72 m over nearly 3,000 steps;
 between steps 3,500 and 4,500 its stopped leader was a D1-bound car with a
 near-zero gap. The immediate timeout mechanism was a downstream queue, and
 the current pilot does not demonstrate learned lane-changing behavior.
+With the same old checkpoint and seed 579073 under lane mode 0, the policy
+again issued zero lane-change actions, SUMO made no within-edge lane changes,
+and ego timed out on `E78_0`. This is a control-attribution check, not a fair
+performance comparison across training conditions.
 
 **Key arguments:**
 

@@ -49,6 +49,8 @@ def SetTrafficBehavior(vehicle_name):
     elif 'f_2' in vehicle_name:
         traci.vehicle.setTau(vehicle_name, np.random.normal(0.7, 0.1))
         traci.vehicle.setMaxSpeed(vehicle_name, np.random.uniform(8, 11))
+    elif vehicle_name == 'ego':
+        traci.vehicle.setLaneChangeMode(vehicle_name, 0)
 
 
 
