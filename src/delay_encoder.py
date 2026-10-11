@@ -76,6 +76,13 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
         self.act_dim = act_dim
         self.hist_len = hist_len
         self.delay_dim = delay_dim
+        if self.obs_dim % 3 != 0 or delay_dim != 1:
+            raise ValueError('DAROM-GRU expects 3 features per vehicle and one delay value')
+        num_entities = self.obs_dim // 3
+        self.register_buffer(
+            'observation_scale',
+            th.tensor([1000., 5., 30.] + [50., 20., 30.] * (num_entities - 1)),
+        )
 
         # -------------------------------
         # 1) Encode observation (o_t)
@@ -123,17 +130,18 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
 
         B = obs.size(0)
 
-        o_t = obs[:, :self.obs_dim]
+        o_t = obs[:, :self.obs_dim] / self.observation_scale
 
         a_hist_flat = obs[:, self.obs_dim : self.obs_dim + self.act_hist_dim]
-        delay = obs[:, -self.delay_dim:]
+        delay = obs[:, -self.delay_dim:] / self.hist_len
 
         # ---- Encode obs ----
         o_emb = self.obs_encoder(o_t)
 
         # ---- Prepare action history ----
         # reshape: (B, hist_len, act_dim)
-        a_hist = a_hist_flat.view(B, self.hist_len, self.act_dim)
+        # DelayWrapper stores newest first; GRU should finish with the latest action.
+        a_hist = a_hist_flat.reshape(B, self.hist_len, self.act_dim).flip(1) / 5.0
 
         # ---- GRU ----
         _, h_last = self.gru(a_hist)   # h_last: (1, B, hidden)

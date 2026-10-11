@@ -400,7 +400,5 @@ class Merging(gym.Env):
         return None
 
     def close(self):
-        try:
+        if traci.isLoaded():
             traci.close()
-        except Exception:
-            print('Error in closing SUMO')

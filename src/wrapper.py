@@ -9,13 +9,16 @@ from .safety_controller import safetyCheck
 # from state_predictor import predictor_infer, load_predictor
 import torch
 class DelayWrapper(ObservationWrapper):
-    def __init__(self, env, max_delay=10, mode=['only_delayed_state' 'delayed_state_and_action', 'delayed_state_and_delay', 'all'], drl_ormoc=False, delay_mode='uniform'):
+    def __init__(self, env, max_delay=10, mode=['only_delayed_state' 'delayed_state_and_action', 'delayed_state_and_delay', 'all'], drl_ormoc=False, delay_mode='uniform', seed=None):
         super().__init__(env)
         self.orig_shape = self.env.observation_space.shape
         orig_shape = self.env.observation_space.shape
         self.mode = mode
         self.delay_mode = delay_mode
         self.congested = False  # for bursty mode
+        self._delay_seed = seed
+        self._delay_episode = -1
+        self._delay_rng = np.random.default_rng()
 
         self.max_delay = max_delay
  
@@ -71,6 +74,16 @@ class DelayWrapper(ObservationWrapper):
 
     def reset(self, **kwargs):
         self.obs, info = self.env.reset(**kwargs)
+        if kwargs.get('seed') is not None:
+            self._delay_seed = kwargs['seed']
+            self._delay_episode = 0
+        else:
+            self._delay_episode += 1
+        if self._delay_seed is None:
+            self._delay_rng = np.random.default_rng()
+        else:
+            sequence = np.random.SeedSequence([self._delay_seed, self._delay_episode])
+            self._delay_rng = np.random.default_rng(sequence)
         self.current_observation_delay = 0
         self.last_observation = self.obs
         self.delay_of_received_observation = 0
@@ -107,33 +120,33 @@ class DelayWrapper(ObservationWrapper):
     def _sample_delay(self):
         """Sample observation delay based on the configured delay_mode."""
         if self.delay_mode == "uniform":
-            return np.random.randint(0, self.max_delay + 1)
+            return self._delay_rng.integers(0, self.max_delay + 1)
 
         elif self.delay_mode == "exponential":
             # Favors low delays, long tail clipped to max_delay
-            raw = np.random.exponential(scale=self.max_delay / 3.0)
+            raw = self._delay_rng.exponential(scale=self.max_delay / 3.0)
             return int(np.clip(round(raw), 0, self.max_delay))
 
         elif self.delay_mode == "triangular":
             # Symmetric triangular distribution peaking at max_delay / 2
             mid = self.max_delay / 2.0
-            return int(round(np.random.triangular(0, mid, self.max_delay)))
+            return int(round(self._delay_rng.triangular(0, mid, self.max_delay)))
 
         elif self.delay_mode == "bursty":
             # Markov regime-switching: normal vs congested
             if self.congested:
-                self.congested = np.random.random() < 0.9  # 90% stay congested
-                return np.random.randint(self.max_delay // 2, self.max_delay + 1)
+                self.congested = self._delay_rng.random() < 0.9  # 90% stay congested
+                return self._delay_rng.integers(self.max_delay // 2, self.max_delay + 1)
             else:
-                self.congested = np.random.random() < 0.05  # 5% chance of burst
-                return np.random.randint(0, self.max_delay // 4 + 1)
+                self.congested = self._delay_rng.random() < 0.05  # 5% chance of burst
+                return self._delay_rng.integers(0, self.max_delay // 4 + 1)
 
         elif self.delay_mode == "bimodal":
             # Mixture of good connection (low delay) and bad connection (high delay)
-            if np.random.random() < 0.6:
-                return np.random.randint(0, max(self.max_delay // 5, 1) + 1)
+            if self._delay_rng.random() < 0.6:
+                return self._delay_rng.integers(0, max(self.max_delay // 5, 1) + 1)
             else:
-                return np.random.randint(self.max_delay * 3 // 5, self.max_delay + 1)
+                return self._delay_rng.integers(self.max_delay * 3 // 5, self.max_delay + 1)
 
         else:
             raise ValueError(f"Unknown delay_mode: {self.delay_mode}")
