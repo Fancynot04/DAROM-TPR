@@ -276,6 +276,11 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   split visible beside the table rates. Generate the corresponding Fig. 5
   training curves. No full Antwerp model training or Table IV evaluation has
   been completed yet.
+- [ ] Investigate D1-incompatible lane decisions before scaling training:
+  `E77_0` connects only to D3, while the ego's O3-to-D1 route continues via
+  E78. One 10,000-step Hard baseline training episode ended with an ego
+  emergency stop at the end of `E77_0`; keep this outcome separate from
+  collision and timeout counts.
 
 **Validation so far:** unit tests cover ego selection, geometry, wrappers,
 and encoder input handling. All three Antwerp scenarios reset at 120.1 s
@@ -287,6 +292,15 @@ completed after reset. A SUMO probe reproduced the same 12 delay draws after
 resetting twice with one seed and a different sequence after changing it.
 These are interface checks, not evidence of training
 convergence or task success.
+
+A Hard/uniform/no-safety pilot with seed 579071 trained each Table IV input
+variant for 256 steps (156 SAC updates). One complete independent episode per
+variant at seed 579072 ended in `Merged Timeout`; this is a pipeline check, not
+a variant ranking. A separate `full` baseline trained from scratch for 10,000
+steps (9,900 updates). Its three independent complete episodes at seeds
+579072–579074 yielded two D1 arrivals and one merged timeout, with no ego
+collision or emergency stop. Three episodes are insufficient for a Table IV
+performance claim; pilot models and logs remain under `tmp/ai/`.
 
 **Key arguments:**
 
