@@ -294,9 +294,9 @@ class Merging(gym.Env):
                         closest_behind = relState
         self._ahead_state = closest_ahead if closest_ahead is not None else [0.0, 0.0, 0.0]
         self._behind_state = closest_behind if closest_behind is not None else [0.0, 0.0, 0.0]
-        # Sort intruders first by y position, then by x position, both ascending
-        intruders = intruders[:self.num_entities - 1] # ego will take the last slot in the observation space.
-        intruders = sorted(intruders, key=lambda x: (x[1], x[0])) # sort intruders by y position, then by x position, both ascending
+        # Keep the nearest neighbors before applying the existing spatial order.
+        intruders = sorted(intruders, key=lambda x: x[0] ** 2 + x[1] ** 2)[:self.num_entities - 1]
+        intruders = sorted(intruders, key=lambda x: (x[1], x[0]))
         
     
         while len(intruders) < self.num_entities - 1:
@@ -329,8 +329,9 @@ class Merging(gym.Env):
         parsed_action = parseAction(action)
         self.action = action
         if self.runSafetyCheck:
-            from .safety_controller import safetyCheck
-            self.action, _ = safetyCheck(action, self.observation, False, 'all')
+            from .safety_controller import safetyCheck, target_lane_line
+            target_line = target_lane_line(self.ego_id, parsed_action[1])
+            self.action, _ = safetyCheck(action, self.observation, False, 'all', target_line)
             parsed_action = parseAction(self.action)
 
         if not self.done:
@@ -388,7 +389,7 @@ class Merging(gym.Env):
             except Exception:
                 pass
         
-        info.update({'lane': self.lane_id, 'action': action})
+        info.update({'lane': self.lane_id, 'action': action, 'merged': bool(self.merged)})
         return self.observation, float(self.reward), terminated, truncated, info
 
 

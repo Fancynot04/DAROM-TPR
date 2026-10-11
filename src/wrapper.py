@@ -5,7 +5,8 @@ from gymnasium import ActionWrapper, ObservationWrapper, RewardWrapper, Wrapper,
 from gymnasium.spaces import Box, Discrete
 from collections import deque
 from .utils import flatten, PredictorDataset, fine_tune_predictor, getDistance
-from .safety_controller import safetyCheck
+from .safety_controller import safetyCheck, target_lane_line
+from .merging import parseAction
 # from state_predictor import predictor_infer, load_predictor
 import torch
 class DelayWrapper(ObservationWrapper):
@@ -202,5 +203,6 @@ class SafetyWrapper(ActionWrapper):
         super().__init__(env)
 
     def action(self, action):
-        action, safety_info = safetyCheck(action, self.env.newX, True, 'all')
+        target_line = target_lane_line(self.env.env.ego_id, parseAction(action)[1])
+        action, safety_info = safetyCheck(action, self.env.newX, True, 'all', target_line)
         return action

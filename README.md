@@ -157,6 +157,10 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   coordinates for up to 30 neighbors; use route distance for ego progress.
   Adapt lane-change bounds, merge recognition, reward gaps, and safety checks
   to the Antwerp observation layout.
+- [x] Select the nearest 30 vehicles within the observation radius before
+  applying the existing left/forward spatial order. Hard traffic reached 37
+  candidates in a full probe; a separate 2,501-step run verified the selected
+  states at all 113 over-capacity steps without changing the 31×3 shape.
 - [x] Connect the training entry to all three routes. Training disables the
   safety controller by default; `--safety` enables it. New checkpoints go to
   `models_experiments/`.
@@ -164,6 +168,25 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   every 100,000 steps without starting a second SUMO environment in the same
   process. Run `evaluate_sac_delay.py` separately for Antwerp outcome metrics;
   checkpoints are no longer labeled "best" before evaluation.
+- [x] Carry the ego's merge status in each environment step. Independent
+  evaluation retains the total `Max Steps` count and splits it into `No Merge
+  Timeout` and `Merged Timeout`; training logs separate episode indicators for
+  arrival, collision, emergency stopping, and both timeout types. A TraCI
+  probe checked no-merge timeouts in all three densities and an Easy arrival
+  after merging.
+- [x] Match the upstream Table IV outcome proxy: success is `Arrived`, collision
+  is `Collision`, and reported no-merge rate counts **all** `Max Steps` episodes.
+  The merged/unmerged timeout split remains diagnostic because the Antwerp route
+  continues beyond the merge. Emergency stopping stays separate and is not
+  silently folded into the paper's three rates; if it occurs, those rates need
+  not sum to 100%.
+- [x] Adapt the safety controller's target-lane filter to Antwerp geometry.
+  It now projects the selected lane centerline into ego's local frame for both
+  lane changes and lane keeping, accounting for lateral movement and heading.
+  In three-density TraCI probes this
+  eliminated the observed misses of `E75_1` vehicles during the O3 merge;
+  fixed-action comparisons reached a mainline lane with `--safety` in all
+  three scenarios. These probes do not establish a trained policy's safety.
 - [x] Align the GRU action-history length with the wrapper's 20-action buffer.
   The upstream training script used `max_delay + 1`, which mismatches that
   buffer's length.
@@ -171,6 +194,13 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   episode index. An explicit `reset(seed=S)` restarts episode 0; later resets
   without a seed advance the index. All five delay modes now replay for the
   same seed without consuming SUMO's or global NumPy's random stream.
+- [x] Check the legacy 32 m/s ego guard against Antwerp speeds. With seed
+  579071 and a continuous +5 acceleration command, ego reached D1 in all
+  three scenarios; its maximum speed was 14.36 m/s and the guard never fired.
+- [x] Check ego acceleration against its `car_van` type. All three routes set
+  `accel=2.6` and `decel=4.5`; an Easy-scenario TraCI probe measured +2.6
+  m/s² from a +5 command and −4.5 m/s² from a −5 command, without an
+  emergency-stop outcome.
 
 **Retained choices and recorded differences**
 
@@ -181,6 +211,12 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   13.89 m/s network speed limit, and Hard-scenario background queues until
   measurements justify a change. The objective is ego reaching D1, not
   removing congestion from the network.
+- Keep the 32 m/s guard as an untriggered legacy condition in the tested runs.
+  The ego's `car_van` type has a 45 m/s maximum and SUMO speed mode 31; its sampled
+  speed factor of 1.034 makes the effective speed limit about 14.36 m/s on
+  13.89 m/s lanes. One internal connector is limited to 12.51 m/s. Recheck
+  the guard if road limits or speed mode change; this probe does not establish
+  the speed behavior of a trained policy.
 - Keep the four Antwerp vehicle types and their SUMO parameters as the traffic
   baseline. The original `f_1`/`f_2` overrides targeted particular lane flows;
   Antwerp flow IDs represent scenario/OD/type and do not match those checks.
@@ -189,6 +225,10 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   Antwerp background vehicles; a sampled `car_van` retained `tau=1.0`, type
   maximum speed 45 m/s, and speed mode 31. Define any driver-profile groups
   separately if a future experiment needs them.
+- The policy action range remains −5 to +5 m/s². SUMO limits realized ego
+  acceleration to the `car_van` type values in the measured probe, while the
+  existing jerk reward uses the commanded action. Keep this reward convention
+  for upstream comparison; review it before changing model behavior.
 - The current Antwerp GRU is a **documented deviation**, not an exact copy
   of upstream: the upstream encoder reads its
   newest-first action buffer without reversal and uses 128 output features;
@@ -204,21 +244,17 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
 
 **Pending work**
 
-- [ ] Verify observation ordering under Hard traffic: `src/merging.py`
-  currently truncates the vehicle list before sorting, so it may omit a closer
-  neighbor when more than 30 are within the observation radius.
-- [ ] Review the ego's 32 m/s cap against the network's 13.89 m/s limit as a
-  separate speed-consistency question; preserve current values meanwhile.
-- [ ] Before any `--safety` comparison, validate the controller at the angled
-  O3-to-E75 merge. Its fixed 3.2 m target-lane offset does not use target-lane
-  geometry or lane connectivity.
+- [ ] Evaluate the trained Antwerp policy with `--safety` before claiming a
+  collision reduction. The fixed-action probes cover merge behavior, not
+  complete policy episodes or all delayed-observation cases.
 - [ ] Select the best Antwerp checkpoint using independent evaluation across
   the required scenarios and delay profiles; no checkpoint has been ranked yet.
 - [ ] Build and train the five Hard-scenario Table IV variants under a stated
   common input-preprocessing and safety-controller policy. Report success,
-  collision, no-merge/timeout, and return; generate the corresponding Fig. 5
-  training curves. No full Antwerp model training or Table IV evaluation has
-  been completed yet.
+  collision, no-merge, and return using the outcome proxy above; keep emergency
+  stops and the timeout split visible beside the table rates. Generate the
+  corresponding Fig. 5 training curves. No full Antwerp model training or
+  Table IV evaluation has been completed yet.
 
 **Validation so far:** unit tests cover ego selection, geometry, wrappers,
 and encoder input handling. All three Antwerp scenarios reset at 120.1 s

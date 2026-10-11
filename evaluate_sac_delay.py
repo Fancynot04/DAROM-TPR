@@ -11,6 +11,7 @@ from src.wrapper import DelayWrapper, SafetyWrapper
 
 
 OUTCOMES = ('Arrived', 'Collision', 'Max Steps', 'Emergency Stopping')
+TIMEOUT_DETAILS = ('No Merge Timeout', 'Merged Timeout')
 
 
 def evaluate(model, env, episodes, seed):
@@ -24,10 +25,18 @@ def evaluate(model, env, episodes, seed):
             observation, reward, terminated, truncated, info = env.step(action)
             episode_return += float(reward)
             if terminated or truncated:
-                counts[info.get('message', 'Unknown')] += 1
+                outcome = info.get('message', 'Unknown')
+                counts[outcome] += 1
+                if outcome == 'Max Steps':
+                    counts['Merged Timeout' if info.get('merged') else 'No Merge Timeout'] += 1
                 returns.append(episode_return)
                 break
     return {**{outcome: counts[outcome] for outcome in OUTCOMES},
+            **{outcome: counts[outcome] for outcome in TIMEOUT_DETAILS},
+            'success_rate': 100 * counts['Arrived'] / episodes,
+            'collision_rate': 100 * counts['Collision'] / episodes,
+            'no_merge_rate': 100 * counts['Max Steps'] / episodes,
+            'emergency_stopping_rate': 100 * counts['Emergency Stopping'] / episodes,
             'mean_return': float(np.mean(returns))}
 
 
@@ -57,6 +66,13 @@ def main():
     print(f'{args.scenario} | {args.delay_mode} | safety={args.safety} | episodes={args.episodes}')
     for outcome in OUTCOMES:
         print(f'{outcome}: {result[outcome]}/{args.episodes} ({result[outcome] / args.episodes:.1%})')
+    for outcome in TIMEOUT_DETAILS:
+        print(f'  {outcome}: {result[outcome]}/{args.episodes} ({result[outcome] / args.episodes:.1%})')
+    print('Table IV rates (No Merge = all Max Steps): '
+          f"success={result['success_rate']:.2f}%, "
+          f"collision={result['collision_rate']:.2f}%, "
+          f"no-merge={result['no_merge_rate']:.2f}%")
+    print(f"Emergency stopping (separate): {result['emergency_stopping_rate']:.2f}%")
     print(f"Mean return: {result['mean_return']:.2f}")
 
 

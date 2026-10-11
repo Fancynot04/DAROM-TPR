@@ -37,6 +37,9 @@ class EpisodeRewardCallback(BaseCallback):
         if self.locals['dones'][0]:
             self.episode_rewards.append(self.current_episode_reward)
             self.episode_lengths.append(self.current_episode_length)
+            info = self.locals['infos'][0]
+            outcome = info.get('message')
+            merged = bool(info.get('merged'))
             
             # Log to wandb
             wandb.log({
@@ -44,6 +47,11 @@ class EpisodeRewardCallback(BaseCallback):
                 'train/episode_length': self.current_episode_length,
                 'train/mean_episode_reward': np.mean(self.episode_rewards),
                 'train/mean_episode_length': np.mean(self.episode_lengths),
+                'train/arrival': int(outcome == 'Arrived'),
+                'train/collision': int(outcome == 'Collision'),
+                'train/emergency_stopping': int(outcome == 'Emergency Stopping'),
+                'train/no_merge_timeout': int(outcome == 'Max Steps' and not merged),
+                'train/merged_timeout': int(outcome == 'Max Steps' and merged),
             })
             
             # Reset for next episode

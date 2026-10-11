@@ -1,7 +1,53 @@
 import numpy as np
-from .merging import parseAction
+import math
+from .merging import LANE_CHANGE_EDGES, parseAction, traci
 
-def safetyCheck(action, state, delayed, mode):
+
+def lane_centerline(ego_pos, ego_angle, shape):
+    """Target lane center as lateral = intercept + slope * longitudinal."""
+    angle = math.radians(ego_angle)
+    forward = (math.sin(angle), math.cos(angle))
+    left = (-forward[1], forward[0])
+    best = None
+    for start, end in zip(shape, shape[1:]):
+        segment = (end[0] - start[0], end[1] - start[1])
+        length_sq = segment[0] ** 2 + segment[1] ** 2
+        if length_sq == 0:
+            continue
+        offset = (ego_pos[0] - start[0], ego_pos[1] - start[1])
+        fraction = np.clip((offset[0] * segment[0] + offset[1] * segment[1]) / length_sq, 0, 1)
+        nearest = (start[0] + fraction * segment[0], start[1] + fraction * segment[1])
+        delta = (nearest[0] - ego_pos[0], nearest[1] - ego_pos[1])
+        distance_sq = delta[0] ** 2 + delta[1] ** 2
+        along = segment[0] * forward[0] + segment[1] * forward[1]
+        if abs(along) < 1e-6:
+            continue
+        if best is None or distance_sq < best[0]:
+            slope = (segment[0] * left[0] + segment[1] * left[1]) / along
+            x = delta[0] * forward[0] + delta[1] * forward[1]
+            y = delta[0] * left[0] + delta[1] * left[1]
+            best = (distance_sq, y - slope * x, slope)
+    return None if best is None else best[1:]
+
+
+def target_lane_line(ego_id, direction):
+    """Return the selected lane centerline in the ego's current local frame."""
+    if direction:
+        edge = traci.vehicle.getRoadID(ego_id)
+        if edge not in LANE_CHANGE_EDGES:
+            return None
+        target = traci.vehicle.getLaneIndex(ego_id) + direction
+        if not 0 <= target < traci.edge.getLaneNumber(edge):
+            return None
+        lane_id = f'{edge}_{target}'
+    else:
+        lane_id = traci.vehicle.getLaneID(ego_id)
+    return lane_centerline(traci.vehicle.getPosition(ego_id),
+                           traci.vehicle.getAngle(ego_id),
+                           traci.lane.getShape(lane_id))
+
+
+def safetyCheck(action, state, delayed, mode, target_line=None):
     min_gap = 10.0
     min_acc = -5
     dt = 0.1  # time step in seconds (from SUMO config)
@@ -48,7 +94,9 @@ def safetyCheck(action, state, delayed, mode):
     min_front_dist = float('inf')
     min_back_dist = float('inf')
     for veh_state in observation[1:]:
-        if abs(veh_state[1] - target_lateral) <= 1.6:
+        expected_lateral = (target_lateral if target_line is None
+                            else target_line[0] + target_line[1] * veh_state[0])
+        if abs(veh_state[1] - expected_lateral) <= 1.6:
             if veh_state[0] > 0:
                 if veh_state[0] < min_front_dist:
                     min_front_dist = veh_state[0]
