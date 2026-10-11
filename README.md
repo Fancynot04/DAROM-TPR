@@ -276,11 +276,12 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   split visible beside the table rates. Generate the corresponding Fig. 5
   training curves. No full Antwerp model training or Table IV evaluation has
   been completed yet.
-- [ ] Investigate D1-incompatible lane decisions before scaling training:
-  `E77_0` connects only to D3, while the ego's O3-to-D1 route continues via
-  E78. One 10,000-step Hard baseline training episode ended with an ego
-  emergency stop at the end of `E77_0`; keep this outcome separate from
-  collision and timeout counts.
+- [ ] Decide how much route-aware lane control belongs to the policy before
+  scaling training. `E77_0` connects only to D3; `E82_0`–`E82_2` connect to
+  D2, while `E82_3`–`E82_5` connect to D1. One baseline training episode ended
+  with an ego emergency stop on `E77_0`; its per-step lane actions were not
+  recorded, so the source of that lane choice is unknown. Keep emergency stops
+  separate from collision and timeout counts.
 
 **Validation so far:** unit tests cover ego selection, geometry, wrappers,
 and encoder input handling. All three Antwerp scenarios reset at 120.1 s
@@ -301,6 +302,15 @@ steps (9,900 updates). Its three independent complete episodes at seeds
 579072–579074 yielded two D1 arrivals and one merged timeout, with no ego
 collision or emergency stop. Three episodes are insufficient for a Table IV
 performance claim; pilot models and logs remain under `tmp/ai/`.
+
+Deterministic traces of the 10,000-step `full` checkpoint at seeds 579073 and
+579074 show a parsed lane-change action of zero on every step. SUMO still
+changed the ego's lane: the successful episode moved from `E82_1` to `E82_3`
+and reached D1, while the timeout moved from `E78_1` to `E78_0` and then
+entered `:J107_0_0`. There it advanced only 72 m over nearly 3,000 steps;
+between steps 3,500 and 4,500 its stopped leader was a D1-bound car with a
+near-zero gap. The immediate timeout mechanism was a downstream queue, and
+the current pilot does not demonstrate learned lane-changing behavior.
 
 **Key arguments:**
 
