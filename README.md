@@ -91,21 +91,30 @@ counts. Detector `3849` (`L4e`) has no verified D1/D2/D3 mapping in the
 three-exit network; its observations are retained in origin totals, and
 their destinations are projected onto the three mapped exits. The four
 vehicle types use the paper's disjoint length ranges; cars and vans are
-combined because the supplied length data cannot separate them. These
-files contain background traffic only, not a controlled `ego` vehicle.
+combined because the supplied length data cannot separate them. Each
+scenario includes one `ego` trip at SUMO time 120 s from O3 to D1 using the
+same `car_van` type as the traffic flow. One O3-to-D1 `car_van` was removed
+from each flow, so the 1-hour vehicle and OD totals are unchanged.
 `src.merging.Merging(seed=579071, scenario="easy")` loads one of the
 `easy`, `medium`, or `hard` Antwerp routes (`medium` by default). Each reset
-warms up for at least 120 simulated seconds, draws a takeover time between
-120 and 600 seconds, and selects the next `car_van` that actually enters O3
-with destination D1. The selected flow vehicle keeps its original SUMO type;
-`reset()` returns its real ID and departure time in `info`. The environment
-starts SUMO from the network and selected route files with the timing and
-lateral settings of `Antwerp.sumocfg`, without detector outputs. The old
-lane/coordinate logic and 200-second absolute episode limit still need
-adaptation before complete training or evaluation runs.
-The existing network speed limit remains 13.89 m/s, so its simulated speed
-and congestion should be calibrated before using these scenarios to assess
-policy performance.
+advances SUMO to just before the scheduled departure, then waits for `ego`
+to actually enter O3. The episode clock starts at takeover and has a uniform
+limit of 6,000 control steps (600 simulated seconds at 0.1 s per step);
+arrival at D1 can end it earlier. `reset()` returns the actual departure
+time in `info`. The environment starts SUMO from the network and selected
+route files with the timing and lateral settings of `Antwerp.sumocfg`,
+without detector outputs. The observation uses ego route distance, lane
+index, and speed, with nearby vehicles expressed in the ego's forward/left
+coordinate frame. Reward and
+safety checks use the same coordinate convention. Lane changes are
+bounded by each Antwerp edge's actual lane count; merging is
+recognized when ego leaves `E75_0` for a mainline lane or reaches `E76`.
+The existing pretrained policy must be retrained for this observation layout.
+The task is for ego to merge safely and reach D1 before the episode limit;
+collision, emergency stopping, and timeout are failures. Background queues
+are recorded as scenario conditions, not optimized away by changing traffic
+demand or network throughput. The existing network speed limit is 13.89 m/s
+and remains unchanged for this stage.
 
 ## Training
 

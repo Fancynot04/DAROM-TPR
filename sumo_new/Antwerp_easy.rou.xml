@@ -26,7 +26,7 @@
     <flow id="easy_O2_D3_car_van" type="car_van" begin="0" end="3600" number="55" from="O2" to="D3" departLane="free" departSpeed="speedLimit" />
     <flow id="easy_O2_D3_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="2" from="O2" to="D3" departLane="free" departSpeed="speedLimit" />
     <flow id="easy_O2_D3_long_vehicle" type="long_vehicle" begin="0" end="3600" number="9" from="O2" to="D3" departLane="free" departSpeed="speedLimit" />
-    <flow id="easy_O3_D1_car_van" type="car_van" begin="0" end="3600" number="26" from="O3" to="D1" departLane="free" departSpeed="speedLimit" />
+    <flow id="easy_O3_D1_car_van" type="car_van" begin="0" end="3600" number="25" from="O3" to="D1" departLane="free" departSpeed="speedLimit" />
     <flow id="easy_O3_D1_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="1" from="O3" to="D1" departLane="free" departSpeed="speedLimit" />
     <flow id="easy_O3_D1_long_vehicle" type="long_vehicle" begin="0" end="3600" number="2" from="O3" to="D1" departLane="free" departSpeed="speedLimit" />
     <flow id="easy_O3_D2_car_van" type="car_van" begin="0" end="3600" number="119" from="O3" to="D2" departLane="free" departSpeed="speedLimit" />
@@ -35,4 +35,5 @@
     <flow id="easy_O3_D3_car_van" type="car_van" begin="0" end="3600" number="48" from="O3" to="D3" departLane="free" departSpeed="speedLimit" />
     <flow id="easy_O3_D3_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="2" from="O3" to="D3" departLane="free" departSpeed="speedLimit" />
     <flow id="easy_O3_D3_long_vehicle" type="long_vehicle" begin="0" end="3600" number="1" from="O3" to="D3" departLane="free" departSpeed="speedLimit" />
+    <trip id="ego" type="car_van" depart="120.00" color="red" from="O3" to="D1" departLane="free" departSpeed="speedLimit" />
 </routes>

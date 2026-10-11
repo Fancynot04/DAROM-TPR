@@ -142,23 +142,19 @@ def extract_lane_name(lane_str):
 
 
 def safe_gap(behindState, aheadState):
-    behind_sum = np.sum(behindState)
-    ahead_sum = np.sum(aheadState)
     safe_gap = 20
     is_safe = [False, False]
 
-    # If behind vehicle is "sum 0" then it's safe
-    if behind_sum == 0:
+    if not np.any(behindState):
         is_safe[0] = True
-    elif np.abs(behindState[1]) > 0.1:
+    elif np.abs(behindState[1]) > 1.6:
         is_safe[0] = True
     elif np.abs(behindState[0]) > safe_gap:
         is_safe[0] = True
 
-    # If ahead vehicle is "sum 0" then it's safe
-    if ahead_sum == 0:
+    if not np.any(aheadState):
         is_safe[1] = True
-    elif np.abs(aheadState[1]) > 0.1:
+    elif np.abs(aheadState[1]) > 1.6:
         is_safe[1] = True
     elif np.abs(aheadState[0]) > safe_gap:
         is_safe[1] = True

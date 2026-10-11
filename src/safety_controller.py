@@ -1,42 +1,28 @@
 import numpy as np
-import traci
-from .utils import get_absolute_lane_idx_from_y
 from .merging import parseAction
+
 def safetyCheck(action, state, delayed, mode):
     min_gap = 10.0
-    reaction_time = 1.0
-    max_acc = 5.0
     min_acc = -5
-    veh_length = 5.0
     dt = 0.1  # time step in seconds (from SUMO config)
     parsed_action = parseAction(action)
     delay_steps = 0
     if delayed:
-        # Original observation shape: (31, 3) = (num_entities, feature_dim)
-        num_entities = 5
+        num_entities = 31
         feature_dim = 3
-        obs_size = num_entities * feature_dim  # 93 elements
+        obs_size = num_entities * feature_dim
         if mode == 'all':
             observation = np.array(state[:obs_size]).reshape(num_entities, feature_dim)
             # Extract delay value (last element of state)
-            delay_steps = state[-1]
+            delay_steps = int(state[-1])
         else:
             raise ValueError(f"Invalid mode: {mode}")
         
     else:
         observation = state
-    ego_id = 'ego'
-    ego_x = observation[0][0]
-    ego_y = observation[0][1]
     ego_speed = observation[0][2]
-    ego_lane = get_absolute_lane_idx_from_y(ego_y)
-    # check lane change safety
-    if parsed_action[1] == 1:
-        target_lane = ego_lane + 1
-    elif parsed_action[1] == -1:
-        target_lane = ego_lane - 1
-    else:
-        target_lane = ego_lane
+    target_lane = int(observation[0][1]) + parsed_action[1]
+    target_lateral = parsed_action[1] * 3.2
     # Initialize info dictionary to store safety check details
     info = {
         'front_gap': None,
@@ -54,10 +40,6 @@ def safetyCheck(action, state, delayed, mode):
         'safe': True
     }
     
-    if ego_lane == -1:
-        info['target_lane'] = target_lane
-        return action, info
-    
     # find closest front and back vehicles in the same lane from the observation
     front_vehicle_state  = None
     back_vehicle_state = None
@@ -66,9 +48,7 @@ def safetyCheck(action, state, delayed, mode):
     min_front_dist = float('inf')
     min_back_dist = float('inf')
     for veh_state in observation[1:]:
-        y = veh_state[1] + ego_y
-        lane = get_absolute_lane_idx_from_y(y)
-        if lane == target_lane:
+        if abs(veh_state[1] - target_lateral) <= 1.6:
             if veh_state[0] > 0:
                 if veh_state[0] < min_front_dist:
                     min_front_dist = veh_state[0]
@@ -189,17 +169,4 @@ def safetyCheck(action, state, delayed, mode):
             print('Unsafe lane change becuase of back vehicle')
             info['safe'] = False
             return [action[0], 0], info
-        elif gap < stopping_dist + min_gap and parsed_action[1] == 0:
-            print('Unsafe lane lane keeping becuase of back vehicle')
-            info['safe'] = False
-            return [-5, 0], info
-    if ego_x < 150 and parsed_action[1] != 0:
-        print('Unsafe lane change becuase of ego position')
-        info['safe'] = False
-        return [action[0], 0], info
-    if get_absolute_lane_idx_from_y(ego_y) == 1 and parsed_action[1] != 0:
-        print('Unnecessary lane change to left lane')
-        info['safe'] = False
-        return [action[0], 0], info
-
     return action, info

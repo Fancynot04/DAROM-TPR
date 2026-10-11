@@ -240,7 +240,7 @@ def main():
         net_arch=[256, 256],      # actor/critic MLP after transformer
     )
     elif encoder_mode == 'GRU':
-        policy_kwargs = dict(features_extractor_class=DelayAwareGRUEncoder, features_extractor_kwargs=dict(act_dim=act_dim, hist_len=wrapped_env.max_delay+1, delay_dim=1, features_dim=128, gru_hidden=64))
+        policy_kwargs = dict(features_extractor_class=DelayAwareGRUEncoder, features_extractor_kwargs=dict(act_dim=act_dim, hist_len=wrapped_env.max_delay, delay_dim=1, features_dim=128, gru_hidden=64))
     elif encoder_mode == 'MLP':
         policy_kwargs = dict(
         features_extractor_class=DelayAwareEncoder,

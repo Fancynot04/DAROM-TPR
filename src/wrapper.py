@@ -32,22 +32,22 @@ class DelayWrapper(ObservationWrapper):
         elif self.mode == 'delayed_state_and_action':
             self.observation_space = Box(
                 shape=(self.orig_shape[0] * self.orig_shape[1] + self.max_delay * self.env.action_space.shape[0],),
-                low=-1000,
-                high=1000,
+                low=-5000,
+                high=5000,
                 dtype=np.float32
             )
         elif self.mode == 'delayed_state_and_delay':
             self.observation_space = Box(
                 shape=(self.orig_shape[0] * self.orig_shape[1] + 1,),
-                low=-1000,
-                high=1000,
+                low=-5000,
+                high=5000,
                 dtype=np.float32
             )
         elif self.mode == 'all':
             self.observation_space = Box(
                 shape=(self.orig_shape[0] * self.orig_shape[1] + self.max_delay * self.env.action_space.shape[0] + 1,),
-                low=-1000,
-                high=1000,
+                low=-5000,
+                high=5000,
                 dtype=np.float32
             )
         self.max_delay = max_delay
@@ -91,13 +91,13 @@ class DelayWrapper(ObservationWrapper):
         #     "entities": self.obs,
         #     "global": flatten([[a.tolist() for a in self.action_history], [0]])
         # }
-        self.newX = flatten([self.obs, list(self.action_history), [0]])
+        self.newX = np.asarray(flatten([self.obs, list(self.action_history), [0]]), dtype=np.float32)
         if self.mode == 'only_delayed_state':
             return self.obs, info
         elif self.mode == 'delayed_state_and_action':
-            return flatten([self.obs, list(self.action_history)]), info
+            return np.asarray(flatten([self.obs, list(self.action_history)]), dtype=np.float32), info
         elif self.mode == 'delayed_state_and_delay':
-            return flatten([self.obs, [0]]), info
+            return np.asarray(flatten([self.obs, [0]]), dtype=np.float32), info
         elif self.mode == 'all':
             return self.newX, info
         else:
@@ -172,13 +172,13 @@ class DelayWrapper(ObservationWrapper):
         masked_action_history = np.array(list(self.action_history)).copy()
         for i in range(self.delay_of_received_observation, len(masked_action_history)):
             masked_action_history[i] = np.zeros_like(masked_action_history[i])
-        self.newX = flatten([received_obs, masked_action_history, [self.delay_of_received_observation]])
+        self.newX = np.asarray(flatten([received_obs, masked_action_history, [self.delay_of_received_observation]]), dtype=np.float32)
         if self.mode == 'only_delayed_state':
             return received_obs
         elif self.mode == 'delayed_state_and_action':
-            return flatten([received_obs, masked_action_history])
+            return np.asarray(flatten([received_obs, masked_action_history]), dtype=np.float32)
         elif self.mode == 'delayed_state_and_delay':
-            return flatten([received_obs, [self.delay_of_received_observation]])
+            return np.asarray(flatten([received_obs, [self.delay_of_received_observation]]), dtype=np.float32)
         elif self.mode == 'all':
             return self.newX
         else:
@@ -189,5 +189,5 @@ class SafetyWrapper(ActionWrapper):
         super().__init__(env)
 
     def action(self, action):
-        action, safety_info = safetyCheck(action, self.env.observation, True, 'all')
+        action, safety_info = safetyCheck(action, self.env.newX, True, 'all')
         return action
