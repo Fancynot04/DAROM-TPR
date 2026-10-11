@@ -7,11 +7,25 @@ import numpy as np
 from stable_baselines3 import SAC
 
 from src.merging import Merging
-from src.wrapper import DelayWrapper, SafetyWrapper
+from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
 OUTCOMES = ('Arrived', 'Collision', 'Max Steps', 'Emergency Stopping')
 TIMEOUT_DETAILS = ('No Merge Timeout', 'Merged Timeout')
+
+
+def make_env(seed, scenario, delay_mode, safety, ablation):
+    env = DelayWrapper(Merging(seed=seed, scenario=scenario),
+                       max_delay=20, mode='all', delay_mode=delay_mode,
+                       seed=seed, ablation=ablation)
+    return SafetyWrapper(env) if safety else env
+
+
+def validate_checkpoint_setup(model, ablation, safety):
+    if hasattr(model, 'ablation') and model.ablation != ablation:
+        raise ValueError(f'Checkpoint ablation={model.ablation!r}, requested {ablation!r}')
+    if hasattr(model, 'training_safety') and model.training_safety != safety:
+        raise ValueError(f'Checkpoint safety={model.training_safety!r}, requested {safety!r}')
 
 
 def evaluate(model, env, episodes, seed):
@@ -48,22 +62,21 @@ def main():
     parser.add_argument('--episodes', type=int, default=51)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--safety', action='store_true')
+    parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     args = parser.parse_args()
     if args.episodes < 1:
         parser.error('--episodes must be positive')
 
-    env = DelayWrapper(Merging(seed=args.seed, scenario=args.scenario),
-                       max_delay=20, mode='all', delay_mode=args.delay_mode,
-                       seed=args.seed)
-    if args.safety:
-        env = SafetyWrapper(env)
+    env = make_env(args.seed, args.scenario, args.delay_mode,
+                   args.safety, args.ablation)
     try:
         model = SAC.load(args.checkpoint, device='auto')
+        validate_checkpoint_setup(model, args.ablation, args.safety)
         result = evaluate(model, env, args.episodes, args.seed)
     finally:
         env.close()
 
-    print(f'{args.scenario} | {args.delay_mode} | safety={args.safety} | episodes={args.episodes}')
+    print(f'{args.scenario} | {args.delay_mode} | ablation={args.ablation} | safety={args.safety} | episodes={args.episodes}')
     for outcome in OUTCOMES:
         print(f'{outcome}: {result[outcome]}/{args.episodes} ({result[outcome] / args.episodes:.1%})')
     for outcome in TIMEOUT_DETAILS:

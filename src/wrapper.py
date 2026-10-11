@@ -9,9 +9,16 @@ from .safety_controller import safetyCheck, target_lane_line
 from .merging import parseAction
 # from state_predictor import predictor_infer, load_predictor
 import torch
+ABLATION_MODES = ('full', 'delayed_state_only', 'delayed_state_delay',
+                  'delayed_state_action', 'linear_predictor')
+
+
 class DelayWrapper(ObservationWrapper):
-    def __init__(self, env, max_delay=10, mode=['only_delayed_state' 'delayed_state_and_action', 'delayed_state_and_delay', 'all'], drl_ormoc=False, delay_mode='uniform', seed=None):
+    def __init__(self, env, max_delay=10, mode=['only_delayed_state' 'delayed_state_and_action', 'delayed_state_and_delay', 'all'], drl_ormoc=False, delay_mode='uniform', seed=None, ablation='full'):
         super().__init__(env)
+        if ablation not in ABLATION_MODES or (ablation != 'full' and mode != 'all'):
+            raise ValueError(f'Unsupported ablation/mode: {ablation}/{mode}')
+        self.ablation = ablation
         self.orig_shape = self.env.observation_space.shape
         orig_shape = self.env.observation_space.shape
         self.mode = mode
@@ -113,7 +120,7 @@ class DelayWrapper(ObservationWrapper):
         elif self.mode == 'delayed_state_and_delay':
             return np.asarray(flatten([self.obs, [0]]), dtype=np.float32), info
         elif self.mode == 'all':
-            return self.newX, info
+            return self._policy_observation(), info
         else:
             raise ValueError(f"Invalid mode: {self.mode}")
         # return flatten([self.obs, list(self.action_history), [0]]), info
@@ -151,6 +158,20 @@ class DelayWrapper(ObservationWrapper):
 
         else:
             raise ValueError(f"Unknown delay_mode: {self.delay_mode}")
+
+    def _policy_observation(self):
+        if self.ablation == 'full':
+            return self.newX
+        policy_obs = self.newX.copy()
+        obs_size = self.orig_shape[0] * self.orig_shape[1]
+        if self.ablation == 'linear_predictor':
+            entities = policy_obs[:obs_size].reshape(self.orig_shape)
+            entities[1:, 0] += entities[1:, 2] * self.delay_of_received_observation * 0.1
+        if self.ablation in ('delayed_state_only', 'delayed_state_delay', 'linear_predictor'):
+            policy_obs[obs_size:-1] = 0
+        if self.ablation in ('delayed_state_only', 'delayed_state_action', 'linear_predictor'):
+            policy_obs[-1] = 0
+        return policy_obs
 
     def observation(self, obs):
         self.obs = obs
@@ -194,7 +215,7 @@ class DelayWrapper(ObservationWrapper):
         elif self.mode == 'delayed_state_and_delay':
             return np.asarray(flatten([received_obs, [self.delay_of_received_observation]]), dtype=np.float32)
         elif self.mode == 'all':
-            return self.newX
+            return self._policy_observation()
         else:
             raise ValueError(f"Invalid mode: {self.mode}")
 

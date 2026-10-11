@@ -18,7 +18,7 @@ import wandb
 from wandb.integration.sb3 import WandbCallback
 
 from src.merging import Merging
-from src.wrapper import DelayWrapper
+from src.wrapper import ABLATION_MODES, DelayWrapper
 
 class EpisodeRewardCallback(BaseCallback):
     def __init__(self, verbose=0):
@@ -98,10 +98,12 @@ def save_model(model: SAC, path: str) -> str:
 def load_model(path: str, env: gym.Env) -> SAC:
     return SAC.load(path, env=env)
 
-def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None):
+def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
+             ablation='full'):
     env = DelayWrapper(
         Merging(seed=seed, scenario=scenario, render_mode=render_mode),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
+        ablation=ablation,
     )
     return SafetyWrapper(env) if use_safety else env
 
@@ -122,8 +124,12 @@ def parse_args():
     parser.add_argument('--load_path', type=str, default=None)
     parser.add_argument('--wandb_mode', type=str, default='online', choices=['online', 'offline', 'disabled'])
     parser.add_argument('--encoder_mode', type=str, default='GRU', choices=['Transformer', 'GRU', 'MLP', 'None'])
+    parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.ablation != 'full' and args.encoder_mode != 'GRU':
+        parser.error('Table IV ablations require --encoder_mode GRU')
+    return args
 
 def ensure_dirs(path: str):
     os.makedirs(path, exist_ok=True)
@@ -146,6 +152,7 @@ def main():
         total_timesteps=args.total_timesteps,
         policy='MlpPolicy',
         encoder_mode=args.encoder_mode,
+        ablation=args.ablation,
         delay_mode=args.delay_mode,
         scenario=args.scenario,
         use_safety=args.use_safety,
@@ -156,7 +163,7 @@ def main():
     max_delay = 20
     def _fn():
         return make_env(args.seed, args.scenario, args.delay_mode, max_delay,
-                        args.use_safety, args.render_mode)
+                        args.use_safety, args.render_mode, args.ablation)
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -201,10 +208,21 @@ def main():
     # Optionally load existing weights
     if args.load_path and os.path.exists(args.load_path):
         try:
-            model = SAC.load(args.load_path, env=vec_env)
-            print(f"Loaded model from {args.load_path}")
+            loaded_model = SAC.load(args.load_path, env=vec_env)
         except Exception as e:
             warnings.warn(f"Failed to load model at {args.load_path}: {e}")
+        else:
+            if (hasattr(loaded_model, 'ablation') and
+                    loaded_model.ablation != args.ablation):
+                raise ValueError('Loaded model ablation does not match --ablation')
+            if (hasattr(loaded_model, 'training_safety') and
+                    loaded_model.training_safety != args.use_safety):
+                raise ValueError('Loaded model safety does not match --safety')
+            model = loaded_model
+            print(f"Loaded model from {args.load_path}")
+
+    model.ablation = args.ablation
+    model.training_safety = args.use_safety
 
     ensure_dirs(args.save_dir)
     model_path = os.path.join(args.save_dir, f"{args.run_name}.zip")

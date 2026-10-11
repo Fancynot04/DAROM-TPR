@@ -138,6 +138,20 @@ The Antwerp GRU scales route progress and local neighbor coordinates before
 encoding, reads masked actions from oldest to newest, and outputs 256 features.
 Models trained with the earlier GRU input convention should be retrained.
 
+For a controlled Table IV input ablation, keep `--encoder_mode GRU` and choose
+`--ablation` from `full`, `delayed_state_only`, `delayed_state_delay`,
+`delayed_state_action`, or `linear_predictor`. All five preserve the 134-value
+GRU input. Missing action-history or delay fields are zeroed; the linear
+predictor advances each neighbor's relative longitudinal position by its
+relative velocity times the received delay and exposes no history or delay to
+the policy. This keeps the architecture fixed while changing available
+information. The safety controller still receives the unmasked delayed state.
+Use the same `--safety` setting for all five runs and pass the matching
+`--ablation` value to independent evaluation. Training and evaluation both
+default to `full`, with safety disabled. New checkpoints store these two
+settings, and evaluation rejects a mismatch. Legacy checkpoints without the
+stored settings need manual matching.
+
 ## Antwerp migration checklist
 
 This checklist tracks the working baseline. Mark an item complete only after
@@ -187,6 +201,13 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   eliminated the observed misses of `E75_1` vehicles during the O3 merge;
   fixed-action comparisons reached a mainline lane with `--safety` in all
   three scenarios. These probes do not establish a trained policy's safety.
+- [x] Connect the five Table IV input ablations to Hard-scenario training and
+  independent evaluation. All retain the GRU input shape and separate safety
+  input; five 3-step training and evaluation smoke runs loaded their matching
+  temporary checkpoints, and a masked-input safety-wrapper smoke run completed.
+  A separate 102-step linear-predictor run exercised training beyond SAC's
+  default initial exploration period. These runs do not measure convergence or
+  task success.
 - [x] Align the GRU action-history length with the wrapper's 20-action buffer.
   The upstream training script used `max_delay + 1`, which mismatches that
   buffer's length.
@@ -250,11 +271,11 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
 - [ ] Select the best Antwerp checkpoint using independent evaluation across
   the required scenarios and delay profiles; no checkpoint has been ranked yet.
 - [ ] Build and train the five Hard-scenario Table IV variants under a stated
-  common input-preprocessing and safety-controller policy. Report success,
-  collision, no-merge, and return using the outcome proxy above; keep emergency
-  stops and the timeout split visible beside the table rates. Generate the
-  corresponding Fig. 5 training curves. No full Antwerp model training or
-  Table IV evaluation has been completed yet.
+  common safety-controller policy. Report success, collision, no-merge, and
+  return using the outcome proxy above; keep emergency stops and the timeout
+  split visible beside the table rates. Generate the corresponding Fig. 5
+  training curves. No full Antwerp model training or Table IV evaluation has
+  been completed yet.
 
 **Validation so far:** unit tests cover ego selection, geometry, wrappers,
 and encoder input handling. All three Antwerp scenarios reset at 120.1 s
@@ -275,6 +296,7 @@ convergence or task success.
 | `--scenario` | `easy`, `medium`, `hard` | Antwerp traffic scenario; defaults to `medium` |
 | `--safety` | flag | Enable the safety controller (disabled by default) |
 | `--encoder_mode` | `GRU`, `MLP`, `Transformer` | Delay-Aware Encoder architecture |
+| `--ablation` | `full`, `delayed_state_only`, `delayed_state_delay`, `delayed_state_action`, `linear_predictor` | Table IV input variant; non-full variants require GRU |
 | `--run_name` | string | WandB run name |
 | `--save_dir` | path | Directory to save model checkpoints |
 
@@ -289,6 +311,7 @@ python evaluate_sac_delay.py \
 ```
 
 Pass `--safety` only when evaluating a run trained with the safety controller.
+Pass the same `--ablation` value used to train that checkpoint.
 The script reports D1 arrival, collision, timeout, emergency stopping, and mean
 return. Each episode gets a distinct seed for SUMO and delay sampling, so the
 same checkpoint and evaluation seed reproduce the episode delay sequences.
