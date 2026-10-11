@@ -93,6 +93,16 @@ their destinations are projected onto the three mapped exits. The four
 vehicle types use the paper's disjoint length ranges; cars and vans are
 combined because the supplied length data cannot separate them. These
 files contain background traffic only, not a controlled `ego` vehicle.
+`src.merging.Merging(seed=579071, scenario="easy")` loads one of the
+`easy`, `medium`, or `hard` Antwerp routes (`medium` by default). Each reset
+warms up for at least 120 simulated seconds, draws a takeover time between
+120 and 600 seconds, and selects the next `car_van` that actually enters O3
+with destination D1. The selected flow vehicle keeps its original SUMO type;
+`reset()` returns its real ID and departure time in `info`. The environment
+starts SUMO from the network and selected route files with the timing and
+lateral settings of `Antwerp.sumocfg`, without detector outputs. The old
+lane/coordinate logic and 200-second absolute episode limit still need
+adaptation before complete training or evaluation runs.
 The existing network speed limit remains 13.89 m/s, so its simulated speed
 and congestion should be calibrated before using these scenarios to assess
 policy performance.
