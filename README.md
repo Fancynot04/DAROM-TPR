@@ -95,6 +95,10 @@ combined because the supplied length data cannot separate them. Each
 scenario includes one `ego` trip at SUMO time 120 s from O3 to D1 using the
 same `car_van` type as the traffic flow. One O3-to-D1 `car_van` was removed
 from each flow, so the 1-hour vehicle and OD totals are unchanged.
+The route file defines ego's trip and vehicle type for both pure SUMO and
+training. Pure SUMO leaves its lane and speed decisions to SUMO; the training
+environment instead applies `laneChangeMode=0` at departure and sends explicit
+acceleration and lane commands through TraCI.
 `src.merging.Merging(seed=579071, scenario="easy")` loads one of the
 `easy`, `medium`, or `hard` Antwerp routes (`medium` by default). Each reset
 advances SUMO to just before the scheduled departure, then waits for `ego`
@@ -305,6 +309,10 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
 - [ ] Distinguish ego teleportation from an uninterrupted D1 arrival in future
   evaluations, and reassess the 6,000-step limit using complete non-teleported
   trajectories. Do not count merely entering D1 as an `Arrived` episode.
+- [ ] Run a scripted end-to-end controller under the same TraCI ego takeover
+  settings as training, verifying D1 exit without ego teleportation. Pure SUMO
+  validates the scenario's native driving behavior, not policy-controllable
+  completion under `laneChangeMode=0`.
 
 **Validation so far:** unit tests cover ego selection, geometry, wrappers,
 and encoder input handling. All three Antwerp scenarios reset at 120.1 s
@@ -367,6 +375,25 @@ entered D1, but timed out 106 m before the D1 endpoint at simulation time
 720 s. The model issued no lane-change commands on E78 or E82 in this run.
 The observed delays include a downstream queue; simply extending max steps
 would not establish uninterrupted ego completion or learned D1 lane choice.
+
+A separate pure-SUMO reference used the same network, scenario routes,
+0.1 s step, lateral resolution, and mapped SUMO seeds without TraCI or a model.
+Ego departed at 120 s; each run was observed until simulation time 900 s.
+
+| Scenario | Environment seed | Ego result | Ego teleported? |
+|---|---:|---|---|
+| Easy | 579071 | Arrived at 303.0 s | No |
+| Medium | 579071 | Arrived at 320.9 s | No |
+| Hard | 579071 | Arrived at 364.8 s | No |
+| Hard | 579072 | Still unfinished at 900 s | No |
+| Hard | 579073 | Arrived at 653.6 s | Yes, at 622.9 s |
+| Hard | 579074 | Arrived at 318.9 s | No |
+
+Thus the O3-to-D1 network is traversable with SUMO's autonomous driving in
+multiple demand realizations, but Hard can also queue long enough to prevent
+completion or require a teleport. These runs do not establish convergence of
+the RL policy or feasibility under TraCI's ego-only lane mode 0. Outputs are
+kept under `tmp/ai/pure-sumo-baseline/`.
 
 **Key arguments:**
 
