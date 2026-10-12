@@ -314,9 +314,17 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   teleportation in both current- and delayed-observation probes; none of four
   Hard seeds did. Pure SUMO validates native driving behavior, while these
   probes validate the policy action interface and expose Hard-scenario limits.
-- [ ] Diagnose why the initial rule misses target lanes or remains in Hard
-  queues before using it as a comparative baseline. Keep the fixed difficult
-  seeds, and distinguish rule limitations from road congestion.
+- [x] Compare native SUMO and scripted ego trajectories on Hard seeds 579071
+  and 579074, then extend only the observation limit for the queued 579074
+  rule run. The fixed rule over-constrains the D1 approach to `E78_2`, while
+  native SUMO can use other D1-connected lanes. Extending to 9,000 steps did
+  not clear its `E78_2` queue. These diagnostics do not justify changing Hard
+  demand or the training episode limit.
+- [ ] Revise the diagnostic rule to choose among D1-reachable lanes and verify
+  requested versus completed lane changes, then rerun the fixed Hard seeds.
+  Inspect J107 conflicts separately; do not use this rule as a Table IV
+  comparator before its information advantage and collision behavior are
+  addressed.
 
 **Validation so far:** unit tests cover ego selection, geometry, wrappers,
 and encoder input handling. All three Antwerp scenarios reset at 120.1 s
@@ -427,6 +435,37 @@ neighbor version of the rule also completed Easy and Medium but no Hard seed
 without teleportation. The temporary script and per-seed logs, including
 lane requests, transitions, final route distance, and stop counts, remain
 under `tmp/ai/rule-baseline/`.
+
+Hard trajectory follow-up used the same SUMO seeds and O3-to-D1 ego route.
+Passive TraCI reproduced uninterrupted native arrivals (579071 at 364.9 s,
+579074 at 319.0 s; one 0.1 s reporting step later than the batch SUMO run).
+The current-observation rule was rerun with per-step lane, position, speed,
+lane-change request, and queue traces:
+
+| Hard seed | Key lane difference | Rule outcome and queue evidence |
+|---|---|---|
+| 579071 | Native ego changed `E75_0` to `E75_1` at 148.7 s. The rule stayed on `E75_0`; its three requests at 151.2–151.4 s did not produce a lane change. | Rule stopped 85.2 s on `E75_0`, then 187.4 s on `E78_1`; timeout on the J107 connector. Native ego had no stopped steps on either edge and reached D1. |
+| 579074 | Native ego used `E76_4` → `E77_5` → `E78_4`; the rule selected `E76_2` → `E77_3` → `E78_2`. | Rule stopped 396.0 s on `E78_2` and timed out there; native ego had no stopped steps on `E78_4` and reached D1. |
+
+The network permits `E78_2` → `E82_3` → D1, `E78_3` → `E82_4` → D1,
+and `E78_4` → `E82_5` → D1. Thus the rule's single target lane is an
+unnecessary restriction, not a demonstrated network or route error. The
+579071 E75 requests were issued but not executed; these traces do not
+identify SUMO's exact rejection reason. A separate delayed-observation 579074
+run collided with `hard_O1_D2_long_vehicle.15` at J107 at 431.2 s. Its ego
+was on `:J107_0_3` at 7.18 m/s and requested no lane change immediately
+before the collision; the collision warning named the conflicting
+`:J107_0_2` connector. That single event does not isolate an observation-
+delay effect.
+
+For a one-factor queue check, only the 579074 current-observation rule's
+post-takeover limit was raised from 6,000 to 9,000 steps (600 to 900 simulated
+seconds). The original Hard route demand, seed, rule, and SUMO settings were
+unchanged. Ego still timed out on `E78_2` at the same 1,982.445 m route
+distance, with no ego teleport; it remained stopped at the same position
+through the additional 300 simulated seconds. This does not support extending
+the production episode limit for that failure. All trace scripts, CSVs, and
+logs remain under `tmp/ai/rule-baseline/` and are not project inputs.
 
 **Key arguments:**
 
