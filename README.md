@@ -200,8 +200,8 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   In three-density TraCI probes this
   eliminated the observed misses of `E75_1` vehicles during the O3 merge;
   fixed-action comparisons reached a mainline lane with `--safety` in all
-  three scenarios before ego lane-mode restoration. These probes do not
-  establish a trained policy's safety and need rerunning under lane mode 0.
+  three scenarios before ego lane-mode restoration and again under lane
+  mode 0. These probes do not establish a trained policy's safety.
 - [x] Connect the five Table IV input ablations to Hard-scenario training and
   independent evaluation. All retain the GRU input shape and separate safety
   input; five 3-step training and evaluation smoke runs loaded their matching
@@ -291,14 +291,15 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   split visible beside the table rates. Generate the corresponding Fig. 5
   training curves. No full Antwerp model training or Table IV evaluation has
   been completed yet.
-- [ ] Retrain the `full` baseline and five variants from scratch under ego
-  lane mode 0; the pre-restoration 256-step and 10,000-step pilot checkpoints
-  used SUMO's automatic lane mode and cannot measure the revised policy task.
-  Rerun the three-density fixed-action and safety probes under this mode.
+- [ ] Train and evaluate the `full` baseline and five variants at a sufficient
+  budget under ego lane mode 0; the pre-restoration pilot checkpoints used
+  SUMO's automatic lane mode and cannot measure the revised policy task.
+  A new 10,000-step `full` pilot and three-density fixed-action/safety probes
+  have completed under lane mode 0, but the pilot is not a Table IV result.
 - [ ] Assess route-aware lane guidance after the policy-controlled baseline.
   `E77_0` connects only to D3; `E82_0`–`E82_2` connect to
-  D2, while `E82_3`–`E82_5` connect to D1. One baseline training episode ended
-  with an ego emergency stop on `E77_0`; its per-step lane actions were not
+  D2, while `E82_3`–`E82_5` connect to D1. One pre-restoration training episode
+  ended with an ego emergency stop on `E77_0`; its per-step lane actions were not
   recorded, so the source of that lane choice is unknown. Keep emergency stops
   separate from collision and timeout counts.
 
@@ -336,6 +337,20 @@ With the same old checkpoint and seed 579073 under lane mode 0, the policy
 again issued zero lane-change actions, SUMO made no within-edge lane changes,
 and ego timed out on `E78_0`. This is a control-attribution check, not a fair
 performance comparison across training conditions.
+
+Under lane mode 0, fixed `+1` lane commands merged into the mainline in Easy,
+Medium, and Hard with the safety controller both disabled and enabled (seed
+579071, 800-step probe). With safety enabled, fixed lane-keeping did not merge
+within 500 steps in any density. These probes check the merge-control path,
+not D1 arrival or policy safety. A new Hard/uniform/no-safety `full` pilot
+trained from scratch for 10,000 steps. Three independent complete episodes
+at seeds 579072–579074 produced zero D1 arrivals, one ego collision, and two
+merged timeouts, with no ego emergency stop. In the collision episode, the
+model issued two consecutive `+1` lane commands on `E82` (steps 2322–2323);
+SUMO reported an ego collision during lane change at step 2339. This small
+pilot demonstrates a policy-control failure, not a stable success rate or a
+comparison with the earlier automatically changing-lane checkpoint. The
+checkpoint, probe logs, and trace remain under `tmp/ai/lane-control-audit/`.
 
 **Key arguments:**
 
