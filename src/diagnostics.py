@@ -1,13 +1,15 @@
-"""Reproducible full-episode diagnostics; not an RL performance comparator.
+"""Reproducible full-episode rule, native-SUMO, and checkpoint diagnostics.
 
-The rule uses current observations plus road/lane connectivity information.
-The optional safety wrapper uses the normal delayed packet stream.
+The rule uses current observations plus road/lane connectivity information and
+is not a fair RL comparator. A loaded policy receives only its augmented
+observation. The optional safety wrapper uses the normal delayed packet stream.
 """
 
 import argparse
 from collections import Counter
 import csv
 import json
+import hashlib
 from functools import lru_cache
 from pathlib import Path
 import subprocess
@@ -118,7 +120,8 @@ def physical_state(base):
     return state
 
 
-def run_episode(scenario, seed, safety, output_dir, lane_strategy='fixed', longitudinal='rule'):
+def run_episode(scenario, seed, safety, output_dir, lane_strategy='fixed', longitudinal='rule',
+                model=None, checkpoint=None):
     case = f'{scenario}-{seed}-safety-{int(safety)}'
     case_dir = Path(output_dir) / case
     case_dir.mkdir(parents=True, exist_ok=False)
@@ -146,7 +149,11 @@ def run_episode(scenario, seed, safety, output_dir, lane_strategy='fixed', longi
                 road_steps[before['lane']] += 1
                 if before['speed'] < 1 and before['lane']:
                     stopped_steps[before['lane']] += 1
-                action, details = rule_action(base, lane_strategy, longitudinal)
+                if model is None:
+                    action, details = rule_action(base, lane_strategy, longitudinal)
+                else:
+                    action, _ = model.predict(observation, deterministic=True)
+                    details = {'target_lane': -1, 'front_gap': '', 'back_gap': ''}
                 decision_delay = delay.delay_of_received_observation
                 requested = int(parseAction(action)[1])
                 observation, reward, terminated, truncated, info = env.step(action)
@@ -186,8 +193,12 @@ def run_episode(scenario, seed, safety, output_dir, lane_strategy='fixed', longi
                 raise RuntimeError('Environment did not end at its configured limit')
         result = {
             'scenario': scenario, 'seed': seed, 'safety': safety,
-            'controller': 'current-observation-rule', 'lane_strategy': lane_strategy,
-            'longitudinal': longitudinal, 'env_version': ANTWERP_ENV_VERSION,
+            'controller': 'model' if model is not None else 'current-observation-rule',
+            'lane_strategy': None if model is not None else lane_strategy,
+            'longitudinal': None if model is not None else longitudinal,
+            'checkpoint': str(checkpoint) if checkpoint else None,
+            'checkpoint_sha256': hashlib.sha256(Path(checkpoint).read_bytes()).hexdigest() if checkpoint else None,
+            'env_version': ANTWERP_ENV_VERSION,
             'delay_mode': 'uniform', 'max_steps': maxSteps, 'outcome': info['message'],
             'success': bool(info['is_success']), 'ego_teleported': info['ego_teleported'],
             'merged': info['merged'], 'steps': step, 'seconds': round(step * 0.1, 1),
@@ -272,10 +283,22 @@ def main():
     parser.add_argument('--seeds', nargs='+', type=int, default=[579071, 579074])
     parser.add_argument('--safety-modes', nargs='+', choices=('off', 'on'), default=['off', 'on'])
     parser.add_argument('--output-dir', type=Path, required=True)
-    parser.add_argument('--controller', choices=('rule', 'native'), default='rule')
+    parser.add_argument('--controller', choices=('rule', 'native', 'model'), default='rule')
+    parser.add_argument('--checkpoint', type=Path)
     parser.add_argument('--lane-strategy', choices=('fixed', 'reachable'), default='fixed')
     parser.add_argument('--longitudinal', choices=('rule', 'sumo'), default='rule')
     args = parser.parse_args()
+    model = None
+    if args.controller == 'model':
+        if not args.checkpoint:
+            parser.error('--controller model requires --checkpoint')
+        import torch
+        from stable_baselines3 import SAC
+        from evaluate_sac_delay import validate_checkpoint_setup
+        torch.set_num_threads(1)
+        model = SAC.load(args.checkpoint, device='cpu')
+        for safety in args.safety_modes:
+            validate_checkpoint_setup(model, 'full', safety == 'on')
     for scenario in args.scenarios:
         for seed in args.seeds:
             if args.controller == 'native':
@@ -283,7 +306,7 @@ def main():
                 continue
             for safety in args.safety_modes:
                 run_episode(scenario, seed, safety == 'on', args.output_dir,
-                            args.lane_strategy, args.longitudinal)
+                            args.lane_strategy, args.longitudinal, model, args.checkpoint)
 
 
 if __name__ == '__main__':

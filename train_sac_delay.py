@@ -3,6 +3,8 @@ import os
 import time
 import argparse
 import warnings
+import json
+import torch
 from typing import Optional
 from src.wrapper import SafetyWrapper
 
@@ -21,12 +23,26 @@ from src.merging import ANTWERP_ENV_VERSION, Merging
 from src.wrapper import ABLATION_MODES, DelayWrapper
 
 class EpisodeRewardCallback(BaseCallback):
-    def __init__(self, verbose=0):
+    def __init__(self, verbose=0, log_path=None):
         super().__init__(verbose)
         self.episode_rewards = []
         self.episode_lengths = []
         self.current_episode_reward = 0
         self.current_episode_length = 0
+        self.started = time.monotonic()
+        self.log_file = None
+        if log_path:
+            os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
+            self.log_file = open(log_path, 'x')
+
+    def _write(self, record):
+        if self.log_file:
+            self.log_file.write(json.dumps(record) + '\n')
+            self.log_file.flush()
+
+    def _on_training_end(self):
+        if self.log_file:
+            self.log_file.close()
 
     def _on_step(self) -> bool:
         # Track episode reward and length
@@ -42,11 +58,11 @@ class EpisodeRewardCallback(BaseCallback):
             merged = bool(info.get('merged'))
             
             # Log to wandb
-            wandb.log({
+            metrics = {
                 'train/episode_reward': self.current_episode_reward,
                 'train/episode_length': self.current_episode_length,
-                'train/mean_episode_reward': np.mean(self.episode_rewards),
-                'train/mean_episode_length': np.mean(self.episode_lengths),
+                'train/mean_episode_reward': float(np.mean(self.episode_rewards)),
+                'train/mean_episode_length': float(np.mean(self.episode_lengths)),
                 'train/arrival': int(outcome == 'Arrived'),
                 'train/success': int(info['is_success']),
                 'train/ego_teleported': int(info['ego_teleported']),
@@ -55,12 +71,21 @@ class EpisodeRewardCallback(BaseCallback):
                 'train/emergency_stopping': int(outcome == 'Emergency Stopping'),
                 'train/no_merge_timeout': int(outcome == 'Max Steps' and not merged),
                 'train/merged_timeout': int(outcome == 'Max Steps' and merged),
-            })
+            }
+            wandb.log(metrics)
+            self._write({'event': 'episode', 'steps': self.num_timesteps,
+                         'outcome': outcome, **{k: float(v) for k, v in metrics.items()}})
             
             # Reset for next episode
             self.current_episode_reward = 0
             self.current_episode_length = 0
 
+        if self.num_timesteps % 1000 == 0:
+            elapsed = time.monotonic() - self.started
+            self._write({'event': 'progress', 'steps': self.num_timesteps,
+                         'updates': int(self.model._n_updates), 'elapsed_seconds': elapsed,
+                         'fps': self.num_timesteps / max(elapsed, 1e-6)})
+            print(f'Training step {self.num_timesteps}, {self.num_timesteps / max(elapsed, 1e-6):.1f} steps/s', flush=True)
         return True
 
 class StepLoggingCallback(EpisodeRewardCallback):
@@ -119,6 +144,11 @@ def parse_args():
     parser.add_argument('--run_id', type=str, default=None)
     parser.add_argument('--radius', type=int, default=50)
     parser.add_argument('--total_timesteps', type=int, default=10_000_000)
+    parser.add_argument('--checkpoint_freq', type=int, default=100_000)
+    parser.add_argument('--torch_threads', type=int, default=None)
+    parser.add_argument('--device', default='auto')
+    parser.add_argument('--log_dir', default='runs')
+    parser.add_argument('--episode_log', default=None)
     parser.add_argument('--render_mode', type=str, default=None)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--scenario', choices=['easy', 'medium', 'hard'], default='medium')
@@ -132,6 +162,8 @@ def parse_args():
     args = parser.parse_args()
     if args.ablation != 'full' and args.encoder_mode != 'GRU':
         parser.error('Table IV ablations require --encoder_mode GRU')
+    if args.checkpoint_freq < 1 or (args.torch_threads is not None and args.torch_threads < 1):
+        parser.error('checkpoint_freq and torch_threads must be positive')
     return args
 
 def ensure_dirs(path: str):
@@ -143,10 +175,9 @@ def main():
     if args.run_name is None:
         args.run_name = f"SAC-merging-delay-wrapper-{time.strftime('%Y%m%d-%H%M%S')}"
 
-    if args.wandb_mode == 'disabled':
-        os.environ['WANDB_MODE'] = 'disabled'
-    elif args.wandb_mode == 'offline':
-        os.environ['WANDB_MODE'] = 'offline'
+    if args.torch_threads is not None:
+        torch.set_num_threads(args.torch_threads)
+    ensure_dirs(args.log_dir)
 
     config = dict(
         algo='SAC',
@@ -159,8 +190,14 @@ def main():
         delay_mode=args.delay_mode,
         scenario=args.scenario,
         use_safety=args.use_safety,
+        antwerp_env_version=ANTWERP_ENV_VERSION,
+        device=args.device,
+        torch_threads=args.torch_threads,
+        checkpoint_freq=args.checkpoint_freq,
     )
-    run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config, sync_tensorboard=True, save_code=True, resume=args.resume, id=args.run_id)
+    run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
+                     mode=args.wandb_mode, dir=args.log_dir, sync_tensorboard=True,
+                     save_code=True, resume=args.resume, id=args.run_id)
     run.log_code('src')
     # Create env
     max_delay = 20
@@ -203,7 +240,7 @@ def main():
     else:
         policy_kwargs = dict()
 
-    model = SAC('MlpPolicy', vec_env, seed=args.seed, verbose=1, tensorboard_log=os.path.join('runs', args.run_name), device='auto', learning_rate=3e-5, policy_kwargs=policy_kwargs, batch_size=512)
+    model = SAC('MlpPolicy', vec_env, seed=args.seed, verbose=1, tensorboard_log=os.path.join(args.log_dir, args.run_name), device=args.device, learning_rate=3e-5, policy_kwargs=policy_kwargs, batch_size=512)
     
     
     
@@ -235,9 +272,9 @@ def main():
     checkpoint_dir = os.path.join(args.save_dir, args.run_name)
 
     # Create callbacks
-    episode_callback = EpisodeRewardCallback()
+    episode_callback = EpisodeRewardCallback(log_path=args.episode_log)
     checkpoint_callback = CheckpointCallback(
-        save_freq=100_000, save_path=checkpoint_dir,
+        save_freq=args.checkpoint_freq, save_path=checkpoint_dir,
         name_prefix=args.run_name, verbose=2,
     )
     wandb_callback = WandbCallback(

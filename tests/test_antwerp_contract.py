@@ -1,6 +1,8 @@
 """Regression checks for teleport accounting and delayed traffic geometry."""
 
 import unittest
+import io
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -165,6 +167,21 @@ class DelayedSafetyTests(unittest.TestCase):
 
 
 class TeleportTests(unittest.TestCase):
+    def test_training_log_separates_raw_arrival_from_success(self):
+        from train_sac_delay import EpisodeRewardCallback
+        callback = EpisodeRewardCallback()
+        callback.log_file = io.StringIO()
+        callback.num_timesteps = 1
+        callback.locals = {'rewards': [-0.03], 'dones': [True], 'infos': [{
+            'message': 'Arrived', 'merged': True, 'ego_teleported': True, 'is_success': False,
+        }]}
+        with patch('train_sac_delay.wandb.log'):
+            self.assertTrue(callback._on_step())
+        entry = json.loads(callback.log_file.getvalue())
+        self.assertEqual(entry['train/arrival'], 1)
+        self.assertEqual(entry['train/success'], 0)
+        self.assertEqual(entry['train/teleported_arrival'], 1)
+
     def make_env(self):
         env = Merging(seed=1)
         env.ego_id = 'ego'

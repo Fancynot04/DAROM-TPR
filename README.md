@@ -11,7 +11,7 @@ In RSU-assisted autonomous driving, the roadside unit (RSU) perceives surroundin
 - **Physics-Based Safety Controller**: A supervisory layer that enforces kinematic stopping distance constraints, overriding unsafe actions before execution.
 - **Unified SAC Agent**: A single soft actor-critic agent for joint longitudinal and lateral control.
 
-Experiments in SUMO using real-world NGSIM traffic data show DAROM-GRU achieves **>99% success** in high-density traffic with random delays up to 2.0 seconds. The trained policy generalizes across five stochastic delay distributions (uniform, bimodal, bursty, triangular, exponential) without retraining.
+Upstream experiments in SUMO using real-world NGSIM traffic data report DAROM-GRU achieving **>99% success** in high-density traffic with random delays up to 2.0 seconds and generalizing across five stochastic delay distributions without retraining. These are historical upstream results, not results of the Antwerp migration. Current local validation and pilot outcomes are recorded under **Version 2 staged validation** below.
 
 ![DAROM Framework](assets/network.png)
 
@@ -331,8 +331,9 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
 - [ ] Train and evaluate the `full` baseline and five variants at a sufficient
   budget under ego lane mode 0; the pre-restoration pilot checkpoints used
   SUMO's automatic lane mode and cannot measure the revised policy task.
-  A new 10,000-step `full` pilot and three-density fixed-action/safety probes
-  have completed under lane mode 0, but the pilot is not a Table IV result.
+  A historical 10,000-step pilot and a fresh version 2 20,000-step `full` pilot
+  have completed under lane mode 0. Neither establishes convergence or a
+  Table IV result; see the staged validation for held-out version 2 outcomes.
 - [ ] Assess route-aware lane guidance after the policy-controlled baseline.
   `E77_0` connects only to D3; `E82_0`–`E82_2` connect to
   D2, while `E82_3`–`E82_5` connect to D1. One pre-restoration training episode
@@ -352,11 +353,12 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   native SUMO can use other D1-connected lanes. Extending to 9,000 steps did
   not clear its `E78_2` queue. These diagnostics do not justify changing Hard
   demand or the training episode limit.
-- [ ] Revise the diagnostic rule to choose among D1-reachable lanes and verify
-  requested versus completed lane changes, then rerun the fixed Hard seeds.
-  Inspect J107 conflicts separately; do not use this rule as a Table IV
-  comparator before its information advantage and collision behavior are
-  addressed.
+- [x] Add connectivity-derived D1 lane choices and record requested versus
+  completed lane changes; rerun the fixed Hard seeds (version 2 stage 2).
+  These cases did not activate a beneficial alternative lane choice.
+- [ ] Address continuous lateral maneuver safety and inspect J107 conflicts
+  separately. The rule has an information advantage and unresolved collisions;
+  it is not a Table IV comparator.
 
 **Validation so far:** unit tests cover ego selection, geometry, wrappers,
 and encoder input handling. All three Antwerp scenarios reset at 120.1 s
@@ -528,6 +530,11 @@ and distinguishes failed lane-change commands from unavailable gaps.
 | `--ablation` | `full`, `delayed_state_only`, `delayed_state_delay`, `delayed_state_action`, `linear_predictor` | Table IV input variant; non-full variants require GRU |
 | `--run_name` | string | WandB run name |
 | `--save_dir` | path | Directory to save model checkpoints |
+| `--checkpoint_freq` | positive integer | Numbered checkpoint interval; defaults to 100,000 steps |
+| `--torch_threads` | positive integer | Optional PyTorch CPU thread limit for this process |
+| `--device` | `auto`, `cpu`, `cuda`, etc. | SB3 model device |
+| `--log_dir` | path | TensorBoard/WandB output directory; defaults to `runs` |
+| `--episode_log` | path | Optional new JSONL file for episode metrics and progress every 1,000 steps |
 
 ## Evaluation
 
@@ -549,7 +556,8 @@ for raw arrivals and adds `train/success`, `train/ego_teleported`, and
 `train/teleported_arrival`. Each episode gets a distinct seed for SUMO and delay sampling, so the
 same checkpoint and evaluation seed reproduce the episode delay sequences.
 
-Numbered checkpoints are saved every 100,000 training steps under
+Numbered checkpoints are saved every 100,000 training steps by default (set
+`--checkpoint_freq` for a short pilot) under
 `models_experiments/<run_name>/`. The latest model is also saved as
 `models_experiments/<run_name>.zip` at training completion. Neither is marked
 "best" until independent evaluation compares them.
@@ -666,6 +674,68 @@ python -m src.diagnostics --scenarios hard --longitudinal sumo \
 Omit `--lane-strategy reachable` for the longitudinal-only comparison. Outputs
 remain under `tmp/ai/antwerp-step2/`. All 12 regression tests, including the
 D1 lane-connectivity check, passed after this stage.
+
+Step 3 completed a fresh **20,000-step `full` GRU/SAC pilot** in Hard with
+uniform delays and safety disabled, training seed 579071. The architecture,
+learning rate (3e-5), batch size (512), rewards, traffic and episode limits
+were unchanged from version 2. Training used CUDA on an RTX 4090 and one
+PyTorch CPU thread, with WandB disabled. It took 1,094 s and performed 19,900
+gradient updates. Five training episodes completed (two collisions and three
+merged timeouts); none succeeded or teleported. The final 89 steps belong to
+an unfinished sixth episode and are not counted as an outcome.
+
+The 10,000-step numbered checkpoint and final 20,000-step model were evaluated
+in separate processes, deterministically on CPU, using held-out seeds
+579081–579084. The policy received only its 134-value augmented observation,
+without the diagnostic rule's live road map or current-neighbor information.
+All eight Hard evaluations completed without simulator/runtime errors:
+
+| Hard seed | 10,000-step checkpoint | Final 20,000-step model |
+|---:|---|---|
+| 579081 | Collision, 60.0 s, E75 | Collision, 63.1 s, E75 |
+| 579082 | Collision, 62.4 s, E75 | Merged timeout, 600 s, E78 |
+| 579083 | Merged timeout, 600 s, E78 | Collision, 544.2 s, E82 |
+| 579084 | Collision, 61.9 s, E75 | Collision, 359.3 s, E82 |
+
+Each checkpoint had **0/4 uninterrupted arrivals, 3 collisions and 1 merged
+timeout**, with no ego teleport or emergency-stop termination. Mean returns
+were -324.258 and -550.869, respectively. These four paired cases are pilot
+diagnostics, not stable rate estimates or evidence of improvement. No "best"
+checkpoint has been selected. The final model made 0/2/4/2 within-edge lane
+changes for those four seeds, so some maneuvers executed, but none completed
+the task. Seed 579082 made no route progress during its last 1,000 steps and
+remained on E78. Additional final-model checks at seed 579081 collided in
+Easy (345.3 s, E82, four lane changes) and Medium (434.0 s, E82, three lane
+changes), also without teleports.
+
+Both checkpoints loaded with the matching version/safety/ablation contract.
+All final policy parameters and recorded actor/critic/entropy losses were
+finite, and all 13 regression tests passed. This verifies training and
+evaluation execution; it does not establish policy convergence or safety.
+Continuous lane-change safety, route completion, larger-budget baseline
+training and broader evaluation remain open. No formal five-variant ablation
+or stage 4 experiment was run.
+
+The final model is retained locally at
+`models_experiments/antwerp-step3/full-v2-hard-20k.zip`; numbered 10k/20k
+checkpoints are in the sibling `full-v2-hard-20k/` directory. Models are ignored
+by Git. Logs, TensorBoard events and all per-episode evaluation CSV/JSON files
+are retained in `tmp/ai/antwerp-step3/`. Reproduction commands (use new run,
+episode-log and output paths to preserve existing artifacts):
+
+```bash
+python train_sac_delay.py --scenario hard --seed 579071 \
+    --encoder_mode GRU --ablation full --delay_mode uniform \
+    --total_timesteps 20000 --checkpoint_freq 10000 \
+    --torch_threads 1 --device cuda --wandb_mode disabled \
+    --run_name full-v2-hard-20k-repeat --save_dir models_experiments/antwerp-step3 \
+    --log_dir tmp/ai/antwerp-step3/tensorboard-repeat \
+    --episode_log tmp/ai/antwerp-step3/training-repeat.jsonl
+python -m src.diagnostics --controller model \
+    --checkpoint models_experiments/antwerp-step3/full-v2-hard-20k.zip \
+    --scenarios hard --seeds 579081 579082 579083 579084 --safety-modes off \
+    --output-dir tmp/ai/antwerp-step3/eval-repeat
+```
 
 ## Regression validation
 
