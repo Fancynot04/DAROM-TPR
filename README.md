@@ -737,6 +737,110 @@ python -m src.diagnostics --controller model \
     --output-dir tmp/ai/antwerp-step3/eval-repeat
 ```
 
+## Hard reachability and learning audit
+
+The follow-up diagnostic adds `--controller managed`. This reference uses the
+same `Merging.step` acceleration/lane-direction actions, lane-change mode 0,
+speed mode 31, traffic, network and 6,000-step limit as training. The modes are
+checked at reset and every on-road step. It does not move vehicles, enable
+automatic lane changing, modify routes, or shorten teleport thresholds.
+
+It is a **privileged feasibility reference**, not a learned policy or a fair
+delay-ablation comparator. It reads live SUMO neighbors and car-following
+parameters, the D1 lane-connectivity graph and current lateral motion.
+`getNeighbors` reports bumper gaps with minimum-gap offsets (including negative
+overlaps); `getSecureGap` supplies the car-following gap requirement. See the
+[SUMO vehicle retrieval documentation](https://sumo.dlr.de/docs/TraCI/Vehicle_Value_Retrieval.html).
+The controller adds a three-second closing-speed allowance, requests one
+adjacent lane at a time, and holds that target until the vehicle is entirely
+inside it with lateral speed below 0.1 m/s. During an active maneuver it limits
+acceleration using the target leader's follow speed. These checks are heuristics,
+not a proof of collision avoidance.
+
+An exploratory implementation incorrectly required exact lane-center settling.
+SUMO's sublane model settled ego around +/-0.6995 m from center while its whole
+1.8 m body was inside a 3.2 m lane, preventing further requests. The corrected
+test uses body containment, not exact centering; a regression test covers it.
+The four exploratory episodes are retained in `committed-dev/` and
+`reactive-dev/` for transparency (one timeout and three teleport-assisted raw
+arrivals, no successes). They do not evaluate the final controller.
+
+With that correction, development seeds 579071 and 579074 both reached D1
+without collisions or teleports in 380.4 s and 228.3 s. The first seed was rerun
+in a separate process: all 3,804 trace rows matched exactly, including controls,
+states, delays and rewards. This establishes a reproducible successful path
+under the training actuator constraints, not general Hard solvability or
+learnability from the policy's restricted observation.
+
+The controller was then frozen (`committed`, `passive`, safety off) for four
+seeds not used in this controller's development. These are the same seeds
+used in the earlier model pilot, permitting outcome comparison without
+retraining that model:
+
+| Hard seed | Managed reference | Terminal area | Observed failure evidence |
+|---:|---|---|---|
+| 579081 | Timeout, 600 s | `:J107_0_1` | Last 1,000 steps: 90.2% below 1 m/s, 26.80 m progress |
+| 579082 | Collision, 53.4 s | E75 | Started lane change with 9.27 m remaining; still moving laterally at impact |
+| 579083 | Timeout, 600 s | `E78_2` | D1-connected lane; last 1,000 steps entirely below 1 m/s, 7.94 m progress |
+| 579084 | Collision, 233.2 s | E82 | Started lane change with 11.56 m remaining; still moving laterally at impact |
+
+There were **0/4 independent successes, two collisions, two timeouts, and no
+ego teleports**. The development successes must not be pooled with this set
+as an unbiased success-rate estimate. The late lane changes reveal an unhandled
+interaction between maneuver duration, lane-end braking and rear traffic;
+bumper gaps at initiation did not establish safety throughout the maneuver.
+The E78 timeout shows that selecting a statically D1-connected lane does not
+guarantee traffic can advance. The logs identify queue locations and stopped
+leaders, but do not prove the root cause of the junction congestion or that
+those seeds are impossible for every controller. This reference is not ready
+to replace the production safety controller.
+
+The observation/reward audit also found two reasons to avoid simply extending
+the previous training budget:
+
+- The 134-value policy input provides distance traveled, lane index, speed,
+  delayed relative neighbor positions/velocities, action history and delay.
+  It does not explicitly expose D1 lane connections, distance to a required
+  lane transition, lateral position/speed, or vehicle lengths. The GRU encodes
+  a window of action history; its hidden state is not persisted between policy
+  calls as a full trajectory memory. Distance may help infer road position on
+  this fixed route, but information sufficiency has not been demonstrated.
+- The saved 20k pilot has `gamma=0.99` at 0.1 s per step. The discount multipliers
+  for rewards 10, 60 and 200 seconds away are approximately 0.366, 0.002405 and
+  1.86e-9. Thus the terminal arrival bonus contributes very little to early
+  decisions; dense progress and merge rewards still provide learning signal.
+  This arithmetic identifies a temporal-credit risk, not proof that discount
+  is the sole cause of failure. No discount/reward/model-input changes or new
+  training were made in this audit.
+
+Diagnostic CSVs now include lateral speed, remaining lane distance, D1 lane
+reachability, maneuver phase and gap-blocking reason. JSON summaries include
+phase durations, control modes, final pre-terminal state, and stopped fraction
+and progress over the last 1,000 steps. A reachable lane flag refers to static
+connectivity without further within-edge changes, not an open traffic path.
+The opt-in `--gap-control yield` variant reduces speed to create an insertion
+opportunity; it retains the same gap guard. Both development seeds timed out
+with this variant: 579071 on D1-connected `E78_2`, and 579074 on `E77_3` after
+an earlier ego teleport from E75. It did not improve these cases and is not
+the default. `--maneuver-mode reactive` disables
+the latched target and is exploratory; it is not the validated reference.
+
+```bash
+python -m src.diagnostics --controller managed --scenarios hard \
+    --seeds 579071 579074 579081 579082 579083 579084 --safety-modes off \
+    --output-dir tmp/ai/hard-reachability/repeat
+```
+
+The audit completed 13 full episodes: four exploratory centering checks, two
+corrected development runs, four independent runs, one exact replay, and two
+yield comparisons. All 17 regression tests passed, including overlapping/fast
+followers, lane-index crossing before maneuver completion, off-center settling,
+edge/teleport target reset, and yielding without relaxing the gap guard.
+All audit artifacts remain local under `tmp/ai/hard-reachability/`; existing
+output directories are not overwritten. No new models or dependencies were
+created, and the production observation/reward/checkpoint contract remains
+version 2.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and

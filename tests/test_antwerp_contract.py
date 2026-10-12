@@ -83,6 +83,78 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(details['front_approach_speed'], 15)
 
 
+class ManagedDiagnosticTests(unittest.TestCase):
+    def setUp(self):
+        from src.diagnostics import ManagedController
+        self.controller = ManagedController()
+        self.base = SimpleNamespace(ego_id='ego', ego_on_road=True)
+        self.fake = Mock()
+        vehicle = self.fake.vehicle
+        vehicle.getRoadID.return_value = 'E75'
+        vehicle.getLaneIndex.return_value = 0
+        vehicle.getLaneID.return_value = 'E75_0'
+        vehicle.getWidth.return_value = 1.8
+        self.fake.lane.getWidth.return_value = 3.2
+        vehicle.getSpeed.return_value = 10
+        vehicle.getLateralLanePosition.return_value = 0
+        vehicle.getLateralSpeed.return_value = 0
+        vehicle.getNeighbors.return_value = ()
+        vehicle.getDecel.return_value = 4.5
+        vehicle.getSecureGap.return_value = 8
+        vehicle.getFollowSpeed.return_value = 10
+
+    def test_overlap_or_fast_follower_prevents_start(self):
+        for speed, gap in [(10, -0.5), (20, 20)]:
+            with self.subTest(speed=speed, gap=gap), patch('src.diagnostics.traci', self.fake):
+                self.fake.vehicle.getNeighbors.side_effect = lambda ego, mode: (('rear', gap),) if mode == 0 else ()
+                self.fake.vehicle.getSpeed.side_effect = lambda name: speed if name == 'rear' else 10
+                action, details = self.controller(self.base)
+                self.assertEqual(action[1], 0)
+                self.assertEqual(details['phase'], 'waiting_gap')
+                self.assertEqual(details['block_reason'], 'rear')
+                self.assertIsNone(self.controller.target)
+
+    def test_lane_index_crossing_does_not_start_second_maneuver(self):
+        with patch('src.diagnostics.traci', self.fake):
+            action, _ = self.controller(self.base)
+            self.assertEqual(action[1], 5)
+            self.fake.vehicle.getLaneIndex.return_value = 1
+            self.fake.vehicle.getLateralLanePosition.return_value = -1.4
+            self.fake.vehicle.getLateralSpeed.return_value = 0.8
+            action, details = self.controller(self.base)
+            self.assertEqual(action[1], 0)
+            self.assertEqual(details['target_lane'], 1)
+            self.assertEqual(details['phase'], 'maneuver')
+            self.fake.vehicle.getLateralLanePosition.return_value = -0.6995
+            self.fake.vehicle.getLateralSpeed.return_value = 0
+            action, details = self.controller(self.base)
+            self.assertEqual(action[1], 5)
+            self.assertEqual(details['target_lane'], 2)
+
+    def test_yield_changes_speed_without_relaxing_gap_guard(self):
+        self.controller.gap_control = 'yield'
+        self.fake.vehicle.getNeighbors.side_effect = lambda ego, mode: (('rear', 1),) if mode == 0 else ()
+        with patch('src.diagnostics.traci', self.fake):
+            action, details = self.controller(self.base)
+        self.assertEqual(action[1], 0)
+        self.assertEqual(action[0], -1.5)
+        self.assertEqual(details['phase'], 'waiting_gap')
+        self.assertIsNone(self.controller.target)
+
+    def test_edge_transition_and_teleport_clear_latched_target(self):
+        with patch('src.diagnostics.traci', self.fake):
+            self.controller(self.base)
+            self.fake.vehicle.getRoadID.return_value = 'E76'
+            self.fake.vehicle.getLaneIndex.return_value = 2
+            action, _ = self.controller(self.base)
+            self.assertEqual(action[1], 0)
+            self.assertIsNone(self.controller.target)
+            self.base.ego_on_road = False
+            action, _ = self.controller(self.base)
+            np.testing.assert_array_equal(action, [0, 0])
+            self.assertIsNone(self.controller.edge)
+
+
 class PacketEnv(gym.Env):
     """A moving ego with deliberately changing live neighbor information."""
     observation_space = gym.spaces.Box(-5000, 5000, (31, 3), np.float32)

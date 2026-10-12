@@ -1,12 +1,12 @@
-"""Reproducible full-episode rule, native-SUMO, and checkpoint diagnostics.
+"""Reproducible rule, managed-maneuver, native-SUMO and model diagnostics.
 
-The rule uses current observations plus road/lane connectivity information and
-is not a fair RL comparator. A loaded policy receives only its augmented
+The rules use privileged current traffic and lane-connectivity information and
+are not fair RL comparators. A loaded policy receives only its augmented
 observation. The optional safety wrapper uses the normal delayed packet stream.
 """
 
 import argparse
-from collections import Counter
+from collections import Counter, deque
 import csv
 import json
 import hashlib
@@ -18,7 +18,8 @@ import time
 import numpy as np
 import sumolib
 
-from .merging import ANTWERP_DIR, ANTWERP_ENV_VERSION, Merging, maxSteps, parseAction, traci
+from .merging import (ANTWERP_DIR, ANTWERP_ENV_VERSION, LANE_CHANGE_EDGES,
+                      Merging, maxSteps, parseAction, traci)
 from .safety_controller import target_lane_line
 from .wrapper import DelayWrapper, SafetyWrapper
 
@@ -101,10 +102,100 @@ def rule_action(base, lane_strategy='fixed', longitudinal='rule'):
     }
 
 
+class ManagedController:
+    """Privileged reachability probe using only the normal two action channels.
+
+    Reads current SUMO neighbors (including vehicle lengths/car-follow models)
+    and the route graph. This is NOT a delayed-observation policy or a safety
+    guarantee. Target lane is latched until lateral motion has settled.
+    """
+
+    def __init__(self, committed=True, gap_control='passive'):
+        self.committed = committed
+        self.gap_control = gap_control
+        self.edge = None
+        self.target = None
+
+    def __call__(self, base):
+        details = {'target_lane': -1, 'front_gap': '', 'back_gap': '',
+                   'phase': 'off_road', 'block_reason': ''}
+        if not base.ego_on_road:
+            self.edge, self.target = None, None
+            return np.zeros(2, np.float32), details
+        ego = base.ego_id
+        edge = traci.vehicle.getRoadID(ego)
+        lane = traci.vehicle.getLaneIndex(ego)
+        speed = traci.vehicle.getSpeed(ego)
+        lateral = traci.vehicle.getLateralLanePosition(ego)
+        lateral_speed = traci.vehicle.getLateralSpeed(ego)
+        # SUMO's sublane model can settle off-center. Completion means the
+        # whole vehicle is inside the lane, not exact centerline alignment.
+        contained = (abs(lateral) + traci.vehicle.getWidth(ego) / 2
+                     <= traci.lane.getWidth(traci.vehicle.getLaneID(ego)) / 2)
+        settled = contained and abs(lateral_speed) < 0.1
+        if self.edge != edge:
+            self.edge, self.target = edge, None
+        if self.target == lane and settled:
+            self.target = None
+        candidates = d1_reachable_lanes().get(edge, [])
+        desired = min(candidates, key=lambda item: abs(item - lane)) if candidates else lane
+        active = self.target is not None and self.committed
+        target = self.target if active else lane + int(np.sign(desired - lane))
+        direction = int(np.sign(target - lane)) if edge in LANE_CHANGE_EDGES else 0
+        details.update(target_lane=target, phase='maneuver' if active else 'keep_lane')
+        acceleration = 2.6
+        if direction:
+            side = 0 if direction > 0 else 1
+            leaders = traci.vehicle.getNeighbors(ego, side | 2)
+            followers = traci.vehicle.getNeighbors(ego, side)
+            details['front_gap'] = min((gap for _, gap in leaders), default=float('inf'))
+            details['back_gap'] = min((gap for _, gap in followers), default=float('inf'))
+            blockers = []
+            blocking_speeds = []
+            for vehicle, gap in leaders:
+                other_speed = traci.vehicle.getSpeed(vehicle)
+                decel = traci.vehicle.getDecel(vehicle)
+                secure = traci.vehicle.getSecureGap(ego, speed, other_speed, decel, vehicle)
+                if gap < max(2.0, secure) + 3 * max(speed - other_speed, 0):
+                    blockers.append('front')
+                    blocking_speeds.append(other_speed)
+                if active:
+                    safe_speed = traci.vehicle.getFollowSpeed(ego, speed, max(0, gap),
+                                                              other_speed, decel, vehicle)
+                    acceleration = min(acceleration, (safe_speed - speed) / 0.1)
+            for vehicle, gap in followers:
+                other_speed = traci.vehicle.getSpeed(vehicle)
+                secure = traci.vehicle.getSecureGap(vehicle, other_speed, speed,
+                                                    traci.vehicle.getDecel(ego), ego)
+                if gap < max(2.0, secure) + 3 * max(other_speed - speed, 0):
+                    blockers.append('rear')
+                    blocking_speeds.append(other_speed)
+            details['block_reason'] = '+'.join(sorted(set(blockers)))
+            if not active:
+                # Do not start another maneuver while a previous lateral drift
+                # is still settling, even in the reactive comparison.
+                if not settled:
+                    direction = 0
+                    details['phase'] = 'settling'
+                elif blockers:
+                    direction = 0
+                    details['phase'] = 'waiting_gap'
+                    if self.gap_control == 'yield':
+                        # Create relative motion before insertion instead of
+                        # racing beside the same vehicles until the lane ends.
+                        desired_speed = max(0.0, min(blocking_speeds) - 2.0)
+                        acceleration = np.clip(desired_speed - speed, -1.5, 2.6)
+                else:
+                    self.target = target if self.committed else None
+                    details['phase'] = 'start_maneuver'
+        return np.asarray([np.clip(acceleration, -4.5, 2.6), 5 * direction], np.float32), details
+
+
 def physical_state(base):
     state = {'edge': '', 'lane': '', 'lane_index': -1, 'speed': 0.0,
              'distance': float(base.observation[0, 0]), 'leader': '',
-             'leader_gap': '', 'leader_speed': '', 'lateral_position': '', 'angle': ''}
+             'leader_gap': '', 'leader_speed': '', 'lateral_position': '', 'angle': '',
+             'lateral_speed': '', 'lane_remaining': '', 'd1_reachable': ''}
     if base.ego_on_road:
         state.update(edge=traci.vehicle.getRoadID(base.ego_id),
                      lane=traci.vehicle.getLaneID(base.ego_id),
@@ -112,7 +203,12 @@ def physical_state(base):
                      speed=traci.vehicle.getSpeed(base.ego_id),
                      distance=traci.vehicle.getDistance(base.ego_id),
                      lateral_position=traci.vehicle.getLateralLanePosition(base.ego_id),
+                     lateral_speed=traci.vehicle.getLateralSpeed(base.ego_id),
                      angle=traci.vehicle.getAngle(base.ego_id))
+        state['lane_remaining'] = (traci.lane.getLength(state['lane'])
+                                   - traci.vehicle.getLanePosition(base.ego_id))
+        if not state['edge'].startswith(':'):
+            state['d1_reachable'] = state['lane_index'] in d1_reachable_lanes().get(state['edge'], [])
         leader = traci.vehicle.getLeader(base.ego_id, 150)
         if leader:
             state.update(leader=leader[0], leader_gap=leader[1],
@@ -121,7 +217,7 @@ def physical_state(base):
 
 
 def run_episode(scenario, seed, safety, output_dir, lane_strategy='fixed', longitudinal='rule',
-                model=None, checkpoint=None):
+                model=None, checkpoint=None, managed=None):
     case = f'{scenario}-{seed}-safety-{int(safety)}'
     case_dir = Path(output_dir) / case
     case_dir.mkdir(parents=True, exist_ok=False)
@@ -129,17 +225,24 @@ def run_episode(scenario, seed, safety, output_dir, lane_strategy='fixed', longi
     delay = DelayWrapper(base, max_delay=20, mode='all', delay_mode='uniform', seed=seed)
     env = SafetyWrapper(delay) if safety else delay
     road_steps, stopped_steps = Counter(), Counter()
+    phases, blocked = Counter(), Counter()
+    tail = deque(maxlen=1000)
     requests, executed_requests, lane_changes, interventions = 0, 0, 0, 0
     teleports = []
     episode_return = 0.0
     started = time.monotonic()
     fields = ['step', 'time', 'edge', 'lane', 'lane_index', 'speed', 'distance',
-              'leader', 'leader_gap', 'leader_speed', 'lateral_position', 'angle', 'target_lane', 'front_gap',
+              'leader', 'leader_gap', 'leader_speed', 'lateral_position', 'angle',
+              'lateral_speed', 'lane_remaining', 'd1_reachable', 'phase', 'block_reason', 'target_lane', 'front_gap',
               'back_gap', 'acceleration', 'requested_lane_change', 'applied_lane_change',
               'after_edge', 'after_lane', 'after_speed', 'after_distance',
               'reward', 'delay', 'teleport_started', 'teleport_ended', 'ego_teleported', 'outcome']
     try:
         observation, reset_info = env.reset(seed=seed)
+        modes = {'lane_change': traci.vehicle.getLaneChangeMode(base.ego_id),
+                 'speed': traci.vehicle.getSpeedMode(base.ego_id)}
+        if modes != {'lane_change': 0, 'speed': 31}:
+            raise RuntimeError(f'Unexpected control modes: {modes}')
         with (case_dir / 'trace.csv').open('x', newline='') as trace:
             writer = csv.DictWriter(trace, fieldnames=fields)
             writer.writeheader()
@@ -149,11 +252,21 @@ def run_episode(scenario, seed, safety, output_dir, lane_strategy='fixed', longi
                 road_steps[before['lane']] += 1
                 if before['speed'] < 1 and before['lane']:
                     stopped_steps[before['lane']] += 1
-                if model is None:
+                if managed is not None:
+                    action, details = managed(base)
+                elif model is None:
                     action, details = rule_action(base, lane_strategy, longitudinal)
                 else:
                     action, _ = model.predict(observation, deterministic=True)
                     details = {'target_lane': -1, 'front_gap': '', 'back_gap': ''}
+                phases[details.get('phase', 'unmanaged')] += 1
+                if details.get('block_reason'):
+                    blocked[details['block_reason']] += 1
+                tail.append(before)
+                if base.ego_on_road:
+                    if (traci.vehicle.getLaneChangeMode(base.ego_id) != 0
+                            or traci.vehicle.getSpeedMode(base.ego_id) != 31):
+                        raise RuntimeError('Control mode changed during the episode')
                 decision_delay = delay.delay_of_received_observation
                 requested = int(parseAction(action)[1])
                 observation, reward, terminated, truncated, info = env.step(action)
@@ -193,9 +306,15 @@ def run_episode(scenario, seed, safety, output_dir, lane_strategy='fixed', longi
                 raise RuntimeError('Environment did not end at its configured limit')
         result = {
             'scenario': scenario, 'seed': seed, 'safety': safety,
-            'controller': 'model' if model is not None else 'current-observation-rule',
-            'lane_strategy': None if model is not None else lane_strategy,
-            'longitudinal': None if model is not None else longitudinal,
+            'controller': ('managed' if managed is not None else
+                           'model' if model is not None else 'current-observation-rule'),
+            'committed': managed.committed if managed is not None else None,
+            'gap_control': managed.gap_control if managed is not None else None,
+            'control_modes': modes,
+            'lane_strategy': ('early-d1' if managed is not None else
+                              None if model is not None else lane_strategy),
+            'longitudinal': ('target-follow' if managed is not None else
+                             None if model is not None else longitudinal),
             'checkpoint': str(checkpoint) if checkpoint else None,
             'checkpoint_sha256': hashlib.sha256(Path(checkpoint).read_bytes()).hexdigest() if checkpoint else None,
             'env_version': ANTWERP_ENV_VERSION,
@@ -208,6 +327,12 @@ def run_episode(scenario, seed, safety, output_dir, lane_strategy='fixed', longi
             'lane_seconds': {key: round(value * 0.1, 1) for key, value in road_steps.items()},
             'stopped_seconds': {key: round(value * 0.1, 1) for key, value in stopped_steps.items()},
             'teleports': teleports, 'reset_info': reset_info,
+            'phase_seconds': {key: round(value * 0.1, 1) for key, value in phases.items()},
+            'blocked_seconds': {key: round(value * 0.1, 1) for key, value in blocked.items()},
+            'final_state_before_step': before,
+            'last_1000_steps': {'count': len(tail),
+                                'stopped_fraction': sum(row['speed'] < 1 for row in tail) / len(tail),
+                                'distance_progress': tail[-1]['distance'] - tail[0]['distance']},
             'wall_seconds': time.monotonic() - started,
             'git_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
             'git_dirty': bool(subprocess.check_output(['git', 'status', '--porcelain'], text=True)),
@@ -283,7 +408,9 @@ def main():
     parser.add_argument('--seeds', nargs='+', type=int, default=[579071, 579074])
     parser.add_argument('--safety-modes', nargs='+', choices=('off', 'on'), default=['off', 'on'])
     parser.add_argument('--output-dir', type=Path, required=True)
-    parser.add_argument('--controller', choices=('rule', 'native', 'model'), default='rule')
+    parser.add_argument('--controller', choices=('rule', 'native', 'model', 'managed'), default='rule')
+    parser.add_argument('--maneuver-mode', choices=('committed', 'reactive'), default='committed')
+    parser.add_argument('--gap-control', choices=('passive', 'yield'), default='passive')
     parser.add_argument('--checkpoint', type=Path)
     parser.add_argument('--lane-strategy', choices=('fixed', 'reachable'), default='fixed')
     parser.add_argument('--longitudinal', choices=('rule', 'sumo'), default='rule')
@@ -306,7 +433,9 @@ def main():
                 continue
             for safety in args.safety_modes:
                 run_episode(scenario, seed, safety == 'on', args.output_dir,
-                            args.lane_strategy, args.longitudinal, model, args.checkpoint)
+                            args.lane_strategy, args.longitudinal, model, args.checkpoint,
+                            ManagedController(args.maneuver_mode == 'committed', args.gap_control)
+                            if args.controller == 'managed' else None)
 
 
 if __name__ == '__main__':
