@@ -467,6 +467,20 @@ through the additional 300 simulated seconds. This does not support extending
 the production episode limit for that failure. All trace scripts, CSVs, and
 logs remain under `tmp/ai/rule-baseline/` and are not project inputs.
 
+The other two Hard rule seeds, 579072 and 579073, also timed out on `E78_2`,
+but their native runs respectively did not finish by 900 s and arrived only
+after an ego teleport. They are useful stress cases, not clean examples of a
+controller-only failure. A short 579071 TraCI inspection showed the first
+`E75_0` lane-change request was blocked by a left leader; extending only the
+request duration from 0 to 1 s still left ego on `E75_0` at 156 s. In a
+separate one-factor diagnostic, reducing the temporary rule's observed-gap
+headway from 1.8 to 1.0 s made the E75 change occur, but ego later reached
+`E82_1` and SUMO teleported it for a wrong lane at 660.3 s before `Arrived`.
+This is not uninterrupted success and does not establish 1.0 s as a safe
+setting. No production gap, lane-change, demand, or episode-limit parameter
+was changed. Calibrate them only after the rule checks all D1-reachable lanes
+and distinguishes failed lane-change commands from unavailable gaps.
+
 **Key arguments:**
 
 | Argument | Options | Description |
