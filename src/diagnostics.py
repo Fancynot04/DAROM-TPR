@@ -306,6 +306,8 @@ def run_episode(scenario, seed, safety, output_dir, lane_strategy='fixed', longi
                 raise RuntimeError('Environment did not end at its configured limit')
         result = {
             'scenario': scenario, 'seed': seed, 'safety': safety,
+            'training_safety': getattr(model, 'training_safety', None) if model is not None else None,
+            'evaluation_safety': bool(safety),
             'controller': ('managed' if managed is not None else
                            'model' if model is not None else 'current-observation-rule'),
             'committed': managed.committed if managed is not None else None,

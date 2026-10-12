@@ -143,7 +143,8 @@ def parse_args():
     parser.add_argument('--resume', type=str, default=None, choices=['must', 'allow', 'never'])
     parser.add_argument('--run_id', type=str, default=None)
     parser.add_argument('--radius', type=int, default=50)
-    parser.add_argument('--total_timesteps', type=int, default=10_000_000)
+    parser.add_argument('--total_timesteps', type=int, default=7_000_000,
+                        help='Training steps; defaults to the paper v5 budget')
     parser.add_argument('--checkpoint_freq', type=int, default=100_000)
     parser.add_argument('--torch_threads', type=int, default=None)
     parser.add_argument('--device', default='auto')
@@ -190,6 +191,7 @@ def main():
         delay_mode=args.delay_mode,
         scenario=args.scenario,
         use_safety=args.use_safety,
+        training_safety=args.use_safety,
         antwerp_env_version=ANTWERP_ENV_VERSION,
         device=args.device,
         torch_threads=args.torch_threads,

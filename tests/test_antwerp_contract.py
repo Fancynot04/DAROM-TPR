@@ -1,4 +1,4 @@
-"""Regression checks for teleport accounting and delayed traffic geometry."""
+"""Regression checks for Antwerp geometry, accounting and evaluation protocols."""
 
 import unittest
 import io
@@ -9,7 +9,8 @@ from unittest.mock import Mock, patch
 import gymnasium as gym
 import numpy as np
 
-from evaluate_sac_delay import evaluate, validate_checkpoint_setup
+from evaluate_sac_delay import (evaluate, evaluate_runs, parse_args as parse_eval_args,
+                                summarize_runs, validate_checkpoint_setup, validate_seed_ranges)
 from src.geometry import TrafficSnapshot, align_delayed_neighbors
 from src.merging import ANTWERP_ENV_VERSION, Merging
 from src.safety_controller import safetyCheck
@@ -153,6 +154,106 @@ class ManagedDiagnosticTests(unittest.TestCase):
             action, _ = self.controller(self.base)
             np.testing.assert_array_equal(action, [0, 0])
             self.assertIsNone(self.controller.edge)
+
+
+class EvaluationProtocolTests(unittest.TestCase):
+    def model(self, training_safety=False):
+        return SimpleNamespace(antwerp_env_version=ANTWERP_ENV_VERSION,
+                               ablation='full', training_safety=training_safety,
+                               seed=7, num_timesteps=20000,
+                               predict=Mock(return_value=(np.zeros(2), None)))
+
+    def test_safety_evaluation_is_independent_without_relabeling_training(self):
+        for training in (False, True):
+            for evaluation in (False, True):
+                model = self.model(training)
+                before = vars(model).copy()
+                setup = validate_checkpoint_setup(model, 'full', evaluation)
+                self.assertEqual(setup, {'training_safety': training, 'evaluation_safety': evaluation})
+                self.assertEqual(vars(model), before)
+        model = SimpleNamespace(antwerp_env_version=ANTWERP_ENV_VERSION)
+        self.assertIsNone(validate_checkpoint_setup(model, 'full', True)['training_safety'])
+
+    def test_incompatible_policies_rejected_before_creating_simulation(self):
+        for attribute, value in [('antwerp_env_version', -1), ('ablation', 'delayed_state_only')]:
+            for safety in (False, True):
+                model = self.model()
+                setattr(model, attribute, value)
+                with patch('evaluate_sac_delay.make_env') as make, self.assertRaises(ValueError):
+                    evaluate_runs(model, 'hard', 'uniform', safety, 'full', 1, [10])
+                make.assert_not_called()
+
+    def test_repeat_aggregation_keeps_episode_seeds_and_training_provenance(self):
+        envs = [Mock(), Mock()]
+        for env in envs:
+            env.reset.return_value = (np.zeros(134), {})
+        envs[0].step.side_effect = [
+            (None, 10, True, False, {'message': 'Arrived', 'ego_teleported': False})
+        ] * 2
+        envs[1].step.side_effect = [
+            (None, -10, True, False, {'message': 'Collision', 'ego_teleported': False}),
+            (None, -10, False, True, {'message': 'Max Steps', 'ego_teleported': False, 'merged': True}),
+        ]
+        with patch('evaluate_sac_delay.make_env', side_effect=envs) as make:
+            report = evaluate_runs(self.model(), 'hard', 'uniform', True, 'full', 2, [10, 20])
+        self.assertEqual(report['aggregate']['success_rate']['mean'], 50)
+        self.assertAlmostEqual(report['aggregate']['success_rate']['std'], np.sqrt(5000))
+        self.assertAlmostEqual(report['aggregate']['success_rate']['ci95_half_width'], 98)
+        self.assertEqual(report['aggregate']['mean_return']['mean'], 0)
+        self.assertAlmostEqual(report['aggregate']['mean_return']['ci95_half_width'], 19.6)
+        single = summarize_runs(report['runs'][:1])
+        self.assertIsNone(single['success_rate']['std'])
+        self.assertIsNone(single['success_rate']['ci95_half_width'])
+        self.assertFalse(report['training_safety'])
+        self.assertTrue(report['evaluation_safety'])
+        self.assertEqual(report['total_episodes'], 4)
+        self.assertEqual(report['runs'][1]['Merged Timeout'], 1)
+        self.assertEqual([entry['seed'] for run in report['runs'] for entry in run['episode_results']],
+                         [10, 11, 20, 21])
+        for env in envs:
+            env.close.assert_called_once()
+        self.assertEqual([call.args[3] for call in make.call_args_list], [True, True])
+        json.dumps(report, allow_nan=False)
+
+    def test_failed_evaluation_closes_environment(self):
+        model, env = self.model(), Mock()
+        env.reset.return_value = (np.zeros(134), {})
+        model.predict.side_effect = RuntimeError('prediction failed')
+        with patch('evaluate_sac_delay.make_env', return_value=env), self.assertRaises(RuntimeError):
+            evaluate_runs(model, 'hard', 'uniform', True, 'full', 1, [10])
+        env.close.assert_called_once()
+
+    def test_run_seed_ranges_must_be_disjoint(self):
+        validate_seed_ranges(500, [42, 542, 1042])
+        for episodes, seeds in [(0, [1]), (1, []), (1, [-1]), (1, [2, 2]), (500, [42, 43])]:
+            with self.subTest(episodes=episodes, seeds=seeds), self.assertRaises(ValueError):
+                validate_seed_ranges(episodes, seeds)
+
+    def test_cli_explicit_safety_and_repeated_runs(self):
+        args = parse_eval_args(['model.zip', '--safety', '--seeds', '10', '20', '--episodes', '2'])
+        self.assertTrue(args.safety)
+        self.assertEqual(args.seeds, [10, 20])
+        self.assertFalse(parse_eval_args(['model.zip', '--no-safety']).safety)
+        for flags in [ ['--safety', '--no-safety'], ['--seeds', '10', '11', '--episodes', '2'],
+                       ['--output', 'README.md'] ]:
+            with patch('sys.stderr', new=io.StringIO()), self.assertRaises(SystemExit):
+                parse_eval_args(['model.zip', *flags])
+
+    def test_training_budget_matches_paper_and_can_be_overridden_for_smoke_runs(self):
+        from train_sac_delay import parse_args
+        with patch('sys.argv', ['train_sac_delay.py']):
+            args = parse_args()
+        self.assertEqual(args.total_timesteps, 7_000_000)
+        self.assertFalse(args.use_safety)
+        with patch('sys.argv', ['train_sac_delay.py', '--total_timesteps', '20000']):
+            self.assertEqual(parse_args().total_timesteps, 20000)
+
+    def test_unknown_outcome_is_not_silently_excluded_from_rates(self):
+        env = Mock()
+        env.reset.return_value = (np.zeros(134), {})
+        env.step.return_value = (None, 0, True, False, {'message': 'Unknown'})
+        with self.assertRaisesRegex(ValueError, 'Unexpected episode outcome'):
+            evaluate(self.model(), env, 1, 10)
 
 
 class PacketEnv(gym.Env):

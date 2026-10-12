@@ -140,6 +140,7 @@ python train_sac_delay.py \
     --scenario hard \
     --delay_mode uniform \
     --encoder_mode GRU \
+    --total_timesteps 7000000 \
     --run_name GRU-hard-uniform-delay \
     --save_dir models_experiments/antwerp-hard \
     --wandb_mode disabled
@@ -165,12 +166,73 @@ every ablation; its packet also retains full world velocity vectors, unlike
 the policy's three values per vehicle. This extra safety input must be stated
 when reporting experiments with `--safety`. Policy input dimensions and the
 linear predictor's longitudinal-only extrapolation remain unchanged.
-Use the same `--safety` setting for all five runs and pass the matching
-`--ablation` value to independent evaluation. Training and evaluation both
-default to `full`, with safety disabled. New checkpoints store these two
-settings and `antwerp_env_version=2`, and evaluation rejects a mismatch.
+Choose one training-safety policy and one evaluation-safety policy across all
+five configurations; those two policies need not be equal. Pass the matching
+`--ablation` value to evaluation. Both entry points default to `full` with
+safety off; use explicit evaluation `--safety` or `--no-safety` in experiments.
+Checkpoints store `training_safety`, `ablation` and `antwerp_env_version=2`.
+Evaluation rejects incompatible environment/ablation settings, but independently
+selects evaluation safety and records both flags without modifying the model.
+Training resume still requires matching training safety to avoid silently
+changing the training intervention midway through a run.
 Checkpoints predating the velocity/reward corrections must be retrained;
 training resume and evaluation reject a missing or different environment version.
+
+## Table IV reproduction protocol
+
+The target is the original task and evaluation, not a shorter success condition
+chosen to improve Antwerp scores. Pin the paper to
+[arXiv v5, Sections V-A/V-D/V-E and Table IV](https://arxiv.org/html/2403.11852v5#S5).
+The table contains **five configurations total**, mapped here as follows:
+
+| Paper configuration | Project argument |
+|---|---|
+| Delayed State Only | `delayed_state_only` |
+| Delayed State + Delay Magnitude | `delayed_state_delay` |
+| Delayed State + Action Buffer | `delayed_state_action` |
+| Linear State Predictor | `linear_predictor` |
+| Full Augmented State | `full` |
+
+The paper specifies Hard traffic, 7,000,000 training steps per agent, learning
+rate 3e-5, batch size 512, and a 0.1 s step with delay draws up to 20 steps.
+Evaluation uses 500 episodes repeated across three seeds. The full-model
+reference is 99.80% success, 0% collision, 0.20% no-merge and 179.68 mean return.
+These are reference results, not achieved Antwerp scores.
+
+**Confirmed source differences and current choices** (upstream checked
+2026-10-12):
+
+- The [upstream training entry](https://github.com/amin-tabrizian/DAROM/blob/main/train_sac_delay.py)
+  does not wrap training in the safety controller and defaults to 10M steps.
+  This project's default budget now follows the paper's 7M; explicit small
+  `--total_timesteps` values remain available for smoke tests. No 7M run has
+  been started by this protocol correction.
+- The [upstream evaluation entry](https://github.com/amin-tabrizian/DAROM/blob/main/evaluate_sac_delay.py)
+  defaults to safety on and evaluates one checkpoint in three runs of 501
+  episodes. Its reported error is `1.96 * sample_std / sqrt(n_runs)`, not
+  standard deviation. Here formal commands explicitly use 500 episodes; reports
+  preserve sample standard deviation and that normal-approximation interval
+  separately. One-run reports use null uncertainty, not a zero-width interval.
+- The paper does not specify each Table IV row's training/evaluation safety
+  flags. Train-off/evaluate-on is supported by the public entry points, but
+  does not establish every row's exact experiment configuration. Until the
+  experiment configuration is verified, label that combination as a public-code
+  reference convention; keep the same convention across the five configurations.
+- Repeated evaluation of one checkpoint estimates evaluation variability only.
+  It is not evidence of variation across independently trained models. Keep
+  training seeds, evaluation seeds and checkpoint selection separate; final
+  test seeds must not be used to choose the best checkpoint.
+
+**Still not an exact reproduction:** Antwerp changes the network, OD demand,
+vehicle profiles, ego speed mode, episode duration, coordinates and safety
+geometry. Its GRU scaling/action ordering also differs from the local upstream
+copy; the fixed-shape masking implementation of the five configurations is a
+documented project choice. Raw returns across different routes/rewards are not
+directly comparable. Full original-scene calibration, per-row safety settings,
+checkpoint selection, and paper/code discrepancies in driver profiles remain
+to be verified. Existing success definitions, traffic and environment version
+are unchanged by this correction. The earlier 20k pilot is 1/350 of the paper
+budget and cannot establish convergence or failure to learn.
 
 ## Antwerp migration checklist
 
@@ -210,7 +272,7 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   arrival, collision, emergency stopping, and both timeout types. A TraCI
   probe checked no-merge timeouts in all three densities and an Easy arrival
   after merging.
-- [x] Match the upstream Table IV outcome proxy: success is `Arrived`, collision
+- [x] Retain the public evaluation script's outcome proxy: success is `Arrived`, collision
   is `Collision`, and reported no-merge rate counts **all** `Max Steps` episodes.
   The merged/unmerged timeout split remains diagnostic because the Antwerp route
   continues beyond the merge. Emergency stopping stays separate and is not
@@ -328,7 +390,7 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   split visible beside the table rates. Generate the corresponding Fig. 5
   training curves. No full Antwerp model training or Table IV evaluation has
   been completed yet.
-- [ ] Train and evaluate the `full` baseline and five variants at a sufficient
+- [ ] Train and evaluate the `full` baseline and four comparison variants at a sufficient
   budget under ego lane mode 0; the pre-restoration pilot checkpoints used
   SUMO's automatic lane mode and cannot measure the revised policy task.
   A historical 10,000-step pilot and a fresh version 2 20,000-step `full` pilot
@@ -530,6 +592,7 @@ and distinguishes failed lane-change commands from unavailable gaps.
 | `--ablation` | `full`, `delayed_state_only`, `delayed_state_delay`, `delayed_state_action`, `linear_predictor` | Table IV input variant; non-full variants require GRU |
 | `--run_name` | string | WandB run name |
 | `--save_dir` | path | Directory to save model checkpoints |
+| `--total_timesteps` | integer | Training budget; defaults to the paper's 7,000,000 steps |
 | `--checkpoint_freq` | positive integer | Numbered checkpoint interval; defaults to 100,000 steps |
 | `--torch_threads` | positive integer | Optional PyTorch CPU thread limit for this process |
 | `--device` | `auto`, `cpu`, `cuda`, etc. | SB3 model device |
@@ -543,18 +606,66 @@ Evaluate a newly trained Antwerp checkpoint in a separate process:
 ```bash
 python evaluate_sac_delay.py \
     models_experiments/antwerp-hard/GRU-hard-uniform-delay/GRU-hard-uniform-delay_100000_steps.zip \
-    --scenario hard --delay-mode uniform --episodes 51
+    --scenario hard --delay-mode uniform --episodes 51 --no-safety
 ```
 
-Pass `--safety` only when evaluating a run trained with the safety controller.
-Pass the same `--ablation` value used to train that checkpoint.
+Select `--safety` or `--no-safety` independently of training. Omission retains
+the existing safety-off default. Pass the same `--ablation` used to train the
+checkpoint. Logs, optional JSON reports, and model diagnostic summaries record
+`training_safety` and `evaluation_safety` separately; missing historical training
+metadata is reported as null/unknown rather than assumed false.
 The script reports raw D1 arrival, uninterrupted D1 arrival, arrival after an
 ego teleport, any-teleport episodes, collision, timeout, emergency stopping,
 and mean return. `success_rate` means uninterrupted arrival; the clearly labeled
-raw Table IV proxy uses `raw_arrival_rate`. Training retains `train/arrival`
+historical upstream arrival proxy uses `raw_arrival_rate`. Training retains `train/arrival`
 for raw arrivals and adds `train/success`, `train/ego_teleported`, and
 `train/teleported_arrival`. Each episode gets a distinct seed for SUMO and delay sampling, so the
 same checkpoint and evaluation seed reproduce the episode delay sequences.
+
+For a paired safety check, run the following command twice with the **same
+checkpoint and seeds**, changing `--no-safety` to `--safety` and using a different
+output filename. This is an Antwerp evaluation with Table IV-style metrics;
+it does not restore the original scene or resolve the protocol gaps above:
+
+```bash
+python evaluate_sac_delay.py models_experiments/antwerp-step3/full-v2-hard-20k.zip \
+    --scenario hard --delay-mode uniform --ablation full --no-safety \
+    --episodes 500 --seeds 579100 580100 581100 \
+    --output tmp/ai/reproduction-protocol/full-safety-off-formal.json
+```
+
+`--episodes` is per evaluation run. Each run uses consecutive episode seeds;
+overlapping ranges are rejected. The example schedules 1,500 episodes; it is a
+command template, not an experiment already performed. `--seed` remains the
+single-run option and cannot be combined with `--seeds`. Evaluation defaults to
+CPU with one PyTorch thread (`--device` / `--torch-threads` can override this).
+`--output` creates a new report and refuses to overwrite an existing file.
+Reports contain checkpoint SHA-256, training seed/step count, both safety flags,
+each episode's seed/outcome/return, per-run metrics and cross-run summaries.
+The reported `std` uses `ddof=1`; `ci95_half_width` uses the upstream normal
+approximation and is not a guarantee of coverage with only a few runs. Neither
+quantity should be confused with independently trained-model variability.
+The legacy `no_merge_rate` still counts all `Max Steps`; its merged/unmerged
+counts and separate emergency-stop and teleport results remain visible.
+
+Protocol-correction validation used the existing 20k checkpoint (training safety
+off) and the same two Hard seeds, without retraining:
+
+| Seed | Evaluation safety off | Evaluation safety on |
+|---:|---|---|
+| 579081 | Collision, 63.1 s | Merged timeout, 600 s |
+| 579084 | Collision, 359.3 s | Teleported arrival, 580.0 s; success false |
+
+Both settings had zero uninterrupted successes. Safety-off steps and returns
+matched the earlier diagnostic runs. All checkpoint hashes matched before and
+after evaluation. These four episodes validate the independent safety switch
+and accounting, not convergence, a safety guarantee, or a Table IV result.
+All 25 regression tests passed. An additional single-run CLI replay verified
+JSON export and null single-run uncertainty. Artifacts remain in
+`tmp/ai/reproduction-protocol/`. The paired jobs started before the final
+uncertainty correction; `paired-current.json` recomputes only their aggregates
+using the final sample-std/CI implementation and links the unmodified source
+reports. All recorded episode data are preserved.
 
 Numbered checkpoints are saved every 100,000 training steps by default (set
 `--checkpoint_freq` for a short pilot) under
@@ -708,7 +819,9 @@ remained on E78. Additional final-model checks at seed 579081 collided in
 Easy (345.3 s, E82, four lane changes) and Medium (434.0 s, E82, three lane
 changes), also without teleports.
 
-Both checkpoints loaded with the matching version/safety/ablation contract.
+Both checkpoints loaded with matching version/ablation and safety off. At that
+time the evaluator also required training and evaluation safety to match; that
+restriction was later removed as described in the reproduction protocol.
 All final policy parameters and recorded actor/critic/entropy losses were
 finite, and all 13 regression tests passed. This verifies training and
 evaluation execution; it does not establish policy convergence or safety.
@@ -880,7 +993,9 @@ The Antwerp evaluation entry point requires a freshly trained version 2 model.
 
 ## Results
 
-Performance on Hard traffic mode (1,374–1,490 vph/lane) with random delays up to 2.0s:
+Historical upstream results on Hard traffic (1,374–1,490 vph/lane), with delays
+up to 2.0 s. These tables are not measurements from the Antwerp migration;
+uncertainty values are reproduced as reported by upstream.
 
 | Method | Success (%) | Collision (%) | Avg. Return |
 |---|---|---|---|
