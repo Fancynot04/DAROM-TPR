@@ -48,6 +48,12 @@ def target_lane_line(ego_id, direction):
 
 
 def safetyCheck(action, state, delayed, mode, target_line=None):
+    """Check neighbors and lane geometry expressed in a common ego frame.
+
+    SafetyWrapper supplies time-aligned snapshots with delayed=False. The
+    legacy delayed=True path only predicts longitudinal motion within an
+    unchanged frame and must not be used for raw Antwerp delayed packets.
+    """
     min_gap = 10.0
     min_acc = -5
     dt = 0.1  # time step in seconds (from SUMO config)
@@ -160,8 +166,7 @@ def safetyCheck(action, state, delayed, mode, target_line=None):
     info['target_lane'] = target_lane
     
     if front_vehicle_state is not None:
-        # front_vehicle_state[2] is relative velocity: vehVel_front - egoVel
-        # Absolute front vehicle speed:
+        # Neighbor velocity and ego speed share the current forward axis.
         front_speed = ego_speed + front_vehicle_state[2]
         # By definition: relative_speed = ego_speed - veh_speed
         # Positive when ego is faster and is closing in on the front vehicle.
@@ -191,8 +196,7 @@ def safetyCheck(action, state, delayed, mode, target_line=None):
             return [-5, 0], info
 
     if back_vehicle_state is not None:
-        # back_vehicle_state[2] is relative velocity: vehVel_back - egoVel
-        # Absolute back vehicle speed:
+        # This is the neighbor velocity projected onto ego's forward axis.
         back_speed = ego_speed + back_vehicle_state[2]
         # By definition: relative_speed = ego_speed - veh_speed
         # For a vehicle behind, we care when it is faster than ego,

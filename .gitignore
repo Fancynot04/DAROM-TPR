@@ -13,6 +13,7 @@
 !/sumo_files/
 !/sumo_new/
 !/models/
+!/tests/
 
 # Only the two distributed pretrained models are allowed under models/.
 /models/*

@@ -1,4 +1,3 @@
-import math
 import os, sys
 import numpy as np
 from pathlib import Path
@@ -6,6 +5,7 @@ from pathlib import Path
 import gymnasium as gym
 from gymnasium import spaces
 from .utils import *
+from .geometry import TrafficSnapshot, driving_axes, world_velocity
 
 
 maxSteps = 6000
@@ -14,6 +14,7 @@ EGO_DEPART_TIME = 120.0
 EGO_DEPARTURE_DEADLINE = 1200.0
 SUMO_STEP_LENGTH = 0.1
 LANE_CHANGE_EDGES = frozenset(('E75', 'E76', 'E77', 'E78', 'E82'))
+ANTWERP_ENV_VERSION = 2
 
 if 'SUMO_HOME' in os.environ:
     tools = os.path.join(os.environ['SUMO_HOME'], 'tools')
@@ -73,6 +74,11 @@ class Merging(gym.Env):
         self.radius = radius
         self.size = 31
         self.merged = False
+        self.ego_teleported = False
+        self.ego_teleporting = False
+        self.ego_on_road = False
+        self.teleport_transition = False
+        self.observation_snapshot = None
         self.lane_id = ''
         self.lane_name = ''
         self.lane_idx = 0
@@ -114,6 +120,11 @@ class Merging(gym.Env):
         self._seed_initialized = True
         sumo_seed = int(self.np_random.integers(0, 2**31 - 1))
         self.merged = False
+        self.ego_teleported = False
+        self.ego_teleporting = False
+        self.ego_on_road = False
+        self.teleport_transition = False
+        self.observation_snapshot = None
         self.given_merge_reward = False
         self.done = False
         self.ego_inserted = False
@@ -157,6 +168,7 @@ class Merging(gym.Env):
                     self.ego_id = vehicle_name
                     self.ego_depart_time = traci.simulation.getTime()
                     self.ego_inserted = True
+                    self.ego_on_road = True
                     self.observation = np.asarray(self._get_obs(), dtype=np.float32)
         if not self.ego_inserted:
             traci.close()
@@ -170,8 +182,10 @@ class Merging(gym.Env):
         # print(self.egoIdx)
         # print('action', action, 'safe_action', safe_action)
         # print(self.state[self.egoIdx])
-        # Use ego x-position delta only to produce a scalar distance traveled
+        # Teleport jumps and time outside the road must not earn progress.
         distance_traveled = float(self.observation[self.egoIdx, 0] - self.state[self.egoIdx, 0])
+        if self.teleport_transition or not self.ego_on_road:
+            distance_traveled = 0.0
         # print(distance_traveled)
         r = -0.30
         base_penalty = -0.30
@@ -217,13 +231,13 @@ class Merging(gym.Env):
             r -= collision_penalty
         elif self.ego_id in traci.simulation.getArrivedIDList():
             print("Arrived")
-            arrived_reward = 500
+            arrived_reward = 0 if self.ego_teleported else 500
             r += arrived_reward
         elif self.ego_id in traci.simulation.getEmergencyStoppingVehiclesIDList():
             print("Emergency Stopping")
             emergency_stopping_penalty = 1000
             r -= emergency_stopping_penalty
-        elif self.merged and not self.given_merge_reward:
+        elif self.merged and not self.given_merge_reward and not self.ego_teleported:
             print("Merge reward given.")
             self.given_merge_reward = True
             merge_reward = 500
@@ -259,9 +273,8 @@ class Merging(gym.Env):
         # Express surrounding vehicles in the ego's local driving direction.
         egoPos = traci.vehicle.getPosition(self.ego_id)
         egoVel = traci.vehicle.getSpeed(self.ego_id)
-        angle = math.radians(traci.vehicle.getAngle(self.ego_id))
-        forward = (math.sin(angle), math.cos(angle))
-        left = (-forward[1], forward[0])
+        ego_angle = traci.vehicle.getAngle(self.ego_id)
+        forward, left = driving_axes(ego_angle)
         ego = [[traci.vehicle.getDistance(self.ego_id),
                 traci.vehicle.getLaneIndex(self.ego_id), egoVel]]
 
@@ -280,11 +293,12 @@ class Merging(gym.Env):
             distance = getDistance(vehPos, egoPos) # distance between vehicle and ego everything is absolute coordinates.
             if distance <= self.radius:
                 vehVel = traci.vehicle.getSpeed(vehID)
+                velocity = world_velocity(vehVel, traci.vehicle.getAngle(vehID))
                 dx, dy = vehPos[0] - egoPos[0], vehPos[1] - egoPos[1]
                 relState = [dx * forward[0] + dy * forward[1],
-                            dx * left[0] + dy * left[1], vehVel - egoVel]
+                            dx * left[0] + dy * left[1], float(velocity @ forward) - egoVel]
                 # print('Distance is less than radius', distance, 'for vehicle', vehID, 'relState', relState)
-                intruders.append(relState)
+                intruders.append((relState, vehPos, velocity))
                 # Determine if ahead or behind by x position relative to ego
                 if relState[0] > 0 and abs(relState[1]) <= 1.6:  # same lane, ahead
                     if relState[0] < min_ahead_dist:
@@ -297,8 +311,20 @@ class Merging(gym.Env):
         self._ahead_state = closest_ahead if closest_ahead is not None else [0.0, 0.0, 0.0]
         self._behind_state = closest_behind if closest_behind is not None else [0.0, 0.0, 0.0]
         # Keep the nearest neighbors before applying the existing spatial order.
-        intruders = sorted(intruders, key=lambda x: x[0] ** 2 + x[1] ** 2)[:self.num_entities - 1]
-        intruders = sorted(intruders, key=lambda x: (x[1], x[0]))
+        intruders = sorted(intruders, key=lambda x: x[0][0] ** 2 + x[0][1] ** 2)[:self.num_entities - 1]
+        intruders = sorted(intruders, key=lambda x: (x[0][1], x[0][0]))
+        positions = np.zeros((self.num_entities - 1, 2))
+        velocities = np.zeros_like(positions)
+        valid = np.zeros(self.num_entities - 1, dtype=bool)
+        for index, (_, position, velocity) in enumerate(intruders):
+            positions[index] = position
+            velocities[index] = velocity
+            valid[index] = True
+        self.observation_snapshot = TrafficSnapshot(
+            traci.simulation.getTime(), np.asarray(egoPos), ego_angle,
+            positions, velocities, valid,
+        )
+        intruders = [entry[0] for entry in intruders]
         
     
         while len(intruders) < self.num_entities - 1:
@@ -320,68 +346,75 @@ class Merging(gym.Env):
                 traci.vehicle.changeLane(self.ego_id, target, 0)
 
     def step(self, action):
+        if self.done:
+            raise RuntimeError('Call reset() before stepping a finished episode')
         terminated = False
         truncated = False
         info = {'message': ''}
-        self.lane_id = traci.vehicle.getLaneID(self.ego_id)
-        self.lane_name = traci.vehicle.getRoadID(self.ego_id)
-        self.lane_idx = traci.vehicle.getLaneIndex(self.ego_id)
-
-
+        was_on_road = self.ego_on_road
+        if was_on_road:
+            self.lane_id = traci.vehicle.getLaneID(self.ego_id)
+            self.lane_name = traci.vehicle.getRoadID(self.ego_id)
+            self.lane_idx = traci.vehicle.getLaneIndex(self.ego_id)
         parsed_action = parseAction(action)
         self.action = action
-        if self.runSafetyCheck:
+        if self.runSafetyCheck and was_on_road:
             from .safety_controller import safetyCheck, target_lane_line
             target_line = target_lane_line(self.ego_id, parsed_action[1])
             self.action, _ = safetyCheck(action, self.observation, False, 'all', target_line)
             parsed_action = parseAction(self.action)
 
-        if not self.done:
+        if was_on_road:
             self._apply_lane_change(parsed_action[1])
-
-            for vehicle_name in traci.simulation.getDepartedIDList():
-                SetTrafficBehavior(vehicle_name)
             traci.vehicle.setAcceleration(self.ego_id, parsed_action[0], 1)
             if traci.vehicle.getSpeed(self.ego_id) > 32:
                 traci.vehicle.setSpeed(self.ego_id, 32)
-            self.counter += 1
-            traci.simulationStep()
+        for vehicle_name in traci.simulation.getDepartedIDList():
+            SetTrafficBehavior(vehicle_name)
+        self.counter += 1
+        traci.simulationStep()
 
-            if self.ego_id in traci.vehicle.getIDList():
-                self.lane_id = traci.vehicle.getLaneID(self.ego_id)
-                self.lane_name = traci.vehicle.getRoadID(self.ego_id)
-                self.lane_idx = traci.vehicle.getLaneIndex(self.ego_id)
-            self.parsed_action = parsed_action
-            if self._has_merged() and not self.merged:
-                print('Merged')
+        started = self.ego_id in traci.simulation.getStartingTeleportIDList()
+        ended = self.ego_id in traci.simulation.getEndingTeleportIDList()
+        self.ego_teleported |= started or ended
+        if started:
+            self.ego_teleporting = True
+        if ended:
+            self.ego_teleporting = False
+        self.ego_on_road = (self.ego_id in traci.vehicle.getIDList()
+                            and not self.ego_teleporting)
+        self.teleport_transition = started or ended or not was_on_road
+        self.parsed_action = parsed_action
+        if self.ego_on_road:
+            self.lane_id = traci.vehicle.getLaneID(self.ego_id)
+            self.lane_name = traci.vehicle.getRoadID(self.ego_id)
+            self.lane_idx = traci.vehicle.getLaneIndex(self.ego_id)
+            if self.teleport_transition:
+                SetTrafficBehavior(self.ego_id)
+            if self._has_merged():
                 self.merged = True
+        else:
+            self._ahead_state = self._behind_state = [0.0, 0.0, 0.0]
 
-            if self.ego_id in traci.simulation.getCollidingVehiclesIDList():
-                info['message'] = 'Collision'
-                terminated = True
-                self.done = True
-                self.observation = self.state
-            elif self.ego_id in traci.simulation.getArrivedIDList():
-                terminated = True
-                self.done = True
-                self.observation = self.state
-                info['message'] = 'Arrived'
-            elif self.counter >= maxSteps:
-                print('Terminating episode since it exceeded maximum time.')
-                info['message'] = 'Max Steps'
-                truncated = True
-                self.done = True
-                self.observation = np.asarray(self._get_obs(), dtype=np.float32)
-                
-            elif self.ego_id in traci.simulation.getEmergencyStoppingVehiclesIDList():
-                self.done = True
-                terminated = True
-                info['message'] = 'Emergency Stopping'
-                self.observation = np.asarray(self._get_obs(), dtype=np.float32)
-                
-            else:
-                self.observation = np.asarray(self._get_obs(), dtype=np.float32)
-               
+        if self.ego_id in traci.simulation.getCollidingVehiclesIDList():
+            info['message'] = 'Collision'
+            terminated = True
+        elif self.ego_id in traci.simulation.getArrivedIDList():
+            info['message'] = 'Arrived'
+            terminated = True
+        elif self.counter >= maxSteps:
+            info['message'] = 'Max Steps'
+            truncated = True
+        elif self.ego_id in traci.simulation.getEmergencyStoppingVehiclesIDList():
+            info['message'] = 'Emergency Stopping'
+            terminated = True
+        self.done = terminated or truncated
+        if self.ego_on_road and info['message'] != 'Collision':
+            self.observation = self._get_obs()
+        else:
+            # Teleport buffers have no physical position to query or control.
+            self.observation = self.state.copy()
+            self.observation_snapshot = None
         self.reward = self.getReward()
         self.state = self.observation.copy()
         self.last_acc = self.parsed_action[0]
@@ -391,7 +424,12 @@ class Merging(gym.Env):
             except Exception:
                 pass
         
-        info.update({'lane': self.lane_id, 'action': action, 'merged': bool(self.merged)})
+        info.update({'lane': self.lane_id, 'action': action, 'merged': bool(self.merged),
+                     'ego_teleported': bool(self.ego_teleported),
+                     'ego_teleporting': bool(self.ego_teleporting),
+                     'ego_on_road': bool(self.ego_on_road),
+                     'teleport_started': started, 'teleport_ended': ended,
+                     'is_success': info['message'] == 'Arrived' and not self.ego_teleported})
         return self.observation, float(self.reward), terminated, truncated, info
 
 

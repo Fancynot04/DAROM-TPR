@@ -17,7 +17,7 @@ from src.delay_encoder import DelayAwareEncoder, DelayAwareGRUEncoder, TinyTrans
 import wandb
 from wandb.integration.sb3 import WandbCallback
 
-from src.merging import Merging
+from src.merging import ANTWERP_ENV_VERSION, Merging
 from src.wrapper import ABLATION_MODES, DelayWrapper
 
 class EpisodeRewardCallback(BaseCallback):
@@ -48,6 +48,9 @@ class EpisodeRewardCallback(BaseCallback):
                 'train/mean_episode_reward': np.mean(self.episode_rewards),
                 'train/mean_episode_length': np.mean(self.episode_lengths),
                 'train/arrival': int(outcome == 'Arrived'),
+                'train/success': int(info['is_success']),
+                'train/ego_teleported': int(info['ego_teleported']),
+                'train/teleported_arrival': int(outcome == 'Arrived' and info['ego_teleported']),
                 'train/collision': int(outcome == 'Collision'),
                 'train/emergency_stopping': int(outcome == 'Emergency Stopping'),
                 'train/no_merge_timeout': int(outcome == 'Max Steps' and not merged),
@@ -212,6 +215,8 @@ def main():
         except Exception as e:
             warnings.warn(f"Failed to load model at {args.load_path}: {e}")
         else:
+            if getattr(loaded_model, 'antwerp_env_version', None) != ANTWERP_ENV_VERSION:
+                raise ValueError('Loaded model uses an older Antwerp observation/reward contract; retrain it')
             if (hasattr(loaded_model, 'ablation') and
                     loaded_model.ablation != args.ablation):
                 raise ValueError('Loaded model ablation does not match --ablation')
@@ -222,6 +227,7 @@ def main():
             print(f"Loaded model from {args.load_path}")
 
     model.ablation = args.ablation
+    model.antwerp_env_version = ANTWERP_ENV_VERSION
     model.training_safety = args.use_safety
 
     ensure_dirs(args.save_dir)

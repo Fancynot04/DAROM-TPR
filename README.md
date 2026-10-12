@@ -18,14 +18,18 @@ Experiments in SUMO using real-world NGSIM traffic data show DAROM-GRU achieves 
 ## Repository Structure
 
 ```
-DAROM/
+DAROM-TPR/
 ├── src/
 │   ├── merging.py           # SUMO-based merging environment (gymnasium)
 │   ├── wrapper.py           # DelayWrapper — RDMDP state augmentation
 │   ├── delay_encoder.py     # Delay-Aware Encoder (MLP / GRU / Transformer)
 │   ├── safety_controller.py # Physics-based safety controller
+│   ├── geometry.py          # Captured traffic geometry and frame/time alignment
+│   ├── diagnostics.py       # Full-episode rule diagnostics and per-step traces
 │   └── utils.py             # Shared utilities
 ├── sumo_files/              # SUMO network and route files (Easy/Medium/Hard)
+├── sumo_new/                # Antwerp network and three demand scenarios
+├── tests/                   # Persistent regression and opt-in SUMO checks
 ├── models/
 │   └── GRU-uniform-delay/   # Pretrained DAROM-GRU checkpoint
 ├── train_sac_delay.py       # Training script
@@ -37,7 +41,7 @@ DAROM/
 ## Git Submission Policy
 
 The root `.gitignore` uses an allowlist. Only `src/`, `assets/`,
-`sumo_files/`, `sumo_new/`, `models/`, and the explicitly listed root files
+`sumo_files/`, `sumo_new/`, `models/`, `tests/`, and the explicitly listed root files
 are eligible for new Git tracking. New root files or directories must be
 added to the allowlist intentionally. Under `models/`, only the two existing
 pretrained checkpoints in `GRU-uniform-delay/` are allowed.
@@ -110,13 +114,19 @@ route files with the timing and lateral settings of `Antwerp.sumocfg`,
 without detector outputs. The observation uses ego route distance, lane
 index, and speed, with nearby vehicle positions expressed in the ego's
 forward/left frame. Reward gaps and current-state safety checks use these
-local positions; relative-speed projection and delayed-frame alignment remain
-pending. Lane changes are
+local positions. Neighbor relative speed is the neighbor's world velocity
+projected onto ego's forward axis minus ego speed. Delayed safety uses captured
+world positions/velocity vectors and timestamps to predict neighbors at constant
+velocity, then transforms them into the current ego frame before lane filtering.
+Only current ego pose/state is used; current neighbor data is not read by that
+prediction. Lane changes are
 bounded by each Antwerp edge's actual lane count; merging is
 recognized when ego leaves `E75_0` for a mainline lane or reaches `E76`.
 The existing pretrained policy must be retrained for this observation layout.
 The task is for ego to merge safely and reach D1 before the episode limit;
-collision, emergency stopping, and timeout are failures. Background queues
+collision, emergency stopping, timeout, and any ego teleport exclude task success.
+Raw `Arrived` remains available as a separate historical comparison metric.
+Background queues
 are recorded as scenario conditions, not optimized away by changing traffic
 demand or network throughput. The existing network speed limit is 13.89 m/s
 and remains unchanged for this stage.
@@ -150,12 +160,17 @@ GRU input. Missing action-history or delay fields are zeroed; the linear
 predictor advances each neighbor's relative longitudinal position by its
 relative velocity times the received delay and exposes no history or delay to
 the policy. This keeps the architecture fixed while changing available
-information. The safety controller still receives the unmasked delayed state.
+information. Safety receives the same unmasked captured-neighbor metadata for
+every ablation; its packet also retains full world velocity vectors, unlike
+the policy's three values per vehicle. This extra safety input must be stated
+when reporting experiments with `--safety`. Policy input dimensions and the
+linear predictor's longitudinal-only extrapolation remain unchanged.
 Use the same `--safety` setting for all five runs and pass the matching
 `--ablation` value to independent evaluation. Training and evaluation both
 default to `full`, with safety disabled. New checkpoints store these two
-settings, and evaluation rejects a mismatch. Legacy checkpoints without the
-stored settings need manual matching.
+settings and `antwerp_env_version=2`, and evaluation rejects a mismatch.
+Checkpoints predating the velocity/reward corrections must be retrained;
+training resume and evaluation reject a missing or different environment version.
 
 ## Antwerp migration checklist
 
@@ -175,9 +190,9 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
 - [x] Express positions of up to 30 neighbors in ego-forward/left local
   coordinates; use route distance for ego progress. Adapt lane-change bounds,
   merge recognition, reward gaps, and safety checks to the Antwerp observation
-  layout. This completes the position-frame conversion only: neighbor relative
-  speed is still the difference of scalar speeds rather than a projection of
-  both velocity vectors onto ego's forward direction.
+  layout. Relative speed now projects the neighbor velocity onto ego's forward
+  axis before subtracting ego speed; regression cases cover parallel, crossing,
+  and opposing traffic.
 - [x] Select the nearest 30 vehicles within the observation radius before
   applying the existing left/forward spatial order. Hard traffic reached 37
   candidates in a full probe; a separate 2,501-step run verified the selected
@@ -200,9 +215,9 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   The merged/unmerged timeout split remains diagnostic because the Antwerp route
   continues beyond the merge. Emergency stopping stays separate and is not
   silently folded into the paper's three rates; if it occurs, those rates need
-  not sum to 100%. This is the raw paper proxy, not yet the uninterrupted
-  O3-to-D1 task-success metric: the current `Arrived` count includes an ego
-  that was teleported earlier in its episode.
+  not sum to 100%. This raw proxy is reported separately from uninterrupted
+  O3-to-D1 task success. `Arrived` includes arrivals after teleportation;
+  `success_rate` excludes them and `raw_arrival_rate` preserves the raw proxy.
 - [x] Adapt the safety controller's target-lane filter to Antwerp geometry.
   It now projects the selected lane centerline into ego's local frame for both
   lane changes and lane keeping, accounting for lateral movement and heading.
@@ -210,10 +225,16 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   eliminated the observed misses of `E75_1` vehicles during the O3 merge;
   fixed-action comparisons reached a mainline lane with `--safety` in all
   three scenarios before ego lane-mode restoration and again under lane
-  mode 0. The delayed safety path still compares older neighbor coordinates
-  with a lane line constructed in the current ego frame; it has not been
-  validated when ego changes lanes or heading during the delay. These probes
-  do not establish a trained policy's safety.
+  mode 0. The corrected delayed safety path predicts all captured neighbors
+  before lane filtering and aligns them with the current ego frame. Regression
+  cases cover lateral movement, rotation, changing neighbor order, packet age,
+  padding, and out-of-order packets. These checks do not establish a trained
+  policy's safety or constant-velocity prediction accuracy in real maneuvers.
+- [x] Track ego teleport start/end events for the entire episode. Teleport
+  buffers skip ego control and position queries. Arrival/merge bonuses are
+  disabled after a teleport; progress reward is suppressed during teleport
+  transitions and off-road steps. Raw arrivals, uninterrupted arrivals, and
+  episodes with any ego teleport are logged separately.
 - [x] Connect the five Table IV input ablations to Hard-scenario training and
   independent evaluation. All retain the GRU input shape and separate safety
   input; five 3-step training and evaluation smoke runs loaded their matching
@@ -292,24 +313,10 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
 
 **Pending work**
 
-- [ ] Before formal experiments, track whether ego has teleported during an
-  episode and report uninterrupted D1 arrival separately from raw `Arrived`.
-  Both the environment's arrival reward and the training/evaluation success
-  counters currently use raw `Arrived`. In one reproduced wrong-lane teleport,
-  route distance rose only 4.201 m at the event and step reward was 0.547;
-  the later `Arrived` still received about 50 scaled reward. Check other
-  teleport modes before concluding route-progress rewards are unaffected.
-- [ ] Project neighboring vehicle velocity onto ego's forward direction when
-  constructing relative speed, and validate this on differing-heading road
-  segments. The scalar speed difference currently used can be wrong on ramps,
-  curves, and junctions; linear prediction and safety approach-speed checks
-  inherit that error.
-- [ ] Validate delayed safety input after ego lateral movement or a heading
-  change, then align neighbor coordinates and target-lane geometry to a common
-  frame/time before claiming complete safety-controller adaptation. A
-  constructed 3.2 m lateral-move case with a vehicle 5 m ahead was marked
-  safe using stale neighbor coordinates and unsafe using current coordinates;
-  this confirms the frame mismatch but not its rate in full TraCI episodes.
+- [ ] Measure the remaining constant-velocity prediction error during neighbor
+  acceleration/turning and crossing-junction conflicts in complete episodes.
+  Coordinate alignment does not provide a collision guarantee. The policy's
+  `linear_predictor` ablation is still longitudinal-only in the captured frame.
 - [ ] Evaluate the trained Antwerp policy with `--safety` before claiming a
   collision reduction. The fixed-action probes cover merge behavior, not
   complete policy episodes or all delayed-observation cases.
@@ -361,6 +368,10 @@ completed after reset. A SUMO probe reproduced the same 12 delay draws after
 resetting twice with one seed and a different sequence after changing it.
 These are interface checks, not evidence of training
 convergence or task success.
+
+The pilot and trajectory results below predate environment version 2. They
+remain historical diagnostics; the corrected observation, safety input, and
+reward contract requires new training before reporting model performance.
 
 A Hard/uniform/no-safety pilot with seed 579071 trained each Table IV input
 variant for 256 steps (156 SAC updates). One complete independent episode per
@@ -530,8 +541,12 @@ python evaluate_sac_delay.py \
 
 Pass `--safety` only when evaluating a run trained with the safety controller.
 Pass the same `--ablation` value used to train that checkpoint.
-The script reports D1 arrival, collision, timeout, emergency stopping, and mean
-return. Each episode gets a distinct seed for SUMO and delay sampling, so the
+The script reports raw D1 arrival, uninterrupted D1 arrival, arrival after an
+ego teleport, any-teleport episodes, collision, timeout, emergency stopping,
+and mean return. `success_rate` means uninterrupted arrival; the clearly labeled
+raw Table IV proxy uses `raw_arrival_rate`. Training retains `train/arrival`
+for raw arrivals and adds `train/success`, `train/ego_teleported`, and
+`train/teleported_arrival`. Each episode gets a distinct seed for SUMO and delay sampling, so the
 same checkpoint and evaluation seed reproduce the episode delay sequences.
 
 Numbered checkpoints are saved every 100,000 training steps under
@@ -539,11 +554,85 @@ Numbered checkpoints are saved every 100,000 training steps under
 `models_experiments/<run_name>.zip` at training completion. Neither is marked
 "best" until independent evaluation compares them.
 
+## Version 2 staged validation
+
+Step 1 (2026-10-12) completed a 12-episode matrix with the corrected environment:
+three densities, seeds 579071/579074, and safety off/on. All runs used the
+production 6,000-step limit, traffic demand, speed mode 31 and ego lane mode 0.
+The diagnostic rule reads current neighbor observations and an explicit fixed
+target-lane map (`E75:1`, `E76:2`, `E77:3`, `E78:2`, `E82:3`). Its headway is
+1.8 s; the optional safety wrapper receives uniform-delay packets as usual.
+This is a new, reproducible engineering rule, not the earlier temporary script
+or a fair RL comparator. It is not a trained model.
+
+| Scenario | Seed | Safety off | Safety on |
+|---|---:|---|---|
+| Easy | 579071 | Arrived, 188.8 s | Arrived, 188.9 s |
+| Easy | 579074 | Arrived, 189.4 s | Arrived, 189.4 s |
+| Medium | 579071 | Arrived, 222.0 s | Arrived, 222.0 s |
+| Medium | 579074 | Arrived, 205.2 s | Arrived, 204.6 s |
+| Hard | 579071 | Collision, 63.8 s | Collision, 119.1 s |
+| Hard | 579074 | Collision, 54.3 s | Collision, 111.2 s |
+
+Times are after ego takeover. None of these 12 episodes teleported. All ended
+through the environment's terminal API, with finite observations/rewards and
+consistent task-success flags. Easy/Medium had eight uninterrupted arrivals;
+Hard had four collisions, including both safety-enabled runs. Completing this
+validation establishes episode accounting, not collision-free control or a
+success-rate estimate. The 11 regression and 3 SUMO integration tests also passed.
+
+To reproduce (choose a new output directory; existing case folders are refused):
+
+```bash
+python -m src.diagnostics --scenarios easy medium hard \
+    --seeds 579071 579074 --safety-modes off on \
+    --output-dir tmp/ai/antwerp-step1-repeat
+```
+
+Each case writes `trace.csv` and `summary.json`, including desired and applied
+lane commands, actual within-edge lane transitions, leader gaps/speeds,
+per-lane stopped time, teleport events and outcomes. Repeated lane commands
+are not counted as successful lane changes. Outputs from this run remain in
+`tmp/ai/antwerp-step1/` and are excluded from Git. Hard failure diagnosis and
+fresh version 2 training are the next stages; formal input ablations are outside
+this staged validation.
+
+## Regression validation
+
+Use an existing Python environment with `requirements.txt` installed and
+`SUMO_HOME` configured. These tests use standard-library `unittest` and add
+no dependencies:
+
+```bash
+python -m unittest discover -s tests -p 'test_antwerp_contract.py' -v
+python -m tests.test_sumo_integration -v
+```
+
+The second command requires SUMO and local TraCI sockets. Ordinary unittest
+discovery skips those integration tests. The version 2 correction passed all
+11 regression tests and 3 integration tests on SUMO 1.18.0. Coverage includes
+five policy input ablations sharing the same delayed safety data, lateral and
+heading changes, stale/out-of-order packets, buffer reinsertion, separate
+arrival metrics, legacy-checkpoint rejection, and 125 control steps with
+safety enabled in each of Easy/Medium/Hard.
+
+The integration arrival/teleport fixtures reposition ego and temporarily
+shorten the teleport timeout only inside the tests. They reproduced an actual
+wrong-lane teleport, verified loss of the arrival bonus and task-success flag,
+and verified clean reset. They do not measure end-to-end driving success;
+production routes, demand, teleport settings, and episode limits are unchanged.
+The buffer handling follows SUMO's documented
+[teleport lifecycle](https://sumo.dlr.de/docs/Simulation/Why_Vehicles_are_teleporting.html).
+Training/evaluation under version 2 and full-episode delayed-safety performance
+remain to be measured. Constant-velocity prediction cannot account for unseen
+neighbor acceleration or turns.
+
 ## Pretrained Model
 
 A pretrained DAROM-GRU checkpoint is provided in `models/GRU-uniform-delay/`. The model was trained exclusively on the uniform delay distribution and evaluated zero-shot on all five distributions.
 
-Use `GRU-uniform-delay_best` for evaluation.
+These are historical upstream checkpoints, not Antwerp version 2 models.
+The Antwerp evaluation entry point requires a freshly trained version 2 model.
 
 ## Results
 

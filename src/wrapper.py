@@ -7,6 +7,7 @@ from collections import deque
 from .utils import flatten, PredictorDataset, fine_tune_predictor, getDistance
 from .safety_controller import safetyCheck, target_lane_line
 from .merging import parseAction
+from .geometry import align_delayed_neighbors
 # from state_predictor import predictor_infer, load_predictor
 import torch
 ABLATION_MODES = ('full', 'delayed_state_only', 'delayed_state_delay',
@@ -94,6 +95,7 @@ class DelayWrapper(ObservationWrapper):
             self._delay_rng = np.random.default_rng(sequence)
         self.current_observation_delay = 0
         self.last_observation = self.obs
+        self.last_snapshot = self.env.observation_snapshot
         self.delay_of_received_observation = 0
         self.delay_of_last_observation = 0
         self.congested = False  # reset bursty state
@@ -180,11 +182,15 @@ class DelayWrapper(ObservationWrapper):
         # self.d = self.max_delay
         self.action_history.pop()
         self.action_history.appendleft(self.env.action)
-        self.observation_history[-self.current_observation_delay-1] = {'observation': self.obs, 'delay': self.current_observation_delay}   
+        snapshot = self.env.observation_snapshot
+        self.observation_history[-self.current_observation_delay-1] = {
+            'observation': self.obs.copy() if snapshot is not None else np.zeros(self.orig_shape),
+            'delay': self.current_observation_delay, 'snapshot': snapshot,
+        }
         received_obsWithDelay = self.observation_history.pop()
         received_obs = received_obsWithDelay['observation']
         self.delay_of_received_observation = received_obsWithDelay['delay']
-        self.observation_history.appendleft({'observation': np.zeros(self.orig_shape[0]), 'delay': 0})
+        self.observation_history.appendleft({'observation': np.zeros(self.orig_shape), 'delay': 0})
         # print('Received observation:', received_obs)
         # print('Received observation:', received_obs)
         first_if_statement = not received_obs.any()
@@ -195,6 +201,10 @@ class DelayWrapper(ObservationWrapper):
         if if_statement:
             received_obs = self.last_observation
             self.delay_of_received_observation = self.delay_of_last_observation + 1
+        else:
+            self.last_snapshot = received_obsWithDelay['snapshot']
+        # Updating the current ego must not mutate captured packets or env.state.
+        received_obs = received_obs.copy()
         self.last_observation = received_obs
         self.delay_of_last_observation = self.delay_of_received_observation
         received_obs[0][:] = self.env.observation[0][:] #ego state is not affected by delay
@@ -219,11 +229,21 @@ class DelayWrapper(ObservationWrapper):
         else:
             raise ValueError(f"Invalid mode: {self.mode}")
 
+    def safety_observation(self):
+        return align_delayed_neighbors(
+            self.last_snapshot, self.env.observation_snapshot, self.env.observation[0],
+        )
+
 class SafetyWrapper(ActionWrapper):
     def __init__(self, env):
         super().__init__(env)
 
     def action(self, action):
+        if not self.env.env.ego_on_road:
+            return action
         target_line = target_lane_line(self.env.env.ego_id, parseAction(action)[1])
-        action, safety_info = safetyCheck(action, self.env.newX, True, 'all', target_line)
+        # All captured neighbors are predicted and aligned before lane filtering.
+        # They already refer to the current instant: do not extrapolate twice.
+        action, safety_info = safetyCheck(action, self.env.safety_observation(),
+                                        False, 'all', target_line)
         return action

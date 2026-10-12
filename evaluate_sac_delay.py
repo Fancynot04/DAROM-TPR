@@ -6,12 +6,13 @@ from collections import Counter
 import numpy as np
 from stable_baselines3 import SAC
 
-from src.merging import Merging
+from src.merging import ANTWERP_ENV_VERSION, Merging
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
 OUTCOMES = ('Arrived', 'Collision', 'Max Steps', 'Emergency Stopping')
 TIMEOUT_DETAILS = ('No Merge Timeout', 'Merged Timeout')
+ARRIVAL_DETAILS = ('Uninterrupted Arrived', 'Teleported Arrived', 'Ego Teleported')
 
 
 def make_env(seed, scenario, delay_mode, safety, ablation):
@@ -22,6 +23,8 @@ def make_env(seed, scenario, delay_mode, safety, ablation):
 
 
 def validate_checkpoint_setup(model, ablation, safety):
+    if getattr(model, 'antwerp_env_version', None) != ANTWERP_ENV_VERSION:
+        raise ValueError('Checkpoint uses an older Antwerp observation/reward contract; retrain it')
     if hasattr(model, 'ablation') and model.ablation != ablation:
         raise ValueError(f'Checkpoint ablation={model.ablation!r}, requested {ablation!r}')
     if hasattr(model, 'training_safety') and model.training_safety != safety:
@@ -41,13 +44,20 @@ def evaluate(model, env, episodes, seed):
             if terminated or truncated:
                 outcome = info.get('message', 'Unknown')
                 counts[outcome] += 1
+                teleported = bool(info['ego_teleported'])
+                counts['Ego Teleported'] += int(teleported)
+                if outcome == 'Arrived':
+                    counts['Teleported Arrived' if teleported else 'Uninterrupted Arrived'] += 1
                 if outcome == 'Max Steps':
                     counts['Merged Timeout' if info.get('merged') else 'No Merge Timeout'] += 1
                 returns.append(episode_return)
                 break
     return {**{outcome: counts[outcome] for outcome in OUTCOMES},
             **{outcome: counts[outcome] for outcome in TIMEOUT_DETAILS},
-            'success_rate': 100 * counts['Arrived'] / episodes,
+            **{outcome: counts[outcome] for outcome in ARRIVAL_DETAILS},
+            'success_rate': 100 * counts['Uninterrupted Arrived'] / episodes,
+            'raw_arrival_rate': 100 * counts['Arrived'] / episodes,
+            'ego_teleport_rate': 100 * counts['Ego Teleported'] / episodes,
             'collision_rate': 100 * counts['Collision'] / episodes,
             'no_merge_rate': 100 * counts['Max Steps'] / episodes,
             'emergency_stopping_rate': 100 * counts['Emergency Stopping'] / episodes,
@@ -81,8 +91,11 @@ def main():
         print(f'{outcome}: {result[outcome]}/{args.episodes} ({result[outcome] / args.episodes:.1%})')
     for outcome in TIMEOUT_DETAILS:
         print(f'  {outcome}: {result[outcome]}/{args.episodes} ({result[outcome] / args.episodes:.1%})')
-    print('Table IV rates (No Merge = all Max Steps): '
-          f"success={result['success_rate']:.2f}%, "
+    for outcome in ARRIVAL_DETAILS:
+        print(f'{outcome}: {result[outcome]}/{args.episodes} ({result[outcome] / args.episodes:.1%})')
+    print(f"Task success (no ego teleport): {result['success_rate']:.2f}%")
+    print('Raw Table IV proxy (includes teleported arrivals; No Merge = all Max Steps): '
+          f"arrival={result['raw_arrival_rate']:.2f}%, "
           f"collision={result['collision_rate']:.2f}%, "
           f"no-merge={result['no_merge_rate']:.2f}%")
     print(f"Emergency stopping (separate): {result['emergency_stopping_rate']:.2f}%")
