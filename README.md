@@ -302,6 +302,9 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   ended with an ego emergency stop on `E77_0`; its per-step lane actions were not
   recorded, so the source of that lane choice is unknown. Keep emergency stops
   separate from collision and timeout counts.
+- [ ] Distinguish ego teleportation from an uninterrupted D1 arrival in future
+  evaluations, and reassess the 6,000-step limit using complete non-teleported
+  trajectories. Do not count merely entering D1 as an `Arrived` episode.
 
 **Validation so far:** unit tests cover ego selection, geometry, wrappers,
 and encoder input handling. All three Antwerp scenarios reset at 120.1 s
@@ -351,6 +354,19 @@ SUMO reported an ego collision during lane change at step 2339. This small
 pilot demonstrates a policy-control failure, not a stable success rate or a
 comparison with the earlier automatically changing-lane checkpoint. The
 checkpoint, probe logs, and trace remain under `tmp/ai/lane-control-audit/`.
+
+Full traces of the two merged timeouts separate their causes. At seed 579073,
+ego remained on `E78_0` from step 2627 to the 6,000-step limit; it advanced
+about 64 m in the final 1,000 steps and spent 82% of those steps below 1 m/s.
+The model issued no lane-change commands on E78, so it had neither reached
+E82 nor moved toward an E82 lane that connects to D1. At seed 579074, ego
+spent about 3,100 steps on `:J107_0_0`, with speed below 1 m/s for 97% of
+that interval. SUMO teleported it at simulation time 699.3 s from the jammed
+connector to `E82_3`; this was not a policy-controlled lane change. It then
+entered D1, but timed out 106 m before the D1 endpoint at simulation time
+720 s. The model issued no lane-change commands on E78 or E82 in this run.
+The observed delays include a downstream queue; simply extending max steps
+would not establish uninterrupted ego completion or learned D1 lane choice.
 
 **Key arguments:**
 
