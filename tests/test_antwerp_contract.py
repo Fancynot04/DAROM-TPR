@@ -185,8 +185,10 @@ class EvaluationProtocolTests(unittest.TestCase):
 
     def test_repeat_aggregation_keeps_episode_seeds_and_training_provenance(self):
         envs = [Mock(), Mock()]
-        for env in envs:
-            env.reset.return_value = (np.zeros(134), {})
+        for index, env in enumerate(envs):
+            env.reset.return_value = (np.zeros(134), {'sumo_seed': 100 + index,
+                                                     'ego_speed_mode': 31,
+                                                     'sumo_version': [20, 'SUMO 1.18.0']})
         envs[0].step.side_effect = [
             (None, 10, True, False, {'message': 'Arrived', 'ego_teleported': False})
         ] * 2
@@ -210,6 +212,10 @@ class EvaluationProtocolTests(unittest.TestCase):
         self.assertEqual(report['runs'][1]['Merged Timeout'], 1)
         self.assertEqual([entry['seed'] for run in report['runs'] for entry in run['episode_results']],
                          [10, 11, 20, 21])
+        self.assertEqual([entry['reset_info']['sumo_seed']
+                          for run in report['runs'] for entry in run['episode_results']],
+                         [100, 100, 101, 101])
+        self.assertEqual(report['runs'][1]['episode_results'][0]['reset_info']['ego_speed_mode'], 31)
         for env in envs:
             env.close.assert_called_once()
         self.assertEqual([call.args[3] for call in make.call_args_list], [True, True])

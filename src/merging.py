@@ -1,4 +1,5 @@
 import os, sys
+import hashlib
 import numpy as np
 from pathlib import Path
 # from inference import model
@@ -143,12 +144,17 @@ class Merging(gym.Env):
             pass
 
         # Load the Antwerp network and one scenario route without detector output files.
+        scene_paths = {'network': ANTWERP_DIR / 'Antwerp.net.xml',
+                       'routes': ANTWERP_DIR / f'Antwerp_{self.scenario}.rou.xml'}
+        scene_files = {name: {'path': str(path.relative_to(ANTWERP_DIR.parent)),
+                              'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+                       for name, path in scene_paths.items()}
         sumo_cmd = [
             self.sumoBinary,
-            '--net-file', str(ANTWERP_DIR / 'Antwerp.net.xml'),
-            '--route-files', str(ANTWERP_DIR / f'Antwerp_{self.scenario}.rou.xml'),
+            '--net-file', str(scene_paths['network']),
+            '--route-files', str(scene_paths['routes']),
             '--begin', '0', '--end', '3600',
-            '--step-length', '0.1', '--lateral-resolution', '0.8',
+            '--step-length', str(SUMO_STEP_LENGTH), '--lateral-resolution', '0.8',
             '--seed', str(sumo_seed),
             '--no-step-log', '--collision.check-junctions',
             '--collision.action', 'remove', '-Q',
@@ -175,7 +181,18 @@ class Merging(gym.Env):
             raise RuntimeError(f'The scheduled ego did not enter O3 before {EGO_DEPARTURE_DEADLINE}s in {self.scenario}')
         
         self.state = self.observation
-        return self.state, {'ego_id': self.ego_id, 'ego_depart_time': self.ego_depart_time}
+        return self.state, {
+            'ego_id': self.ego_id, 'ego_depart_time': self.ego_depart_time,
+            'task': 'antwerp-o3-d1', 'scenario': self.scenario,
+            'antwerp_env_version': ANTWERP_ENV_VERSION,
+            'sumo_version': list(traci.getVersion()), 'sumo_seed': sumo_seed,
+            'sumo_command': sumo_cmd, 'scene_files': scene_files,
+            'step_length': traci.simulation.getDeltaT(),
+            'episode_limit_steps': maxSteps, 'episode_clock': 'steps_since_takeover',
+            'ego_route': list(traci.vehicle.getRoute(self.ego_id)),
+            'ego_speed_mode': traci.vehicle.getSpeedMode(self.ego_id),
+            'ego_lane_change_mode': traci.vehicle.getLaneChangeMode(self.ego_id),
+        }
 
     def getReward(self):
 

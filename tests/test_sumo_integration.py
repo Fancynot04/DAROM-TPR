@@ -5,6 +5,9 @@ only inside these tests. They validate accounting, not driving performance.
 """
 
 import socket
+import hashlib
+import json
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -36,6 +39,21 @@ class SumoIntegrationTests(unittest.TestCase):
                 observation, info = env.reset()
                 self.assertAlmostEqual(info['ego_depart_time'], 120.1)
                 self.assertEqual(traci.vehicle.getLaneChangeMode('ego'), 0)
+                self.assertEqual(info['ego_lane_change_mode'], 0)
+                self.assertEqual(info['ego_speed_mode'], traci.vehicle.getSpeedMode('ego'))
+                self.assertEqual(info['sumo_version'], list(traci.getVersion()))
+                self.assertEqual(info['step_length'], 0.1)
+                self.assertEqual(info['episode_limit_steps'], 6000)
+                self.assertEqual(info['ego_route'][0], 'O3')
+                self.assertEqual(info['ego_route'][-1], 'D1')
+                self.assertEqual(info['scene_files']['routes']['path'],
+                                 f'sumo_new/Antwerp_{scenario}.rou.xml')
+                for scene_file in info['scene_files'].values():
+                    path = Path(__file__).resolve().parents[1] / scene_file['path']
+                    self.assertEqual(scene_file['sha256'], hashlib.sha256(path.read_bytes()).hexdigest())
+                command = info['sumo_command']
+                self.assertEqual(int(command[command.index('--seed') + 1]), info['sumo_seed'])
+                json.dumps(info, allow_nan=False)
                 for _ in range(125):
                     observation, reward, terminated, truncated, info = env.step([0.5, 0])
                     self.assertFalse(terminated or truncated)

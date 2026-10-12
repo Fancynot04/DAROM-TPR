@@ -202,12 +202,12 @@ These are reference results, not achieved Antwerp scores.
 **Confirmed source differences and current choices** (upstream checked
 2026-10-12):
 
-- The [upstream training entry](https://github.com/amin-tabrizian/DAROM/blob/main/train_sac_delay.py)
+- The [upstream training entry](https://github.com/amin-tabrizian/DAROM/blob/6dadb355a8a5dd3fc4ee092454a7b425d90afee4/train_sac_delay.py)
   does not wrap training in the safety controller and defaults to 10M steps.
   This project's default budget now follows the paper's 7M; explicit small
   `--total_timesteps` values remain available for smoke tests. No 7M run has
   been started by this protocol correction.
-- The [upstream evaluation entry](https://github.com/amin-tabrizian/DAROM/blob/main/evaluate_sac_delay.py)
+- The [upstream evaluation entry](https://github.com/amin-tabrizian/DAROM/blob/6dadb355a8a5dd3fc4ee092454a7b425d90afee4/evaluate_sac_delay.py)
   defaults to safety on and evaluates one checkpoint in three runs of 501
   episodes. Its reported error is `1.96 * sample_std / sqrt(n_runs)`, not
   standard deviation. Here formal commands explicitly use 500 episodes; reports
@@ -225,14 +225,114 @@ These are reference results, not achieved Antwerp scores.
 
 **Still not an exact reproduction:** Antwerp changes the network, OD demand,
 vehicle profiles, ego speed mode, episode duration, coordinates and safety
-geometry. Its GRU scaling/action ordering also differs from the local upstream
+geometry. Its GRU scaling/action ordering also differs from the pinned upstream
 copy; the fixed-shape masking implementation of the five configurations is a
 documented project choice. Raw returns across different routes/rewards are not
-directly comparable. Full original-scene calibration, per-row safety settings,
-checkpoint selection, and paper/code discrepancies in driver profiles remain
-to be verified. Existing success definitions, traffic and environment version
-are unchanged by this correction. The earlier 20k pilot is 1/350 of the paper
-budget and cannot establish convergence or failure to learn.
+directly comparable. The original-scene smoke calibration below passes, but
+per-row experiment configurations and checkpoint selection remain unverified.
+Existing success definitions, traffic and environment version are unchanged.
+The earlier 20k pilot is 1/350 of the paper budget and cannot establish
+convergence or failure to learn.
+
+### Original-scene calibration (2026-10-12)
+
+The public-code reference is pinned to
+[`amin-tabrizian/DAROM@6dadb355`](https://github.com/amin-tabrizian/DAROM/tree/6dadb355a8a5dd3fc4ee092454a7b425d90afee4).
+SHA-256 comparisons confirm that this project's original network, SUMO config,
+default route and all three difficulty routes match that revision byte for byte.
+The default `mergingP.rou.xml` is identical to `mergingP_hard.rou.xml`.
+Having these assets does not make the current training entry an original-scene
+benchmark: `src.merging.Merging` still loads Antwerp exclusively.
+
+| Setting | Pinned public implementation / packaged checkpoint | Current Antwerp implementation |
+|---|---|---|
+| Ego task | `E4 → E3 → E0`; arrive after merging | `O3 → D1`; arrive without any ego teleport |
+| Clock | Depart at 10 s; timeout when absolute SUMO time exceeds 200 s | Depart at 120 s; 6,000 steps after actual takeover |
+| Road / ego speed | Road limit 60 m/s; ego type and command cap 32 m/s | Road limit 13.89 m/s; `car_van` type max 45 m/s, SUMO constraints active |
+| Control modes | Requests speed mode 96 and lane-change mode 0 | Actual speed mode 31, lane-change mode 0 |
+| Hard demand | Five lane flows, probabilities 0.41/0.38/0.38/0.38/0.38 | 7,108 scheduled vehicles including ego, distributed over multiple OD pairs |
+| Ego features | World x/y and speed | Route distance, lane index and speed |
+| Neighbor features | Relative world x/y and scalar speed difference | Ego-frame positions and projected relative velocity |
+| GRU input split | 91 observation + 42 action + 1 delay values; 21 history slots, 128 output features | 93 observation + 40 action + 1 delay values; 20 history slots, 256 output features |
+| Safety input | First 5 entities, including ego | Up to 31 entities, with captured geometry aligned to current ego frame |
+
+These are implementation facts, not a declaration that the public code exactly
+implements every paper setting. In particular:
+
+- The [public GRU training configuration](https://github.com/amin-tabrizian/DAROM/blob/6dadb355a8a5dd3fc4ee092454a7b425d90afee4/train_sac_delay.py)
+  requests `hist_len=max_delay+1`, while its wrapper emits only `max_delay`
+  actions. On a 134-value packet this silently consumes two observation values
+  as action history. Both packaged checkpoints preserve this 91/42/1 split;
+  the best checkpoint records 9.1M steps and the final checkpoint 10M, seed 42.
+  Neither records training safety. They are legacy public-code references,
+  not compatible Antwerp models or proven 7M Table IV checkpoints. Do not fix
+  their encoder split and then reuse the same weights.
+- The [public safety controller](https://github.com/amin-tabrizian/DAROM/blob/6dadb355a8a5dd3fc4ee092454a7b425d90afee4/src/safety_controller.py)
+  decodes only ego plus four neighbors. A synthetic probe moves the same
+  dangerous leader from row 1 to row 5: the former triggers braking and the
+  latter is ignored. This defect is retained only in the isolated reference
+  probe; it is not reintroduced into Antwerp.
+- The [public environment](https://github.com/amin-tabrizian/DAROM/blob/6dadb355a8a5dd3fc4ee092454a7b425d90afee4/src/merging.py)
+  applies aggressive/cooperative overrides only to `f_1`/`f_2`; the other three
+  flows keep their type defaults. Cooperative headway uses `N(0.7, 0.1)`
+  rather than the paper's uniform interval. Original reward progress uses
+  world-x displacement; Antwerp uses route distance. Event rewards retain the
+  same nominal scale, but timeout precedence, gap handling and teleport
+  accounting differ. Absolute returns cannot be used as a cross-scene ranking.
+- Original flow probabilities imply nominal expected rates of 1,800 / 3,456 /
+  6,948 vph. The paper's Hard lane counts sum to 7,108. Expected probabilistic
+  demand, observed arrivals and Antwerp's scheduled total are different
+  quantities; matching a total alone does not match traffic difficulty.
+- Local SUMO is **1.18.0**. The original request `speedMode=96` reads back as
+  `32`: the [SUMO 1.18 implementation](https://github.com/eclipse-sumo/sumo/blob/v1_18_0/src/microsim/MSVehicle.cpp)
+  implements bits 0–5 but not the speed-limit override bit 6 described in the
+  [current documentation](https://sumo.dlr.de/docs/TraCI/Change_Vehicle_State.html#speed_mode_0xb3).
+  The paper's exact SUMO version is not established. No simulator upgrade or
+  production control-mode change was made during calibration.
+
+The paper's Table IV full row matches Table III's Hard DAROM-GRU row with SC,
+which supports **evaluation safety on for the full reference**. It does not
+resolve safety flags for every ablation row or training safety. The public
+evaluation defaults to `bursty`; calibration explicitly selected `uniform`.
+No per-row execution manifest was established from the inspected sources.
+
+**Runtime smoke result:** the packaged `GRU-uniform-delay_best.zip` was loaded
+with the pinned original encoder/environment/wrapper/controller, not Antwerp's
+modules. Only the hard-coded launch path, output location and random seeding
+were adapted: original assets were selected explicitly, SUMO `--random` was
+replaced with each stated seed, and NumPy/Python/Torch were seeded. Traffic,
+rewards, network and checkpoint bytes were unchanged. CPU inference used one
+Torch thread. This deterministic calibration convention differs from the
+public entry's unseeded SUMO runs and is not a formal reproduction claim.
+
+| Hard seed | Evaluation SC | Outcome | Control time | Return | SC interventions |
+|---|---|---|---:|---:|---:|
+| 579091 | Off | Arrived, no teleport | 20.0 s | 180.589 | 0 |
+| 579091 | On | Arrived, no teleport | 20.0 s | 180.589 | 0 |
+| 579092 | Off | Arrived, no teleport | 20.0 s | 180.150 | 0 |
+| 579092 | On | Arrived, no teleport | 20.0 s | 177.969 | 23 |
+
+All four episodes merged. An additional repeat of seed 579091 with SC on
+matched all 200 trace records and the return exactly. These are two paired
+development seeds, not 500×3 independent test episodes or evidence of 99.8%
+success. The archived checkpoint SHA-256 is
+`f3d8521eee9a10584a036ba8f2856381e41f86247df9cca2fc7399850242e13b`.
+Sources, hashes, probe scripts, JSON traces, logs and SUMO tripinfo remain under
+ignored `tmp/ai/original-calibration/`; production code does not depend on them.
+The runtime-metadata additions passed all 25 regression tests and three real
+SUMO integration tests. A complete Antwerp Hard replay (20k checkpoint, seed
+579081, SC off) also preserved the previous 631-step collision and return
+exactly while exporting the new scene hashes and runtime settings.
+
+**Calibration decision:** retain Antwerp as a transfer experiment and establish
+a separately identified original-scene benchmark before claiming Table IV
+reproduction. The current smoke pass validates the legacy runtime chain only.
+The next implementation stage should provide a permanent original-scene entry,
+make the public-code versus corrected/paper-aligned conventions explicit, and
+verify a fresh short training run before committing to the 7M budget. Exact
+per-row safety, training seeds, checkpoint selection and SUMO version still
+need provenance; do not select those conventions by whichever gives the best
+final-test score. Formal training and ablations have not started.
 
 ## Antwerp migration checklist
 
@@ -642,6 +742,13 @@ CPU with one PyTorch thread (`--device` / `--torch-threads` can override this).
 `--output` creates a new report and refuses to overwrite an existing file.
 Reports contain checkpoint SHA-256, training seed/step count, both safety flags,
 each episode's seed/outcome/return, per-run metrics and cross-run summaries.
+Each episode's `reset_info` additionally records the task/scenario, actual SUMO
+version and seed, launch command, network/route SHA-256, ego route and actual
+speed/lane-change modes, step length and takeover-based episode limit. Rule and
+model diagnostic summaries retain the same reset metadata. These fields are
+additive; the observation/reward contract remains version 2. In particular,
+evaluation `--no-safety` disables the project wrapper, not SUMO's built-in
+speed-mode-31 constraints. It is not equivalent to the original ego setup.
 The reported `std` uses `ddof=1`; `ci95_half_width` uses the upstream normal
 approximation and is not a guarantee of coverage with only a few runs. Neither
 quantity should be confused with independently trained-model variability.

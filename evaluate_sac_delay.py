@@ -50,7 +50,7 @@ def evaluate(model, env, episodes, seed):
     returns = []
     records = []
     for episode in range(episodes):
-        observation, _ = env.reset(seed=seed + episode)
+        observation, reset_info = env.reset(seed=seed + episode)
         episode_return = 0.0
         steps = 0
         while True:
@@ -73,7 +73,7 @@ def evaluate(model, env, episodes, seed):
                 records.append({'seed': seed + episode, 'steps': steps, 'outcome': outcome,
                                 'merged': bool(info.get('merged')), 'ego_teleported': teleported,
                                 'success': outcome == 'Arrived' and not teleported,
-                                'return': episode_return})
+                                'return': episode_return, 'reset_info': reset_info})
                 break
     return {**{outcome: counts[outcome] for outcome in OUTCOMES},
             **{outcome: counts[outcome] for outcome in TIMEOUT_DETAILS},
