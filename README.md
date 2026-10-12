@@ -593,9 +593,79 @@ Each case writes `trace.csv` and `summary.json`, including desired and applied
 lane commands, actual within-edge lane transitions, leader gaps/speeds,
 per-lane stopped time, teleport events and outcomes. Repeated lane commands
 are not counted as successful lane changes. Outputs from this run remain in
-`tmp/ai/antwerp-step1/` and are excluded from Git. Hard failure diagnosis and
-fresh version 2 training are the next stages; formal input ablations are outside
-this staged validation.
+`tmp/ai/antwerp-step1/` and are excluded from Git. Formal input ablations are
+outside this staged validation.
+
+Step 2 completed 12 additional Hard diagnostics on SUMO 1.18.0. Four passive
+native-SUMO references retain the mapped scenario seed, speed mode and 600 s
+budget, but restore native ego lane mode 1621 and issue no policy actions:
+
+| Seed | Native outcome | Final lane | Ego teleport |
+|---:|---|---|---|
+| 579071 | Timeout, 600 s | `:J107_0_2` | No |
+| 579072 | Timeout, 600 s | `E78_1` | No |
+| 579073 | Timeout, 600 s | `:J107_0_1` | No |
+| 579074 | Arrived, 294.6 s | `D1_1` | No |
+
+These local runs do not reproduce every historical native result above; the
+historical simulator build and raw artifacts are unavailable in this clone.
+Treat these fresh results separately. The three timeout cases spent 93.7%,
+97.3%, and 97.7% of their last 1,000 steps below 1 m/s, respectively.
+
+Two controlled rule variants each ran seeds 579071/579074 with safety off/on.
+First, only longitudinal control changed to constant +2.6 commands, leaving
+SUMO speed mode 31 to enforce longitudinal limits. Second, that variant also
+used a connectivity-derived set of D1 lanes instead of one fixed target.
+Lane paths without further within-edge changes include `E78_2/3/4` and
+`E82_3/4/5`; an adjacent reachable lane can be chosen when a stopped queue has
+less observed forward room. Gap/headway, traffic and episode settings were
+unchanged. Both variants produced the same physical trajectories and outcomes
+on these four cases, so they do not demonstrate a benefit from route guidance:
+
+| Seed | Safety | Outcome for both variants |
+|---:|---|---|
+| 579071 | Off | Collision at E75, 52.4 s |
+| 579071 | On | Collision at E76, 119.0 s |
+| 579074 | Off | Timeout on `E78_1`, 600 s |
+| 579074 | On | Raw arrival at 523.6 s **after teleport**, task success false |
+
+The evidence separates three mechanisms:
+
+- The original four rule collisions were SUMO `stage=laneChange` events.
+  They occurred 18–40 steps after the last nonzero applied lane request.
+  New traces show ego continuing lateral motion while subsequent commands are
+  zero. A zero policy direction sends no TraCI lane command and therefore does
+  not actively cancel the ongoing maneuver. Single-step gap checks and the
+  optional safety filter have not established safe completion of that maneuver.
+- Native 579074 changed `E75_0` to `E75_1` at 146.2 s simulation time; the
+  constant-acceleration rule changed at 276.7 s after 107.5 stopped seconds on
+  E75. The latter reached E78 much later, then queued behind a D2-bound vehicle.
+  During its final 1,000 steps it moved only 31.10 m and was below 1 m/s for
+  89.5% of steps. There were 229 applied lane requests in that interval but no
+  successful move out of `E78_1`. This is not simply a missing request.
+- With safety enabled, seed 579074 stopped 300.2 s on wrong-lane `E82_1`, then
+  teleported to D1 at simulation time 625.0 s. The teleport-step reward was
+  -0.0883 and final arrival reward -0.03; task success remained false. This is
+  a naturally occurring full-episode check of the version 2 accounting fix.
+
+No production lane-change, reward, road, demand or time-limit parameters were
+changed in this diagnostic stage. Route-aware multi-lane selection alone did
+not resolve the observed failures, and relaxing a gap threshold is not justified
+by these results. Continuous lateral maneuver safety and queue-aware route
+choices remain open. Fresh `full` training is an exploratory policy baseline,
+not a claim that these control problems have been solved.
+
+```bash
+python -m src.diagnostics --controller native --scenarios hard \
+    --seeds 579071 579072 579073 579074 \
+    --output-dir tmp/ai/antwerp-step2/native-repeat
+python -m src.diagnostics --scenarios hard --longitudinal sumo \
+    --lane-strategy reachable --output-dir tmp/ai/antwerp-step2/reachable-repeat
+```
+
+Omit `--lane-strategy reachable` for the longitudinal-only comparison. Outputs
+remain under `tmp/ai/antwerp-step2/`. All 12 regression tests, including the
+D1 lane-connectivity check, passed after this stage.
 
 ## Regression validation
 

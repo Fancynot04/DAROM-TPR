@@ -26,6 +26,13 @@ def snapshot(time=0.0, ego=(0, 0), angle=90, positions=((5, 3.2),),
 
 
 class GeometryTests(unittest.TestCase):
+    def test_route_guidance_includes_all_d1_connected_lanes(self):
+        from src.diagnostics import d1_reachable_lanes
+        reachable = d1_reachable_lanes()
+        self.assertEqual(reachable['E78'], [2, 3, 4])
+        self.assertEqual(reachable['E82'], [3, 4, 5])
+        self.assertEqual(reachable['E77'], [3, 4, 5])
+
     def test_velocity_projection_for_crossing_and_opposing_traffic(self):
         env = Merging(seed=1)
         env.ego_id = 'ego'
