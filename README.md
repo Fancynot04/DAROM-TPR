@@ -309,10 +309,14 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
 - [ ] Distinguish ego teleportation from an uninterrupted D1 arrival in future
   evaluations, and reassess the 6,000-step limit using complete non-teleported
   trajectories. Do not count merely entering D1 as an `Arrived` episode.
-- [ ] Run a scripted end-to-end controller under the same TraCI ego takeover
-  settings as training, verifying D1 exit without ego teleportation. Pure SUMO
-  validates the scenario's native driving behavior, not policy-controllable
-  completion under `laneChangeMode=0`.
+- [x] Run an initial scripted end-to-end controller under the same TraCI ego
+  takeover settings as training. Easy and Medium completed without ego
+  teleportation in both current- and delayed-observation probes; none of four
+  Hard seeds did. Pure SUMO validates native driving behavior, while these
+  probes validate the policy action interface and expose Hard-scenario limits.
+- [ ] Diagnose why the initial rule misses target lanes or remains in Hard
+  queues before using it as a comparative baseline. Keep the fixed difficult
+  seeds, and distinguish rule limitations from road congestion.
 
 **Validation so far:** unit tests cover ego selection, geometry, wrappers,
 and encoder input handling. All three Antwerp scenarios reset at 120.1 s
@@ -394,6 +398,35 @@ multiple demand realizations, but Hard can also queue long enough to prevent
 completion or require a teleport. These runs do not establish convergence of
 the RL policy or feasibility under TraCI's ego-only lane mode 0. Outputs are
 kept under `tmp/ai/pure-sumo-baseline/`.
+
+A temporary scripted controller then reused `evaluate_sac_delay.make_env` with
+the same scenario, seed, 120.1 s ego takeover, 0.1 s action step, 6,000-step
+limit, `car_van` type, ego lane mode 0, speed mode 31, and default safety
+controller disabled. It requested one lane at a time through the existing
+action interface, checked neighbor gaps, and kept SUMO's collision and
+teleport behavior unchanged. Both observation variants used the same static
+O3-to-D1 target-lane map. The current-observation variant read the environment's
+31-vehicle state; the delayed variant read the uniform-delay policy observation
+from `DelayWrapper` (up to 20 steps). Ego state remained current in both.
+
+| Scenario | Seed | Current observation | Delayed observation |
+|---|---:|---|---|
+| Easy | 579071 | Arrived, 199.3 s, no teleport | Arrived, 215.0 s, no teleport |
+| Medium | 579071 | Arrived, 217.0 s, no teleport | Arrived, 217.0 s, no teleport |
+| Hard | 579071 | Timeout at J107 connector | Timeout on D1 after ego teleport |
+| Hard | 579072 | Timeout on E78_2 | Timeout on E82_0 |
+| Hard | 579073 | Timeout on E78_2 | Timeout on E77_3 |
+| Hard | 579074 | Timeout on E78_2 | Ego collision at J107 connector |
+
+Times are simulated seconds after takeover. `Arrived` counts as success only
+without an ego teleport. The rule also reads current edge/lane position and
+an explicit lane-connectivity map, information not explicitly supplied to the
+RL observation; these are engineering diagnostics, not a fair Table IV
+comparison or evidence that delay compensation helps. The first exact-TraCI-
+neighbor version of the rule also completed Easy and Medium but no Hard seed
+without teleportation. The temporary script and per-seed logs, including
+lane requests, transitions, final route distance, and stop counts, remain
+under `tmp/ai/rule-baseline/`.
 
 **Key arguments:**
 
