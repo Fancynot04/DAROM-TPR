@@ -1150,6 +1150,56 @@ reward, network, traffic demand, episode limit or model was changed in this
 stage. Seeds 579081–579084 are now diagnostic/development cases and must not
 be reused as unseen final-test seeds after tuning against these findings.
 
+### Background 200k baseline (started 2026-10-12)
+
+A fresh Antwerp Hard `full` GRU/SAC run was launched in a detached process
+at 2026-10-12 22:33 Asia/Shanghai. The target is **200,000 total steps**,
+not 200,000 additional steps loaded from the old pilot. The previous 20k
+checkpoint did not include its replay buffer, so this run starts from scratch
+with the same seed 579071, uniform delay, training safety off, environment
+version 2, learning rate 3e-5, batch size 512 and gamma 0.99. The road, traffic,
+observations, rewards, encoder and episode limit are unchanged. Training uses
+CUDA with one Torch thread and W&B disabled; no upload is scheduled.
+
+The detached supervisor PID at launch was `3721008`, with training PID
+`3721044`. These identify the original processes only; inspect the status file
+and log progress for the current stage rather than assuming an old PID is
+still valid. Closing the interactive session does not send a hangup to the
+detached process; host shutdown or process failure can still interrupt it.
+
+| Artifact | Location |
+|---|---|
+| Console output and errors | `tmp/ai/antwerp-200k/train.log` |
+| Episode metrics and progress every 1,000 steps | `tmp/ai/antwerp-200k/training.jsonl` |
+| TensorBoard events, including SAC losses | `tmp/ai/antwerp-200k/tensorboard/full-v2-hard-200k/` |
+| Task stage, active PID and exit status | `tmp/ai/antwerp-200k/status.json` |
+| Supervisor errors | `tmp/ai/antwerp-200k/supervisor.log` |
+| Launch command, source/scene hashes and seeds | `tmp/ai/antwerp-200k/manifest.json` |
+| Checkpoints every 50,000 steps | `models_experiments/antwerp-200k/full-v2-hard-200k/` |
+| Final model, once training succeeds | `models_experiments/antwerp-200k/full-v2-hard-200k.zip` |
+
+After successful training, the supervisor evaluates the 50k, 100k and 200k
+checkpoints sequentially, each with safety off and on, using development seeds
+579081–579084. This schedules 24 evaluation episodes in separate processes;
+these are previously inspected seeds, not an unseen final test. Evaluation
+outputs use `tmp/ai/antwerp-200k/eval-<steps>-safety-<0|1>.json` and `.log`.
+Failure of a training/evaluation command stops the remaining sequence and
+records the error; success ends with status `completed`. Launch is not evidence
+of completed training or improved performance. No further training budget or
+formal ablations are automatically scheduled.
+
+Monitor from the repository root:
+
+```bash
+tail -f tmp/ai/antwerp-200k/train.log
+tail -n 5 tmp/ai/antwerp-200k/training.jsonl
+cat tmp/ai/antwerp-200k/status.json
+```
+
+The temporary supervisor lives in `tmp/ai/antwerp-200k/background.py`; it
+orchestrates the existing production entry points without modifying them.
+All generated logs, models and supervisor files remain ignored by Git.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
