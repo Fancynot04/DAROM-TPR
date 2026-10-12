@@ -108,9 +108,10 @@ arrival at D1 can end it earlier. `reset()` returns the actual departure
 time in `info`. The environment starts SUMO from the network and selected
 route files with the timing and lateral settings of `Antwerp.sumocfg`,
 without detector outputs. The observation uses ego route distance, lane
-index, and speed, with nearby vehicles expressed in the ego's forward/left
-coordinate frame. Reward and
-safety checks use the same coordinate convention. Lane changes are
+index, and speed, with nearby vehicle positions expressed in the ego's
+forward/left frame. Reward gaps and current-state safety checks use these
+local positions; relative-speed projection and delayed-frame alignment remain
+pending. Lane changes are
 bounded by each Antwerp edge's actual lane count; merging is
 recognized when ego leaves `E75_0` for a mainline lane or reaches `E76`.
 The existing pretrained policy must be retrained for this observation layout.
@@ -171,10 +172,12 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   replacing one background O3-to-D1 car without changing total demand.
 - [x] Start the episode when ego actually enters O3; cap it at 6,000 control
   steps after takeover, with arrival, collision, and emergency-stop outcomes.
-- [x] Replace old-world-axis observation logic with ego-forward/left local
-  coordinates for up to 30 neighbors; use route distance for ego progress.
-  Adapt lane-change bounds, merge recognition, reward gaps, and safety checks
-  to the Antwerp observation layout.
+- [x] Express positions of up to 30 neighbors in ego-forward/left local
+  coordinates; use route distance for ego progress. Adapt lane-change bounds,
+  merge recognition, reward gaps, and safety checks to the Antwerp observation
+  layout. This completes the position-frame conversion only: neighbor relative
+  speed is still the difference of scalar speeds rather than a projection of
+  both velocity vectors onto ego's forward direction.
 - [x] Select the nearest 30 vehicles within the observation radius before
   applying the existing left/forward spatial order. Hard traffic reached 37
   candidates in a full probe; a separate 2,501-step run verified the selected
@@ -197,7 +200,9 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   The merged/unmerged timeout split remains diagnostic because the Antwerp route
   continues beyond the merge. Emergency stopping stays separate and is not
   silently folded into the paper's three rates; if it occurs, those rates need
-  not sum to 100%.
+  not sum to 100%. This is the raw paper proxy, not yet the uninterrupted
+  O3-to-D1 task-success metric: the current `Arrived` count includes an ego
+  that was teleported earlier in its episode.
 - [x] Adapt the safety controller's target-lane filter to Antwerp geometry.
   It now projects the selected lane centerline into ego's local frame for both
   lane changes and lane keeping, accounting for lateral movement and heading.
@@ -205,7 +210,10 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   eliminated the observed misses of `E75_1` vehicles during the O3 merge;
   fixed-action comparisons reached a mainline lane with `--safety` in all
   three scenarios before ego lane-mode restoration and again under lane
-  mode 0. These probes do not establish a trained policy's safety.
+  mode 0. The delayed safety path still compares older neighbor coordinates
+  with a lane line constructed in the current ego frame; it has not been
+  validated when ego changes lanes or heading during the delay. These probes
+  do not establish a trained policy's safety.
 - [x] Connect the five Table IV input ablations to Hard-scenario training and
   independent evaluation. All retain the GRU input shape and separate safety
   input; five 3-step training and evaluation smoke runs loaded their matching
@@ -284,6 +292,24 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
 
 **Pending work**
 
+- [ ] Before formal experiments, track whether ego has teleported during an
+  episode and report uninterrupted D1 arrival separately from raw `Arrived`.
+  Both the environment's arrival reward and the training/evaluation success
+  counters currently use raw `Arrived`. In one reproduced wrong-lane teleport,
+  route distance rose only 4.201 m at the event and step reward was 0.547;
+  the later `Arrived` still received about 50 scaled reward. Check other
+  teleport modes before concluding route-progress rewards are unaffected.
+- [ ] Project neighboring vehicle velocity onto ego's forward direction when
+  constructing relative speed, and validate this on differing-heading road
+  segments. The scalar speed difference currently used can be wrong on ramps,
+  curves, and junctions; linear prediction and safety approach-speed checks
+  inherit that error.
+- [ ] Validate delayed safety input after ego lateral movement or a heading
+  change, then align neighbor coordinates and target-lane geometry to a common
+  frame/time before claiming complete safety-controller adaptation. A
+  constructed 3.2 m lateral-move case with a vehicle 5 m ahead was marked
+  safe using stale neighbor coordinates and unsafe using current coordinates;
+  this confirms the frame mismatch but not its rate in full TraCI episodes.
 - [ ] Evaluate the trained Antwerp policy with `--safety` before claiming a
   collision reduction. The fixed-action probes cover merge behavior, not
   complete policy episodes or all delayed-observation cases.
@@ -306,9 +332,8 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   ended with an ego emergency stop on `E77_0`; its per-step lane actions were not
   recorded, so the source of that lane choice is unknown. Keep emergency stops
   separate from collision and timeout counts.
-- [ ] Distinguish ego teleportation from an uninterrupted D1 arrival in future
-  evaluations, and reassess the 6,000-step limit using complete non-teleported
-  trajectories. Do not count merely entering D1 as an `Arrived` episode.
+- [ ] Reassess the 6,000-step limit using complete non-teleported trajectories.
+  Do not count merely entering D1 as an `Arrived` episode.
 - [x] Run an initial scripted end-to-end controller under the same TraCI ego
   takeover settings as training. Easy and Medium completed without ego
   teleportation in both current- and delayed-observation probes; none of four
