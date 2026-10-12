@@ -1061,6 +1061,95 @@ output directories are not overwritten. No new models or dependencies were
 created, and the production observation/reward/checkpoint contract remains
 version 2.
 
+### Hard success/failure trajectory comparison (2026-10-12)
+
+This follow-up compares the **corrected** development traces in
+`tmp/ai/hard-reachability/contained-dev/` (579071/579074) with the frozen
+controller's four failures in `heldout/` (579081–579084). The earlier
+`committed-dev/` traces used the centering bug and are excluded. These six
+selected episodes are diagnostic cases, not an unbiased success-rate sample.
+All use lane-change mode 0, speed mode 31 and wrapper safety off; none has an
+ego teleport. Times below are elapsed control time unless marked SUMO time.
+
+| Seed | Result | Distinguishing trajectory evidence |
+|---:|---|---|
+| 579071 | Arrived, 380.4 s | Spent 148.8 s below 1 m/s overall, but eventually crossed J107; started E82 lane 1→2 with 118.82 m remaining, then 2→3 with 58.70 m remaining |
+| 579074 | Arrived, 228.3 s | Never fell below 1 m/s; started the same E82 changes with 119.31 m and 57.51 m remaining |
+| 579081 | Timeout, 600 s | Spent 353.1 s on `:J107_0_1`, including 331.0 s below 1 m/s; progressed only 62.38 m within that interval |
+| 579082 | Collision, 53.4 s | Started E75 0→1 at 9.31 m/s with only 9.27 m remaining; collision occurred 2.1 s into the maneuver |
+| 579083 | Timeout, 600 s | Reached a statically D1-connected lane on E75, then spent 447.7 s on `E78_2`, including 386.8 s below 1 m/s |
+| 579084 | Collision, 233.2 s | Entered E82 lane 1 but waited until only 11.56 m remained to start 1→2 at 10.43 m/s; still needed lane 3 for D1 |
+
+**Maneuver timing and execution.** The successful E82 changes took about
+4.0–4.2 s each; both successful cases began the first change near the E82
+entrance. The failing changes began with approximately one second of travel
+remaining at their initial speeds. This is a screening calculation, not a
+constant-speed feasibility proof: the actual vehicles decelerated sharply.
+Both were still moving laterally at 1 m/s immediately before impact, with
+longitudinal speed approaching zero at the lane end.
+
+Read-only replay instrumentation confirmed the collision participants:
+579082 was struck by `hard_O2_D2_car_van.15` on `E75_1` (reported speeds
+2.76 and 0 m/s); in 579084, SUMO reports ego as the collider with
+`hard_O1_D2_car_van.48` on `E82_2` (0 and 11.52 m/s). The second event was
+reported during lane changing. Thus these are concrete overlap/collision
+events, not false failures from teleport accounting.
+
+The controller's initial gap check is insufficient over the full maneuver:
+the traces show a rear blocker emerging while the latched maneuver continues.
+The implementation adjusts longitudinal acceleration for the target leader
+but does not reject a maneuver using lane-end distance or replan its lateral
+execution on a rear blocker. A blanket "never change near a lane end" rule
+is also unsupported: seed 579084 successfully started an earlier E75 maneuver
+from rest with only 0.101 m remaining. Speed, lateral completion, downstream
+connections and surrounding motion must be considered together.
+
+**Queue location and route choice.** Static D1 reachability is an existence
+test for a lane path, not a congestion forecast. Seed 579083 followed the
+D1-connected chain `E75_3 → E76_2 → E77_3 → E78_2` and still timed out;
+its 386.8 s below 1 m/s on E78 were spent behind
+`hard_O3_D2_car_van.14`. Conversely, the two successes approached E82 on lane 1,
+which requires two more changes to reach D1. Those different seeds do not
+establish that this corridor is always preferable.
+
+For seed 579081, ego continuously requested +2.6 m/s² and no lane change on
+the internal J107 connector. Its low speed therefore cannot be explained by
+the reference controller voluntarily commanding a stop. In 28 samples spaced
+5 s apart, from SUMO time 515 through 650 s, every vehicle on all five E78
+lanes was halted according to SUMO while all six E82 lanes were empty. Some
+sampled queue-front vehicles were stopped on `:J107_0_1` with no leader
+reported within 200 m. Seed 579083 showed the same halted-E78/empty-E82
+condition in 29 consecutive samples from SUMO time 465 through 605 s.
+These are sampled observations, not measurements of continuous standstill.
+This localizes a flow interruption around the internal
+connector; it does **not** prove the entire downstream network is saturated,
+identify a specific junction defect, or show that another ego strategy could
+not avoid the queue. Junction/route/lane-choice behavior remains to be tested.
+
+**Next implementation priorities:** audit whether the policy can distinguish
+route-required lanes, remaining maneuver distance and lateral completion;
+test a reference-controller change that accounts for maneuver duration and
+rear traffic before changing the RL observation/reward contract. Separately
+inspect J107 queue-front route and lane-choice behavior before treating queue
+timeouts as a training-budget problem. Do not copy the successful seeds'
+action sequence or assume that increasing training steps resolves these
+specific failure mechanisms. Existing distance/neighbor inputs may encode
+some of this information indirectly; this comparison alone does not prove
+that the policy observation is insufficient.
+
+Comparison scripts, source hashes, replay traces, collision events and
+5-second queue samples are retained under
+`tmp/ai/hard-trajectory-comparison/`. All four additional full replays matched
+the archived **14,866 CSV rows** exactly, including actions, states, delays
+and rewards; terminal outcomes/returns and scene hashes were also verified.
+The passive probe collected 296 queue snapshots and both ego collision
+events. It makes no changes to vehicle controls or traffic settings. No new
+unit tests were needed for this documentation-only production change.
+No production controller, observation,
+reward, network, traffic demand, episode limit or model was changed in this
+stage. Seeds 579081–579084 are now diagnostic/development cases and must not
+be reused as unseen final-test seeds after tuning against these findings.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
