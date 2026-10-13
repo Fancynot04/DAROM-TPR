@@ -103,6 +103,45 @@ The route file defines ego's trip and vehicle type for both pure SUMO and
 training. Pure SUMO leaves its lane and speed decisions to SUMO; the training
 environment instead applies `laneChangeMode=0` at departure and sends explicit
 acceleration and lane commands through TraCI.
+
+**Speed and demand provenance audit (2026-10-13).** The 13.89 m/s (50 km/h)
+road limit already exists in the first repository commit `9a59395`; no evidence
+was found that this uniform limit was calibrated from observed speeds or is
+the real road's legal limit. It must not be described as an empirical speed
+profile. The pinned original DAROM implementation caps ego at 32 m/s, but that
+is also a configuration limit, not a measured mean speed.
+
+Recounting the raw archive's 2022-09-05 11:30–12:30 entrance observations gives:
+
+| Mapped entrance | Detectors | Observed vehicles in the hour | Mean valid crossing speed (km/h) |
+|---|---|---:|---:|
+| O1 | 467, 468, 469 | 3,771 | 40.21 |
+| O2 | 471, 472 | 2,482 | 46.75 |
+| O3 | 464 | 816 | 66.07 |
+| Total | Six entrance detectors | **7,069** | — |
+
+These are **flows, not spatial densities in vehicles/km**. No measured
+corridor-wide spatial density follows from the counts alone. The current
+Hard demand (7,108/h) is about 0.55% above this observed entrance total;
+Easy/Medium are scaled experimental demands (1,800/3,456 per hour), not three
+separately observed traffic-density windows. Entrance and downstream counts
+must not be added together because vehicles cross multiple detectors.
+The current routes distribute demand over an hour rather than replaying all
+original passage timestamps.
+
+Speed means use 3,747 / 2,454 / 808 valid samples for O1/O2/O3; nonpositive,
+nonfinite and provisional missing-code 254 speeds are excluded, while their
+vehicles remain in demand totals. The local source-paper/geometry audit
+supports km/h for this field, but does not establish a statutory limit. Raw
+source: `/home/cyl/datasets/New_Data.zip`, member
+`New_Data/20220905/20220905.txt`, SHA-256
+`6a7c01cba487e75326112bbac1391b28a66598427557c8a4fe3d36157aeda7e0`.
+Time filtering preserves the supplied Epoch clock without a timezone shift.
+The local aggregate is retained in
+`tmp/ai/safety-bumper-gap/speed-demand-audit.json`. Speed-distribution and
+background-flow calibration remain necessary before changing limits or
+claiming equivalent traffic difficulty; this audit does not change speeds.
+
 `src.merging.Merging(seed=579071, scenario="easy")` loads one of the
 `easy`, `medium`, or `hard` Antwerp routes (`medium` by default). Each reset
 advances SUMO to just before the scheduled departure, then waits for `ego`
@@ -1448,6 +1487,67 @@ Local diagnostic artifacts are retained, ignored by Git, under
 training group's source/scene hashes remain unchanged; `.gitignore` needs no
 update. New training, including the deferred No Encoder queue, remains paused
 pending a separate decision.
+
+### Safety correction and passive background diagnosis (2026-10-13)
+
+The separate `safety-bumper-gap` branch, commit `b60ffb0`, corrects safety's
+reference-point/bumper-clearance mismatch. Neighbor dimensions and headings
+travel with delayed snapshots; policy input remains 134 values. Both safety
+entry points use the corrected geometry and reports identify controller
+`bumper-clearance-v1`. The original 10 m margin and stopping rule are retained.
+The branch passed 32 unit tests, four SUMO integration tests, and six complete
+checkpoint replays. All three safety-off controls preserved every recorded
+action/reward/physical state and sampled full observation, as well as exact
+terminal outcomes/returns. Main's source/scene hashes remain frozen for the
+ongoing baseline; the correction is **not merged into that experiment**.
+
+| 500k checkpoint case | Previous safety on | Corrected safety on |
+|---|---|---|
+| Hard / 680009 | Timeout, 600.0 s | Timeout, 600.0 s |
+| Hard / 680013 | Success, 316.0 s | Teleported arrival, 592.4 s; failure |
+| Medium / 680005 | Teleported arrival, 503.1 s; failure | Teleported arrival, 503.1 s; failure |
+
+These selected cases show no arrival improvement. Correcting clearance can
+remove previously allowed maneuvers and change subsequent policy decisions;
+the result does not validate the unchanged threshold/policy combination.
+Details, version/source manifests, and traces remain under
+`tmp/ai/safety-bumper-gap/`, with formal changes committed in its `worktree/`.
+
+After that commit, four **passive SUMO** diagnostics used archived commands,
+scenario seeds, routes, demand, limits, and vehicle types, but let SUMO drive
+ego as well as all background vehicles. No learned policy or external safety
+controller was used. Ego's observed modes were speed 31 and lane change 1621.
+Each simulation continued to absolute time 720 s, even after ego arrived,
+recording network/lane conditions every 10 s and collision/teleport events
+every step. This is a traffic diagnostic, not a DAROM benchmark.
+
+| Scenario / seed | Peak sampled E78 halted vehicles | Background/network collision events | Teleport starts | Ego by absolute 720 s |
+|---|---:|---:|---:|---|
+| Easy / 680009 | 0 | 0 | 0 | Arrived at 335.4 s |
+| Medium / 680005 | 0 | 0 | 0 | Arrived at 314.6 s |
+| Hard / 680009 | 178 | 1 | 3 | Not arrived |
+| Hard / 680013 | 170 | 2 | 0 | Not arrived |
+
+Both Hard cases repeatedly had at least 100 halted E78 vehicles while E82,
+D1 and D2 contained **no vehicles** (16 and 12 sampled instants respectively).
+In Hard 680009 at absolute 620 s, all 178 E78 vehicles were halted and the
+downstream edges were empty. Several stopped J107 heads had no queried leader;
+their lane-change states reported urgent strategic changes blocked by lateral
+leaders/followers and overlap. D1-bound vehicles requested left changes while
+D2-bound vehicles requested right changes. This localizes a route/lane-change
+bottleneck at the 125.36 m J107 internal connector; it is not evidence of a
+full downstream exit queue and is not caused solely by the learned ego policy.
+The relative contributions of connector modeling, SUMO lane-change behavior,
+OD assignment and high demand still require controlled isolation. No road,
+flow, departure time, threshold or speed change was made to obtain these data.
+
+All four diagnostics completed, with 288 scheduled samples and unchanged
+scene/source hashes. Scripts, logs, events, lane/head traces, manifests and
+aggregates are retained under `tmp/ai/background-traffic-audit/`; they and the
+safety probes remain ignored without changing `.gitignore`. The next priority
+is connector/background behavior and measured-speed calibration before a
+route-preparation training comparison. No new training or No Encoder queue
+was launched.
 
 ## Regression validation
 
