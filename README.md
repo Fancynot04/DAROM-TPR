@@ -755,7 +755,9 @@ the live baseline before launch. This group does **not** apply the separate
 bumper-clearance correction or modify the live training/evaluation sources.
 Existing matching archived episodes are checked for identical checkpoint hash,
 scene fingerprints, outcome, success, teleport flag, step count and return.
-The first completed Easy episode passed these parity checks.
+The batch completed all 120 episodes at 23:01 Asia/Shanghai on 2026-10-13.
+All 80 Easy/Medium episodes matched their archived evaluations exactly; all
+120 episodes have valid speed and jerk statistics.
 
 In addition to outcomes and return, reports include mean physical speed (m/s),
 signed jerk (m/s³), absolute jerk and RMS jerk. Motion statistics weight episodes
@@ -768,6 +770,17 @@ and logs, `progress.jsonl`, and live aggregate `status.json` are retained under
 `tmp/ai/table3-metrics/latest-evaluation/`, already ignored by Git. The supervisor
 stops and records an error if evaluation fails, source fingerprints change, or
 an archived parity check fails. No new training is launched by this group.
+
+On 2026-10-14, the follow-up group `AT-T3-H1M-MOTION-20261014` supplements
+the now-completed Hard **1,000,000-step** model using the same 20 development
+seeds, safety off/on, original controller and isolated evaluator: **40 episodes**
+on a serial CPU worker. Every episode must match its archived 1M evaluation
+before contributing to the aggregate. Its logs, manifest and live `status.json`
+are retained separately in `tmp/ai/table3-metrics/hard1m-evaluation/`.
+After all 40 episodes pass, the runner combines these two Hard rows with the
+previous four Easy/Medium 1M rows into `table3-1m.json` and `table3-1m.csv` in
+that directory. It verifies matching evaluator fingerprints and seeds before
+combining results; the 750k Hard metrics are not substituted for the 1M model.
 
 Evaluate a newly trained Antwerp checkpoint in a separate process:
 
