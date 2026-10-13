@@ -1273,7 +1273,7 @@ The user authorized three fresh, independent 1,000,000-step runs on October
 `1M` is the per-model training budget. No proposed route-preparation changes
 are included. Use the complete group and run IDs when comparing later runs.
 
-| Execution order | Density | Run / checkpoint experiment ID | Training seed | Steps |
+| Run | Density | Run / checkpoint experiment ID | Training seed | Steps |
 |---|---|---|---|---|
 | 1 | Hard | `AT-B0-H1M-S579071` | 579071 | 1,000,000 |
 | 2 | Medium | `AT-B0-M1M-S579071` | 579071 | 1,000,000 |
@@ -1298,8 +1298,10 @@ not restore live SUMO/RNG state or provide bit-identical interrupted-run
 resumption. Automatic resumption is not scheduled.
 
 A detached supervisor at `tmp/ai/antwerp-density-1m/background.py` executes
-one CUDA training job at a time, automatically advancing Hard → Medium →
-Easy. An independent queue runs at most one CPU evaluation process at a time.
+**three CUDA training jobs in parallel**, as requested after the initial
+serial launch. Hard's existing process and accumulated training were retained;
+Medium and Easy were started alongside it. An independent queue runs at most
+one CPU evaluation process at a time.
 The already-running 120-episode 200k validation is allowed to finish before
 this group's CPU queue starts. Training does not wait for that evaluation.
 
@@ -1318,7 +1320,8 @@ Table IV-level performance or training-seed stability.
 |---|---|
 | Supervisor, launch and source/scene/command manifest | `tmp/ai/antwerp-density-1m/` |
 | Group progress, PIDs, queue states and evaluation aggregates | `tmp/ai/antwerp-density-1m/status.json` |
-| Supervisor progress and errors | `tmp/ai/antwerp-density-1m/supervisor.log` |
+| Current supervisor progress and errors | `tmp/ai/antwerp-density-1m/parallel-supervisor.log` |
+| Scheduling change and archived serial status | `tmp/ai/antwerp-density-1m/parallel-handoff.json`, `serial-status-at-handoff.json` in the same directory |
 | Console, episode/progress JSONL and TensorBoard per run | `tmp/ai/antwerp-density-1m/<run-id>/` |
 | Per-episode evaluation reports and logs | `tmp/ai/antwerp-density-1m/evaluation/` |
 | Evaluation completion records | `tmp/ai/antwerp-density-1m/evaluation-progress.jsonl` |
@@ -1328,12 +1331,16 @@ Table IV-level performance or training-seed stability.
 The supervisor refuses existing output paths, verifies source/scene hashes
 before launching each subprocess, and records failures instead of silently
 skipping experiments. On failure it stops its own active children and leaves
-all files for inspection. Previously started independent experiments are not
-stopped. Changing experiment code/scenes while this group runs will prevent
+all files for inspection; the adopted Hard process is preserved rather than
+terminated by the replacement supervisor. Its actual process exit code cannot
+be collected by the new parent: completion requires process exit, 1M logged
+steps, final model/buffer files and the training success log footer. Previously
+started independent experiments are not stopped. Changing experiment code/scenes while this group runs will prevent
 further queued subprocesses from starting; future variants should be isolated.
 All generated artifacts remain ignored, with no dependency or ignore-rule
-changes. The estimated training-only duration from the old run is about
-38 hours; actual throughput and concurrent evaluation determine completion.
+changes. The earlier 38-hour training estimate assumed serial execution and
+does not apply to the parallel schedule. Measure sustained per-run throughput
+under GPU/CPU contention to estimate the new finish time.
 
 Validation before launch: 25 contract tests passed. A 16-step local fixture
 exercised the production training entry point with actual SAC updates, saved
@@ -1349,8 +1356,17 @@ in 18 groups. Its outputs are fixtures, not traffic-performance results.
 
 The detached group was launched at **2026-10-13 09:59:45 Asia/Shanghai**
 with supervisor PID `3914167`. Hard started with PID `3914268`, CUDA confirmed;
-Medium and Easy are queued for automatic execution. These PIDs describe the
-launch only; `status.json` and per-run progress logs are the live record.
+Medium and Easy were initially queued. At **10:05:58 Asia/Shanghai**, the
+user-requested parallel handoff replaced only the serial scheduler with PID
+`3941888`; Hard retained PID `3914268` and 7k logged steps, while Medium PID
+`3942022` and Easy PID `3942023` started. The original manifest is preserved;
+`parallel-handoff.json` records the scheduling change and matching source
+hashes. The old scheduler was identity-checked, suspended, then terminated
+without signaling the Hard trainer, preventing duplicate queued launches.
+A simulated full parallel run verified three trainers started before waiting
+for completion, all 360 evaluations completed, and a separate handoff fixture
+verified only the scheduler received signals. These PIDs describe the
+launch/handoff only; `status.json` and per-run progress logs are the live record.
 Launch does not imply completed training or measured improvement.
 
 ```bash
