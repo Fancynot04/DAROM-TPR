@@ -1230,6 +1230,41 @@ evaluation's checkpoint hash was checked against the saved model on October
 13. The supervisor reports `completed`, with all six evaluations recorded
 and the final subprocess exit code zero.
 
+### Expanded checkpoint validation (started 2026-10-13)
+
+Following the completed 200k baseline, a detached evaluation-only job was
+launched at **2026-10-13 09:16:57 Asia/Shanghai**, supervisor PID `3843755`.
+It compares the existing 50k, 100k and 200k checkpoints on the same 20 seeds
+**680001–680020**, with evaluation safety off and on: **120 episodes**.
+Each episode runs in a separate process using the existing deterministic
+Hard/uniform/full evaluation entry point, on CPU with one Torch thread.
+Training safety remains off. These additional seeds are development
+validation cases for checkpoint selection, not a reserved final test.
+No further training budget or formal ablation is scheduled in this stage.
+
+The temporary supervisor `tmp/ai/antwerp-200k-validation/background.py`
+checks baseline source/scene hashes and checkpoint hashes before execution.
+It preserves existing outputs, records a manifest, and stops on a subprocess
+failure or fingerprint mismatch. Each seed/safety/checkpoint combination
+has a separate `.json` report and `.log`; `progress.jsonl` records each
+completed episode. `status.json` records the active process, completed count
+out of 120, and running outcome/success/return aggregates for each of the
+six configurations. Incomplete groups are not final comparative results.
+`supervisor.log` records progress and supervisor errors. Models are read
+from `models_experiments/antwerp-200k/` without modification.
+
+```bash
+cat tmp/ai/antwerp-200k-validation/status.json
+tail -f tmp/ai/antwerp-200k-validation/supervisor.log
+```
+
+The job plan was checked for 120 unique outputs, 20 paired seeds and matching
+baseline source/checkpoint fingerprints. Generated files remain ignored;
+no dependencies or ignore rules changed. Once complete, compare success,
+collision, timeout and emergency-stop counts before choosing a subsequent
+training experiment. The old checkpoints have no saved replay buffer, so a
+future weight-loaded run must not be described as an exact training resume.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
