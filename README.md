@@ -1347,6 +1347,12 @@ A full supervisor dry run with simulated child processes also completed all
 three ordered training jobs, 12 checkpoint registrations and 360 evaluations
 in 18 groups. Its outputs are fixtures, not traffic-performance results.
 
+The detached group was launched at **2026-10-13 09:59:45 Asia/Shanghai**
+with supervisor PID `3914167`. Hard started with PID `3914268`, CUDA confirmed;
+Medium and Easy are queued for automatic execution. These PIDs describe the
+launch only; `status.json` and per-run progress logs are the live record.
+Launch does not imply completed training or measured improvement.
+
 ```bash
 cat tmp/ai/antwerp-density-1m/status.json
 tail -f tmp/ai/antwerp-density-1m/AT-B0-H1M-S579071/train.log
