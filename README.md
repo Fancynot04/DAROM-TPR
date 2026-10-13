@@ -1374,6 +1374,81 @@ cat tmp/ai/antwerp-density-1m/status.json
 tail -f tmp/ai/antwerp-density-1m/AT-B0-H1M-S579071/train.log
 ```
 
+### Learned-checkpoint route diagnosis (2026-10-13)
+
+For the current Table III migration target, six diagnostic episodes replayed
+the existing Hard and Medium **500k-step** GRU checkpoints, pairing evaluation
+safety off/on for three selected development cases. All six exactly matched
+the archived outcome, success/teleport/merge flags, step count, and return;
+checkpoint and scene hashes also matched. These cases were selected to explain
+different failure mechanisms, **not to estimate success rates**.
+
+| Density / evaluation seed | Safety off | Safety on |
+|---|---|---|
+| Hard / 680009 | Success, 303.1 s | Timeout, 600.0 s |
+| Hard / 680013 | Timeout, 600.0 s | Success, 316.0 s |
+| Medium / 680005 | Success, 263.6 s | Teleported arrival, 503.1 s; task failure |
+
+Times start at ego takeover. The observer logged policy requests, actual
+safety-controller decisions, road/lane position, and adjacent traffic without
+changing actions or the policy's normal 134-dimensional input. Replays ran
+sequentially on CPU with one Torch thread; no new training was launched.
+
+- **Late route preparation is present even in successful cases.** All three
+  successful episodes entered the final 119.4 m E82 segment in lane 0 and
+  crossed to lane 3 there. Medium kept its lane throughout E77 and E78.
+  Arrival alone therefore does not demonstrate reliable early preparation.
+- **Medium combines late requests with subsequent safety suppression.** With
+  safety on, ego spent 310.9 s on E82, including 300.2 s below 1 m/s. Of 1,471
+  per-step requests toward the D1 lanes, safety suppressed 1,468; only three
+  commands passed, and one actual lane crossing completed. Ego remained on
+  E82_1 at its end and teleported at about 483 s. Earlier, 33 one-second
+  samples passed the diagnostic adjacent-gap check without a corresponding
+  route-directed request. These are instantaneous heuristic opportunities,
+  not proof that a complete safe maneuver was possible. Suppression counts
+  are 0.1 s commands, not independent attempted maneuvers.
+- **Hard also exhibits queue lock-up.** Seed 680009 with safety on made no
+  progress in its final 100 s despite positive policy and applied acceleration
+  in 991 of 1,000 steps; safety made no longitudinal changes on E78. The
+  four-vehicle leader chain was stopped. Seed 680013 with safety off was
+  already on graph-compatible E78_2, yet advanced only 0.0027 m in its final
+  100 s while requesting positive acceleration throughout. Graph reachability
+  means a lane-connected path exists, not that congestion permits arrival.
+  Early route preparation alone cannot account for every timeout. Safety
+  changes trajectories earlier in the episode, so paired outcomes cannot be
+  attributed solely to the final blocked request.
+
+A separate pure-function counterexample confirmed a **distance-definition
+issue in safety checking**. Observation geometry uses vehicle reference-point
+separation, which the controller treats as clearance without subtracting
+vehicle length. For a stationary ego and leader with the same physical bumper
+gap of 2.501 m, a 4.2 m leader produces reference separation 6.701 m and a brake
+decision, whereas a 16.6 m leader produces 19.101 m and permits acceleration.
+SUMO defines vehicle position at the front bumper; its leader-distance API
+has an additional minGap convention, so these values must not be compared as
+interchangeable physical gaps. See the official
+[position definition](https://sumo.dlr.de/docs/TraCI/Vehicle_Value_Retrieval.html)
+and [leader/neighbor API definitions](https://eclipse.dev/sumo/pydoc/traci/_vehicle.html).
+This confirms a controller-contract issue, not that it caused every observed
+failure. Correcting and testing this contract should precede interpreting
+safety-on performance or adding reward terms.
+
+The current observation has no explicit target exit, lane connectivity, or
+distance to the required divergence. Cumulative distance on this fixed route
+can nevertheless convey location implicitly; these replays do not establish
+that the task is unobservable or that adding route features/rewards improves
+learning. Such claims require a controlled comparison. No production state,
+reward, controller, checkpoint, or scene was changed by this diagnosis.
+
+Local diagnostic artifacts are retained, ignored by Git, under
+`tmp/ai/checkpoint-route-diagnosis/`: `probe.py`, `probe.log`, `manifest.json`,
+`results.json`, per-case `trace.jsonl`/`summary.json`, `analyze.py`,
+`analysis.json`, `analysis.log`, `gap-contract-check.json`, and
+`trajectories.png`. Production code does not depend on these files. The active
+training group's source/scene hashes remain unchanged; `.gitignore` needs no
+update. New training, including the deferred No Encoder queue, remains paused
+pending a separate decision.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
