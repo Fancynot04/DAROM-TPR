@@ -740,6 +740,35 @@ and distinguishes failed lane-change commands from unavailable gaps.
 
 ## Evaluation
 
+### Current Table III motion evaluation (2026-10-13)
+
+The background group `AT-T3-MOTION-20261013` supplements the running baseline
+with the physical metrics implemented in isolated `table3-metrics` commit
+`7d1710f`. It evaluates Easy/Medium **1,000,000-step** checkpoints and the
+currently available Hard **750,000-step** checkpoint, fixed at launch. Each
+checkpoint uses development seeds 680001–680020 with safety off/on: **120
+episodes**, serial CPU evaluation with one PyTorch thread. This is one training
+seed per density, not a multi-training-seed study or an equal-budget comparison.
+
+Environment, scene and original safety-controller files were checked against
+the live baseline before launch. This group does **not** apply the separate
+bumper-clearance correction or modify the live training/evaluation sources.
+Existing matching archived episodes are checked for identical checkpoint hash,
+scene fingerprints, outcome, success, teleport flag, step count and return.
+The first completed Easy episode passed these parity checks.
+
+In addition to outcomes and return, reports include mean physical speed (m/s),
+signed jerk (m/s³), absolute jerk and RMS jerk. Motion statistics weight episodes
+equally and include all outcomes; teleport gaps are excluded from derivatives.
+Success requires arrival without ego teleport. Partial groups must retain their
+actual sample count and must not be presented as completed 20-episode results.
+
+The temporary supervisor, launch/checkpoint/source manifest, per-episode JSON
+and logs, `progress.jsonl`, and live aggregate `status.json` are retained under
+`tmp/ai/table3-metrics/latest-evaluation/`, already ignored by Git. The supervisor
+stops and records an error if evaluation fails, source fingerprints change, or
+an archived parity check fails. No new training is launched by this group.
+
 Evaluate a newly trained Antwerp checkpoint in a separate process:
 
 ```bash
