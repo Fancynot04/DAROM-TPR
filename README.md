@@ -1265,6 +1265,93 @@ collision, timeout and emergency-stop counts before choosing a subsequent
 training experiment. The old checkpoints have no saved replay buffer, so a
 future weight-loaded run must not be described as an exact training resume.
 
+### Three-density 1M baseline: AT-B0-1M-20261013
+
+The user authorized three fresh, independent 1,000,000-step runs on October
+13. The experiment group is **`AT-B0-1M-20261013`**. `AT` identifies Antwerp;
+`B0` identifies the current version 2 observation/action/reward baseline;
+`1M` is the per-model training budget. No proposed route-preparation changes
+are included. Use the complete group and run IDs when comparing later runs.
+
+| Execution order | Density | Run / checkpoint experiment ID | Training seed | Steps |
+|---|---|---|---|---|
+| 1 | Hard | `AT-B0-H1M-S579071` | 579071 | 1,000,000 |
+| 2 | Medium | `AT-B0-M1M-S579071` | 579071 | 1,000,000 |
+| 3 | Easy | `AT-B0-E1M-S579071` | 579071 | 1,000,000 |
+
+Each run starts from scratch, including Hard; the old 200k model is not
+loaded. All use full GRU/SAC, uniform delay up to 20 steps, training safety
+off, learning rate 3e-5, gamma 0.99, batch size 512, CUDA and one Torch thread.
+The 0.1-second step, 6,000-step episode limit, traffic, road and policy inputs
+remain the same. W&B is disabled. This is three density-specific policies,
+not three training seeds or a cross-density generalization experiment.
+
+`train_sac_delay.py --save_replay_buffer` enables SB3 replay-buffer saving
+alongside numbered checkpoints and the final model. The run name is also
+stored as the model's `experiment_id`. The switch is off by default, so old
+commands retain their previous storage behavior. This group saves at 250k,
+500k, 750k and 1M, plus the final model and buffer. The SB3 periodic callback
+runs before inserting the current transition; its replay buffer therefore
+lags the checkpoint step by one transition. Final saving occurs after
+`learn()` returns. These files support future training continuation, but do
+not restore live SUMO/RNG state or provide bit-identical interrupted-run
+resumption. Automatic resumption is not scheduled.
+
+A detached supervisor at `tmp/ai/antwerp-density-1m/background.py` executes
+one CUDA training job at a time, automatically advancing Hard → Medium →
+Easy. An independent queue runs at most one CPU evaluation process at a time.
+The already-running 120-episode 200k validation is allowed to finish before
+this group's CPU queue starts. Training does not wait for that evaluation.
+
+Evaluate each density's 250k, 500k and 1M checkpoints on the matching density,
+using development seeds 680001–680020, safety off and on, one episode per
+seed: **360 episodes**. The same seeds are used in the old 200k validation
+and are not an unseen final test. Numbered checkpoint/replay pairs become
+eligible only after a later training progress entry or successful training
+exit confirms saving has finished. Each evaluation gets an exclusive JSON
+report/log. Compare uninterrupted success, collision, timeout, emergency-stop
+and teleport counts; successful travel time can be derived from episode steps.
+Incomplete groups and one training seed per density do not establish
+Table IV-level performance or training-seed stability.
+
+| Artifact | Location |
+|---|---|
+| Supervisor, launch and source/scene/command manifest | `tmp/ai/antwerp-density-1m/` |
+| Group progress, PIDs, queue states and evaluation aggregates | `tmp/ai/antwerp-density-1m/status.json` |
+| Supervisor progress and errors | `tmp/ai/antwerp-density-1m/supervisor.log` |
+| Console, episode/progress JSONL and TensorBoard per run | `tmp/ai/antwerp-density-1m/<run-id>/` |
+| Per-episode evaluation reports and logs | `tmp/ai/antwerp-density-1m/evaluation/` |
+| Evaluation completion records | `tmp/ai/antwerp-density-1m/evaluation-progress.jsonl` |
+| Completed checkpoint hashes and buffer sizes | `tmp/ai/antwerp-density-1m/checkpoints.jsonl` |
+| Models and replay buffers | `models_experiments/antwerp-density-1m/<run-id>/` |
+
+The supervisor refuses existing output paths, verifies source/scene hashes
+before launching each subprocess, and records failures instead of silently
+skipping experiments. On failure it stops its own active children and leaves
+all files for inspection. Previously started independent experiments are not
+stopped. Changing experiment code/scenes while this group runs will prevent
+further queued subprocesses from starting; future variants should be isolated.
+All generated artifacts remain ignored, with no dependency or ignore-rule
+changes. The estimated training-only duration from the old run is about
+38 hours; actual throughput and concurrent evaluation determine completion.
+
+Validation before launch: 25 contract tests passed. A 16-step local fixture
+exercised the production training entry point with actual SAC updates, saved
+and reloaded both periodic checkpoint/buffer pairs and the final pair, and
+verified experiment IDs, transition counts and stored observations/actions.
+Only this fixture uses a small replay buffer; the actual experiments retain
+SAC's existing buffer configuration. The temporary fixture and outputs are
+kept under `tmp/ai/antwerp-density-1m/verification/`. The supervisor plan was
+checked for three unique training runs and 360 unique paired evaluation jobs.
+A full supervisor dry run with simulated child processes also completed all
+three ordered training jobs, 12 checkpoint registrations and 360 evaluations
+in 18 groups. Its outputs are fixtures, not traffic-performance results.
+
+```bash
+cat tmp/ai/antwerp-density-1m/status.json
+tail -f tmp/ai/antwerp-density-1m/AT-B0-H1M-S579071/train.log
+```
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and

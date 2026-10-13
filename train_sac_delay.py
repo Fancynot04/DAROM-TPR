@@ -146,6 +146,8 @@ def parse_args():
     parser.add_argument('--total_timesteps', type=int, default=7_000_000,
                         help='Training steps; defaults to the paper v5 budget')
     parser.add_argument('--checkpoint_freq', type=int, default=100_000)
+    parser.add_argument('--save_replay_buffer', action='store_true',
+                        help='Save replay buffers alongside periodic and final models')
     parser.add_argument('--torch_threads', type=int, default=None)
     parser.add_argument('--device', default='auto')
     parser.add_argument('--log_dir', default='runs')
@@ -196,6 +198,7 @@ def main():
         device=args.device,
         torch_threads=args.torch_threads,
         checkpoint_freq=args.checkpoint_freq,
+        save_replay_buffer=args.save_replay_buffer,
     )
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
                      mode=args.wandb_mode, dir=args.log_dir, sync_tensorboard=True,
@@ -268,6 +271,7 @@ def main():
     model.ablation = args.ablation
     model.antwerp_env_version = ANTWERP_ENV_VERSION
     model.training_safety = args.use_safety
+    model.experiment_id = args.run_name
 
     ensure_dirs(args.save_dir)
     model_path = os.path.join(args.save_dir, f"{args.run_name}.zip")
@@ -278,6 +282,7 @@ def main():
     checkpoint_callback = CheckpointCallback(
         save_freq=args.checkpoint_freq, save_path=checkpoint_dir,
         name_prefix=args.run_name, verbose=2,
+        save_replay_buffer=args.save_replay_buffer,
     )
     wandb_callback = WandbCallback(
         gradient_save_freq=1000,
@@ -293,6 +298,10 @@ def main():
     try:
         model.learn(total_timesteps=args.total_timesteps, callback=callbacks)
         save_model(model, model_path)
+        if args.save_replay_buffer:
+            replay_path = os.path.join(args.save_dir, f'{args.run_name}_replay_buffer.pkl')
+            model.save_replay_buffer(replay_path)
+            print(f'Saved final replay buffer to {replay_path}', flush=True)
     finally:
         vec_env.close()
 
