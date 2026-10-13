@@ -1150,7 +1150,7 @@ reward, network, traffic demand, episode limit or model was changed in this
 stage. Seeds 579081–579084 are now diagnostic/development cases and must not
 be reused as unseen final-test seeds after tuning against these findings.
 
-### Background 200k baseline (started 2026-10-12)
+### Background 200k baseline (completed 2026-10-13)
 
 A fresh Antwerp Hard `full` GRU/SAC run was launched in a detached process
 at 2026-10-12 22:33 Asia/Shanghai. The target is **200,000 total steps**,
@@ -1199,6 +1199,36 @@ cat tmp/ai/antwerp-200k/status.json
 The temporary supervisor lives in `tmp/ai/antwerp-200k/background.py`; it
 orchestrates the existing production entry points without modifying them.
 All generated logs, models and supervisor files remain ignored by Git.
+
+The run completed successfully: training ended at **2026-10-13 01:03:53**
+Asia/Shanghai and all six evaluation jobs ended at **01:25:56**. Training
+reached 200,000 steps and 199,899 updates in 9,017.94 seconds (about 2 h 30 m).
+Its 87 completed exploration episodes contained 34 uninterrupted arrivals,
+37 collisions, eight timeouts and eight emergency-stop terminations. No ego
+teleports were recorded. The first training success ended at step 36,474.
+Training success (34/87, 39.1%) is not deterministic evaluation performance;
+the final partially completed episode is excluded from these counts.
+
+| Checkpoint | Evaluation safety | Success | Collision | Timeout | Emergency stop | Mean return |
+|---|---|---|---|---|---|---|
+| 50k | Off | 2/4 | 2/4 | 0/4 | 0/4 | -45.142 |
+| 50k | On | 2/4 | 2/4 | 0/4 | 0/4 | -109.294 |
+| 100k | Off | 2/4 | 2/4 | 0/4 | 0/4 | -220.810 |
+| 100k | On | 2/4 | 0/4 | 1/4 | 1/4 | -759.690 |
+| 200k | Off | 1/4 | 3/4 | 0/4 | 0/4 | -23.668 |
+| 200k | On | 2/4 | 2/4 | 0/4 | 0/4 | -3.789 |
+
+All 24 evaluation episodes had no ego teleport. In particular, the 200k
+policy reached D1 on seed 579084 in 210.0 seconds with safety off; with safety
+on it succeeded on seeds 579083 and 579084. These are learned-policy
+successes on Antwerp Hard, distinct from the earlier reference-controller
+and original-road calibration successes. Four development episodes per
+configuration cannot establish a reliable ranking, monotonic improvement,
+or Table IV-level performance. A higher return does not imply a higher
+success rate. Source/scene hashes still match the launch manifest, and each
+evaluation's checkpoint hash was checked against the saved model on October
+13. The supervisor reports `completed`, with all six evaluations recorded
+and the final subprocess exit code zero.
 
 ## Regression validation
 
