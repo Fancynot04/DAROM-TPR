@@ -1801,15 +1801,32 @@ is included. The evaluation sample size follows the paper; the models remain
 Total: **9000 episodes**, excluding the six pilot cases and previous development
 evaluations. Three disjoint seed ranges are 710001–710500, 720001–720500 and
 730001–730500. SC off/on are paired on the same seeds; all cases use deterministic
-actions and uniform delays up to 20 steps. Two CPU processes with one PyTorch
-thread each interleave scenarios, safety settings and batches. Each completed
+actions and uniform delays up to 20 steps. Four CPU worker processes with one
+PyTorch thread each interleave scenarios, safety settings and batches. The
+workers execute episodes from six configurations (three densities × safety
+off/on); they do not represent four densities or four models. Each completed
 episode is saved immediately; an evaluator error stops new scheduling instead
 of dropping the case. Successful cases are preserved when explicitly resuming.
 
-The two-worker timing projection is approximately **84 hours (3.5 days)**,
-with a practical planning range of **3–5 days**, subject to case mix and server
-contention. Progress and estimated finish time are updated during execution.
+The original two-worker timing projection was approximately **84 hours**.
+At the same per-episode speed, four workers project approximately **42 hours**;
+allow roughly **2–3 days** for planning, subject to case mix and server contention.
+This is a pilot-based estimate, not measured sustained four-worker throughput.
+Progress and estimated finish time are updated during execution.
 All batch sizes and settings are fixed before inspecting the new results.
+
+Formal evaluation started at 19:12:18 Asia/Shanghai on October 14 with two
+workers. After the user requested more parallelism if resources permitted,
+CPU sampling showed 30–34% idle, 22 GiB available memory and no active swap I/O.
+The two in-flight episodes finished before replacing only the scheduler at
+19:18:05. All nine saved reports were retained; new supervisor PID `2888031`
+started four workers. Post-launch sampling showed 25–28% CPU idle and about
+20 GiB available memory, with no active swap I/O. These are launch-time
+observations; consult `formal/status.json` for live progress. The handoff is
+recorded in `formal/parallel-handoff.json`. Runtime `control.json` can set
+1–4 workers; lowering the limit lets active episodes finish before reducing
+concurrency. The control bounds and unchanged 9000-job schedule were checked.
+Model, scene, safety and metric definitions remain frozen.
 
 Outputs under `tmp/ai/table3-1m-1500/formal/` include `status.json`,
 `progress.jsonl`, `supervisor.log`, per-episode logs/JSON, and automatically updated
