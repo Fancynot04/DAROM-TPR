@@ -1751,6 +1751,37 @@ the remaining learning differences require matched diagnostics, not inference
 from curve shape alone. Neither repository's training code or models changed,
 and no new training or evaluation was launched.
 
+### Six-episode reevaluation timing pilot (2026-10-14)
+
+The user narrowed the next task to a timing/compatibility check only. Group
+`AT-T3-1M-1500-20261014/pilot` evaluated the existing Easy/Medium/Hard 1M
+checkpoints with SC off/on, one archived development seed (680001) per case.
+Two CPU evaluator processes, each with one PyTorch thread, completed all six
+cases in **255.2 seconds** and stopped. All outcomes, steps, returns and motion
+metrics exactly matched the archived evaluations; checkpoint hashes remained
+unchanged. This verifies the evaluation pipeline, not task success rates.
+
+| Scenario | SC off wall time (s) | SC on wall time (s) |
+|---|---:|---:|
+| Easy | 22.0 | 54.1 |
+| Medium | 38.5 | 76.5 |
+| Hard | 193.1 | 17.0 |
+
+Mean per-process episode wall time was 66.87 seconds. Assuming the same case
+mix and sustained two-worker utilization, 600/3000/9000 episodes would take
+approximately 5.6/27.9/83.6 hours. These are rough projections from only six
+cases, sensitive to episode lengths and server contention; they are not runtime
+guarantees. Directly scaling this small batch's elapsed time also includes its
+idle-worker tail and gives a more conservative 106.3 hours for 9000 episodes.
+
+The temporary runner, frozen model/source manifest, per-case logs/reports,
+`pilot/status.json` and `pilot/timing.json` remain under
+`tmp/ai/table3-1m-1500/`. The prepared 9000-episode formal manifest is dormant:
+**no formal evaluation was launched or queued, and the pilot does not launch
+it automatically**. Further large-scale evaluation requires a new instruction.
+Training/model/environment code and ignore rules are unchanged; the local
+`agents.md` task boundary records the six-episode limit.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
