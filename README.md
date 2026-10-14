@@ -1702,6 +1702,55 @@ The final plotted return windows average 119.46/150.23/-370.17 for Easy/Medium/H
 over 25/25/23 episodes, respectively; these are training returns, not Table III
 evaluation returns. No training, model, environment or dependency is changed.
 
+### Existing DAROM-original training comparison (2026-10-14)
+
+The local `../DAROM-original/` contains an actual 10M-step reproduction,
+`GRU-uniform-delay-full`, seed 42, GRU/uniform, learning rate 3e-5 and batch
+size 512. Read-only extraction recovered 5,113 TensorBoard loss records,
+20,454 completed training episodes and 100 historical evaluation checkpoints.
+The short `GRU-uniform-mytest` run and distributed pretrained models are not
+substituted for this run. W&B records were read locally with fragment checksums
+verified; no W&B initialization, synchronization or network upload was used.
+The cumulative episode lengths match every TensorBoard logging step exactly
+(one dump per four episodes); cumulative returns also match the logged means.
+
+| Original reproduction window | Mean training episode return | Median actor loss | Median critic loss |
+|---|---:|---:|---:|
+| 800k–1M | -261.77 | 44.74 | 2.16 |
+| 6M–7M | -247.89 | 39.39 | 2.10 |
+| 9M–10M | 143.94 | -38.29 | 1.81 |
+
+Original actor loss initially rises from about -1.8 to 69.6, then falls;
+it remains positive at 1M and 7M. Historical deterministic evaluation reports
+0/51 arrivals at 1M and 7M, and 49/51 (96.08%) at 10M, using the original
+callback's arrival definition, not Antwerp's stricter success definition.
+Critic loss has a raw spike of 3,756,378.5 at step 8,278,650, followed by
+recovery. Thus this local reproduction does not duplicate the paper's smooth
+training trajectory either. Early positive actor loss or a transient critic
+spike alone does not establish transfer failure; this one run also cannot
+guarantee that longer Antwerp training will recover.
+
+`tmp/ai/training-loss-analysis/original_reproduction_training.{png,pdf}` shows
+the first 1M and full 10M history. `original_vs_antwerp_1m.{png,pdf}` compares
+equal training budgets with the same trailing 50k-step arithmetic mean.
+The same original run is repeated against Antwerp Easy/Medium/Hard, not three
+matched original-density runs. All raw values are retained; critic axes are
+logarithmic and the full-history original actor axis is symlog beyond +/-80.
+`compare_original.py`, allowlisted CSV exports, source hashes, statistics and
+the parsing/plot log remain in the same temporary directory.
+
+The archived run records commit `eabd572fc0aece579e5b553bdc7af27a8b81d03a`.
+Present original scene files match that commit, and its default route matches
+Hard, but the archived environment points to the historical absolute directory
+`/home/cyl/project/DAROM/`, which no longer exists; runtime scene hashes were
+not recorded. Treat traffic provenance as qualified, not a controlled paired
+experiment. Seeds differ and the original SUMO configuration used `--random`.
+Original logging starts at step 254 versus Antwerp's 9608/5529/13911; neither
+first recorded loss represents an identical initialization stage. Reasons for
+the remaining learning differences require matched diagnostics, not inference
+from curve shape alone. Neither repository's training code or models changed,
+and no new training or evaluation was launched.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
