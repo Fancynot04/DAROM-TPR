@@ -1684,6 +1684,24 @@ deterministic evaluation, including lane-change command distributions, is a
 more informative next diagnostic than inferring convergence from loss alone.
 This audit launches no new training or evaluation.
 
+The same directory also contains `figure4_training_curves.png` and `.pdf`,
+following the row/column layout of
+[paper Figure 4](https://arxiv.org/html/2403.11852v5#S5.SS5): Easy/Medium/Hard
+columns and average training return, critic loss, actor loss rows. This figure
+uses the **arithmetic mean** of available samples in the trailing 50k environment
+steps for all bold curves, rather than the median used in `loss_curves`.
+Return data include all 490/480/442 completed training episodes from
+`training.jsonl`; losses use the TensorBoard records described above.
+Raw points, including negative-return outliers and the Hard critic spike, remain
+visible. Return axes have independent ranges; critic axes use a shared log scale
+to retain the full spike. `figure4_data.csv` exports raw values, rolling means
+and window sample counts; `statistics.json` includes episode-source hashes.
+Only one GRU training seed per scenario is available here: this is not a
+multi-method comparison, independent evaluation, or multi-seed confidence band.
+The final plotted return windows average 119.46/150.23/-370.17 for Easy/Medium/Hard
+over 25/25/23 episodes, respectively; these are training returns, not Table III
+evaluation returns. No training, model, environment or dependency is changed.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
