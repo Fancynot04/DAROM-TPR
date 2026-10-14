@@ -1846,6 +1846,52 @@ formal table begins empty. The original six-episode parity validation remains
 applicable because this extension changes scheduling authorization and report
 export only, not environment, policy inference or motion measurement.
 
+### Original full-GRU best: historical Table III and Figure 4 export (2026-10-14)
+
+The requested checkpoint is specifically
+`../DAROM-original/models/GRU-uniform-delay-full/GRU-uniform-delay-full_best.zip`.
+Its metadata records **9,700,000 steps**, seed 42, learning rate 3e-5 and batch
+size 512; SHA256 is `eff41757c0aac5ad535fe187f737e9828105fc247c5163057bfe92a6e1c2d82a`.
+It must not be confused with similarly named models in another directory.
+Two complete historical uniform-delay, safety-on logs name this model path:
+
+| Historical log | Episodes | Legacy arrival (%) | Collision (%) | Timeout (%) | Return | Speed (m/s) | Signed jerk (m/s³) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `eval_uniform_best_uniform.log` | 501 × 3 | 99.53 ± 0.13 | 0.00 ± 0.00 | 0.00 ± 0.00 | 177.95 ± 0.40 | 29.24 ± 0.01 | -0.26 ± 0.01 |
+| `eval_uniform.log` | 501 × 3 | 99.40 ± 0.45 | 0.00 ± 0.00 | 0.00 ± 0.00 | 177.64 ± 1.25 | 29.24 ± 0.01 | -0.25 ± 0.01 |
+
+These are separate existing evaluations, not additional densities or newly
+executed trials. The table transcribes the complete log footers. Their ± values
+are the old evaluator's **1.96 × standard error**, computed across three batches
+for outcomes/return and across episodes for motion; they are not the batch
+standard deviations in the ongoing Antwerp table. Historical success means
+`Arrived` without the stricter no-teleport check. No Merge remains a timeout
+proxy. Current default scene files match Hard, but the historical scene and
+checkpoint hashes were not logged, so their exact identity is unverified.
+No separate Easy/Medium or safety-off records were found for this checkpoint.
+Some per-episode lines are disrupted by stdout/stderr interleaving, and motion
+trajectories were not retained; the footers cannot be fully independently
+reconstructed. The incomplete `eval_uniform_best.log` is excluded.
+
+`tmp/ai/original-best-report/` contains `table3.md/.csv/.json`,
+`table3_original_best.pdf/.png`, and `figure4_original_best.pdf/.png` with
+underlying `figure4_data.csv`. The figure uses the previously extracted actual
+10M training history: 20,454 episode returns and 5,113 points per loss metric,
+with a trailing 50k-step arithmetic mean and a vertical marker at 9.7M.
+Post-best training is shaded. Critic uses a log axis and actor a symmetric-log
+axis outside ±80; outliers are retained. This is one run's training history,
+not evaluation losses or three independent density-specific histories.
+Source W&B/TensorBoard hashes were rechecked, rolling means independently
+recomputed, and both rendered figures inspected. Six complete historical logs
+(including four other delay modes in a supplementary table) and one incomplete
+log are inventoried in `manifest.json`; `build_report.py`, `build.log` and
+`validation.json` retain the extraction and verification details.
+
+Resource sampling found about 469 GiB free disk, 21 GiB available memory and
+26–28% idle CPU while the four Antwerp evaluators continued normally. This
+export required no additional SUMO job, training, dependency or ignore-rule
+change. The files remain local temporary analysis artifacts; no upload occurred.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
