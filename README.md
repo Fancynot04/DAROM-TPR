@@ -1591,6 +1591,62 @@ is connector/background behavior and measured-speed calibration before a
 route-preparation training comparison. No new training or No Encoder queue
 was launched.
 
+### Small speed-limit sensitivity probe (2026-10-14)
+
+Group `AT-SPEED50-60-PILOT-20261014` tests two previously diagnosed Hard seeds,
+680009 and 680013, using isolated scene copies. Only the 46 external-lane
+speed limits change from 13.89 to 16.67 m/s (approximately 50 to 60 km/h).
+All internal connector limits, geometry, demand, vehicle types, OD routes and
+random seeds remain fixed. The 60 km/h value is a sensitivity setting, not a
+claim about the real road's legal limit. Because `departSpeed="speedLimit"`
+is retained, realized entry speeds can change as part of this intervention.
+
+Four native-SUMO episodes use the same absolute 720 s observation horizon.
+Both 50 km/h baselines exactly reproduce all 72 archived ten-second traffic
+snapshots (lane counts, halted vehicles, lane speeds, active and pending counts).
+
+| Native SUMO seed | Limit km/h | Ego uninterrupted arrival by 720 s | Peak E78 halted | Background collision events | Network arrivals / departures |
+|---|---:|---|---:|---:|---:|
+| 680009 | 50 | No | 178 | 1 | 301 / 1435 |
+| 680009 | 60 | Yes, at absolute 364.1 s | 110 | 12 | 464 / 1435 |
+| 680013 | 50 | No | 170 | 2 | 310 / 1435 |
+| 680013 | 60 | No | 178 | 1 | 278 / 1435 |
+
+Network arrivals can include teleported vehicles and are not a success metric.
+The increased collisions in the first higher-speed case mean that lower queues
+cannot be attributed solely to better traffic service: collision participants
+are removed under the unchanged SUMO collision configuration. The second seed
+does not improve. These two selected seeds cannot estimate general success rates.
+
+The same pair is also evaluated with the frozen Hard 1M GRU model, additional
+safety off, SUMO speed mode 31, and the existing 600 s takeover-based timeout.
+The 50 km/h model controls must match archived outcomes, steps and returns.
+The existing model was trained at 50 km/h, so higher-speed evaluation tests
+sensitivity of that policy, not performance after retraining at 60 km/h.
+
+All eight cases completed. Both 50 km/h model controls exactly matched the
+archived steps, outcomes, success/teleport/merge flags and returns. Model elapsed
+times below are measured from takeover; both 60 km/h ego episodes had no teleport.
+
+| Hard 1M GRU, extra safety off | 50 km/h | 60 km/h | Mean ego speed, 50 → 60 (m/s) |
+|---|---|---|---:|
+| Seed 680009 | Success, 258.6 s | Collision, 167.4 s | 10.055 → 13.834 |
+| Seed 680013 | Timeout, 600.0 s | Success, 548.7 s | 3.460 → 4.736 |
+
+One model case improves and one regresses; each limit has one success in these
+two selected cases. This demonstrates speed sensitivity, not a general benefit
+from raising the limit or proof that 50 km/h is the principal failure cause.
+Background teleports remain possible and are counted separately from ego
+success. Do not merge these sensitivity episodes into the baseline Table III.
+Source, production-scene and checkpoint hashes were verified unchanged after
+the test, and traffic logging covered each model episode through its terminal step.
+
+Temporary scripts, isolated networks/routes, source/checkpoint manifests,
+per-case traffic traces and summaries remain in `tmp/ai/speed-limit-probe/`.
+An initial terminal-step logging error was fixed in the temporary probe;
+the failed attempt and logs are retained, and only model probes were resumed.
+No production scene, reward, model or dependency is changed.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
