@@ -1647,6 +1647,43 @@ An initial terminal-step logging error was fixed in the temporary probe;
 the failed attempt and logs are retained, and only model probes were resumed.
 No production scene, reward, model or dependency is changed.
 
+### Training-loss and convergence audit (2026-10-14)
+
+Read-only analysis of the three AT-B0 1M TensorBoard files exports actor loss,
+critic loss, entropy-coefficient loss, entropy coefficient alpha, and success
+diagnostics under `tmp/ai/training-loss-analysis/`. PNG/PDF figures, raw
+`scalars.csv`, source hashes and descriptive `statistics.json` are retained
+there; production code and models are unchanged. The verification smoke-run
+event file is excluded. Easy/Medium/Hard have 122/120/110 logged points, ending
+at steps 995324/998750/991929, respectively, although training completed 1M.
+SB3 dumps these logs every four episodes; they do not record every optimizer
+update. Plots retain raw values and overlay a trailing 50k-step median, with
+a shared logarithmic critic-loss axis and the last 200k steps shaded.
+
+| Scenario | Critic loss median, logged points in 800k–1M | Training success, episodes ending in 800k–1M | Final deterministic eval success, SC off / on |
+|---|---:|---:|---:|
+| Easy | 0.838 | 84/103 = 81.6% | 20% / 15% |
+| Medium | 1.996 | 86/101 = 85.1% | 0% / 0% |
+| Hard | 6.208 | 42/93 = 45.2% | 45% / 35% |
+
+All inspected scalar values are finite. Easy/Medium critic loss and alpha
+are comparatively stable late in training, but actor loss still drifts and
+independent task performance does not show sustained improvement. Hard has
+intermittent large critic errors and a final recorded spike of **9233.912 at
+991929 steps**. One spike, with no subsequent logged loss, does not establish
+sustained divergence or identify its cause. A low sampled Bellman error or
+near-zero entropy-coefficient loss is not evidence of successful task learning;
+SAC actor loss also has no required zero limit.
+
+The training/evaluation discrepancy is especially large for Easy/Medium.
+Training uses sampled actions and changing policies/scenarios; evaluation uses
+frozen checkpoints, deterministic actions, and 20 development seeds. These
+are not matched estimators. The data do not isolate action determinism, seed
+generalization, reward alignment or overfitting. A matched stochastic versus
+deterministic evaluation, including lane-change command distributions, is a
+more informative next diagnostic than inferring convergence from loss alone.
+This audit launches no new training or evaluation.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
