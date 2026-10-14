@@ -1782,6 +1782,53 @@ it automatically**. Further large-scale evaluation requires a new instruction.
 Training/model/environment code and ignore rules are unchanged; the local
 `agents.md` task boundary records the six-episode limit.
 
+### Table III reevaluation plan after the timing pilot (2026-10-14)
+
+Following the completed pilot, the user authorized the paper-sized evaluation
+and Table III generation for the current three **1M** Antwerp checkpoints.
+Group `AT-T3-1M-1500-20261014` uses the validated metrics worktree at `7d1710f`
+and freezes the existing baseline safety controller and model/scene hashes.
+No additional training, original pretrained-model evaluation or other algorithm
+is included. The evaluation sample size follows the paper; the models remain
+1M checkpoints, not the paper's 7M training runs.
+
+| Scenario | Checkpoint | Evaluation safety | Episodes per setting |
+|---|---|---|---:|
+| Easy | AT-B0-E1M-S579071, 1M | off / on | 500 × 3 = 1500 |
+| Medium | AT-B0-M1M-S579071, 1M | off / on | 500 × 3 = 1500 |
+| Hard | AT-B0-H1M-S579071, 1M | off / on | 500 × 3 = 1500 |
+
+Total: **9000 episodes**, excluding the six pilot cases and previous development
+evaluations. Three disjoint seed ranges are 710001–710500, 720001–720500 and
+730001–730500. SC off/on are paired on the same seeds; all cases use deterministic
+actions and uniform delays up to 20 steps. Two CPU processes with one PyTorch
+thread each interleave scenarios, safety settings and batches. Each completed
+episode is saved immediately; an evaluator error stops new scheduling instead
+of dropping the case. Successful cases are preserved when explicitly resuming.
+
+The two-worker timing projection is approximately **84 hours (3.5 days)**,
+with a practical planning range of **3–5 days**, subject to case mix and server
+contention. Progress and estimated finish time are updated during execution.
+All batch sizes and settings are fixed before inspecting the new results.
+
+Outputs under `tmp/ai/table3-1m-1500/formal/` include `status.json`,
+`progress.jsonl`, `supervisor.log`, per-episode logs/JSON, and automatically updated
+`table3.md`, `table3.csv`, `table3.json`. The table contains the six GRU safety-on/off
+rows with success, collision, timeout/legacy No Merge, return, speed and signed
+jerk. Partial results are explicitly labeled; the final ± values are sample
+standard deviations across the three evaluation batches, not confidence bounds
+or training-seed variation. JSON also retains Wilson 95% success intervals,
+actual unmerged/merged timeouts, teleport outcomes, safety intervention counts,
+absolute/RMS jerk and missing-motion counts. Only one training seed per density
+is represented. The paper's additional algorithms remain outside this table.
+
+Preparation validation passed for all 9000 unique paired jobs, source/model
+fingerprints, and empty/partial/complete table exports with synthetic batch
+statistics. Synthetic outputs remain isolated under `verification/`; the
+formal table begins empty. The original six-episode parity validation remains
+applicable because this extension changes scheduling authorization and report
+export only, not environment, policy inference or motion measurement.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
