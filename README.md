@@ -1892,6 +1892,77 @@ Resource sampling found about 469 GiB free disk, 21 GiB available memory and
 export required no additional SUMO job, training, dependency or ignore-rule
 change. The files remain local temporary analysis artifacts; no upload occurred.
 
+### Antwerp actor-loss decomposition and Hard critic spike audit (2026-10-15)
+
+The user requested a concrete explanation of the current 1M loss curves.
+This audit reads saved checkpoints and replay buffers on CPU, with one Torch
+thread, without gradient updates or SUMO. The original figures and ongoing
+Table III evaluation are unchanged. Source/model/replay hashes and results
+are retained under `tmp/ai/loss-spike-audit/`.
+
+The installed SB3 logger overwrites `train/*` metrics on each training call
+and dumps them every four completed episodes. These runs use one gradient
+step per interaction and batch size 512. Thus a plotted loss is the latest
+minibatch loss at the dump, **not the average loss across the preceding four
+episodes**. For the 991,929-step dump, `n_updates=991828` corresponds to training
+through interaction 991,928; the arrival transition at 991,929 has been stored
+but has not yet been used in an update. Its preceding reward is +0.1044 and
+its arrival reward is +49.9683. The episode arrived without teleport, and the
+next two completed episodes also arrived. There is no evidence that an ego
+collision at that timestamp caused the spike. The last recorded critic losses
+are 14.306, 2.383, 3.968, 4.883 and 9233.912. In Figure 4 the final bold value
+1544.277 averages only six logged points; it is not evidence of a continuously
+elevated loss over 50k steps.
+
+With `gradient_steps=1` and `target_entropy=-2`, existing alpha/alpha-loss
+records allow algebraic reconstruction of the logged actor objective's two
+terms, subject to float rounding. Actor loss is `alpha * mean(log_pi) - mean(Q)`.
+The latest reconstructed entropy and negative-Q terms are respectively
+0.0864 + 17.4485 for Easy, 0.1046 + 27.5999 for Medium, and 0.0588 + 21.6757
+for Hard. At the first recorded points, mean Q was +15.0388, +9.5233 and
++1.8447 respectively. Their subsequent negative value estimates account for
+most of the initial-to-final actor-loss increase; this is not an independently
+measured increase in driving error. The states/policies differ across these
+historical minibatches. A separate fixed set of 8192 first-250k replay states
+also shows Easy actor objective rising 10.105→15.896 between its 250k and 1M
+checkpoints, dominated by the Q term, while critic MSE falls 1.546→0.936.
+
+All three saved periodic replay buffers contain 999,999 transitions (the
+checkpoint callback runs before storing the millionth), with finite states,
+actions and rewards and episode boundaries matching the complete episode logs.
+Hard single-step rewards range from -100.8635 to +50.1654. A full frozen-1M
+scan of Hard, sampling one next action per transition, found:
+
+- Median per-transition squared TD error 0.2675 versus mean 211.1338.
+- The largest 10 errors contribute 79.58% of total squared error; the largest
+  100 contribute 91.77%. There are 1389 replay states with absolute critic Q
+  above 1000. This is rare-state value instability, not uniformly large error.
+- At replay interaction 69,085, reward is -0.91865, current Q values about
+  5.92/6.47, but the bootstrapped target is 6420.72. Its squared error alone
+  contributes about 80,363 to a 512-item batch average if sampled once.
+- For that same next state, the target network's minimum-Q estimate averages
+  -32.26, -27.53 and +6486.65 at the 250k, 750k and 1M checkpoints. At 1M,
+  128 sampled actions give 6485.29–6487.31; a deterministic action gives
+  6486.73. The large value is not just one unlucky action draw.
+
+This establishes that the saved final Hard value networks can produce large
+bootstrap errors on rare historical states, sufficient to cause isolated
+minibatch spikes. It **does not identify the exact batch or weights responsible
+for the historical 9233.912 value**: neither the 991,928-step weights nor its
+sample indices/RNG state were saved. The origin of the value drift (such as
+representation, replay distribution, timeout handling or optimization) and its
+effect on final driving performance remain unisolated. Do not describe the
+model as globally divergent, the spike as harmless, or a learning-rate/reward
+change as a proven cure. The next diagnostic should record Q/target ranges,
+TD-error quantiles, replay indices and gradients during a separately authorized
+small controlled continuation, rather than overwrite the active baseline.
+
+Artifacts include `audit.py`, `scan_hard.py`, `check_tail.py`, `summarize.py`,
+their logs, per-density JSON, `actor_decomposition.csv`, `hard_transition_td.npz`,
+`hard_full_scan.json`, `tail_checks.json`, `validation.json`, and the inspected
+`loss_spike_diagnostics.pdf/.png`. Model hashes matched after analysis; no
+production code, model, dependency or ignore rule changed.
+
 ## Regression validation
 
 Use an existing Python environment with `requirements.txt` installed and
