@@ -1,0 +1,6 @@
+# Preserve historical source bytes and their recorded SHA-256 values.
+reproduction/source/** -text -whitespace
+antwerp/evaluation/source_reference/** -text -whitespace
+methods/** -text -whitespace
+# CSV exports use the standard csv.writer CRLF record separator.
+**/*.csv -text whitespace=cr-at-eol

@@ -1,0 +1,154 @@
+{
+  "scope": "Frozen 1M policies on sampled historical training observations; not rollout success rates",
+  "sample_seed": 20261018,
+  "samples_per_scenario": 8192,
+  "transition_window": "800001 through 999999",
+  "class_order": [
+    "right (-1)",
+    "keep (0)",
+    "left (+1)"
+  ],
+  "method": "Exact Normal CDF probabilities before tanh, with lane thresholds +/-atanh(1/3)",
+  "scenarios": {
+    "easy": {
+      "model": "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-E1M-S579071/AT-B0-E1M-S579071/AT-B0-E1M-S579071_1000000_steps.zip",
+      "model_sha256": "f93388f250c73bb43992aa0f0854155abc1884abc4099d368780e08cc8cb9519",
+      "gamma": 0.99,
+      "training_safety": false,
+      "use_sde": false,
+      "training_last200k_episodes": 103,
+      "training_last200k_successes": 84,
+      "training_last200k_arrivals": 84,
+      "training_last200k_teleported_episodes": 0,
+      "deterministic_category_fractions": [
+        0.0018310546875,
+        0.987548828125,
+        0.0106201171875
+      ],
+      "sampled_category_probabilities_mean": [
+        0.005997021216899157,
+        0.9755666851997375,
+        0.018440719693899155
+      ],
+      "historical_sampled_action_category_fractions": [
+        0.0042724609375,
+        0.976806640625,
+        0.0189208984375
+      ],
+      "expected_category_disagreement": 0.01638844609260559,
+      "disagreement_probability_over_25pct_fraction": 0.0145263671875,
+      "deterministic_keep_with_sampled_change_probability_over_50pct_fraction": 0.0,
+      "deterministic_action_near_threshold_within_0_1_physical_fraction": 0.00341796875,
+      "latent_std_quantiles": [
+        0.07967696487903594,
+        0.10022488608956337,
+        0.13095565587282182
+      ],
+      "conditional_on_deterministic_category": {
+        "0": {
+          "n": 15,
+          "sampled_category_probabilities_mean": [
+            0.7699886560440063,
+            0.22983913123607635,
+            0.00017223756003659219
+          ]
+        },
+        "1": {
+          "n": 8090,
+          "sampled_category_probabilities_mean": [
+            0.004644549451768398,
+            0.985638439655304,
+            0.009721442125737667
+          ]
+        },
+        "2": {
+          "n": 87,
+          "sampled_category_probabilities_mean": [
+            3.9090369682526216e-05,
+            0.16757731139659882,
+            0.8323836326599121
+          ]
+        }
+      }
+    },
+    "medium": {
+      "model": "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-M1M-S579071/AT-B0-M1M-S579071/AT-B0-M1M-S579071_1000000_steps.zip",
+      "model_sha256": "79d0873f150a3bbc1992b9c9936a20aa23ab742fafdbb3a24ec748f247896bf7",
+      "gamma": 0.99,
+      "training_safety": false,
+      "use_sde": false,
+      "training_last200k_episodes": 101,
+      "training_last200k_successes": 86,
+      "training_last200k_arrivals": 86,
+      "training_last200k_teleported_episodes": 0,
+      "deterministic_category_fractions": [
+        0.0008544921875,
+        0.9869384765625,
+        0.01220703125
+      ],
+      "sampled_category_probabilities_mean": [
+        0.0034485897049307823,
+        0.9679800271987915,
+        0.02857222594320774
+      ],
+      "historical_sampled_action_category_fractions": [
+        0.0037841796875,
+        0.973388671875,
+        0.0228271484375
+      ],
+      "expected_category_disagreement": 0.023987045511603355,
+      "disagreement_probability_over_25pct_fraction": 0.0213623046875,
+      "deterministic_keep_with_sampled_change_probability_over_50pct_fraction": 0.0,
+      "deterministic_action_near_threshold_within_0_1_physical_fraction": 0.0042724609375,
+      "latent_std_quantiles": [
+        0.09624324887990951,
+        0.10618403553962708,
+        0.12545354664325714
+      ],
+      "conditional_on_deterministic_category": {
+        "0": {
+          "n": 7,
+          "sampled_category_probabilities_mean": [
+            0.7316697239875793,
+            0.2682972848415375,
+            3.300394382677041e-05
+          ]
+        },
+        "1": {
+          "n": 8085,
+          "sampled_category_probabilities_mean": [
+            0.002860274165868759,
+            0.9782437086105347,
+            0.01889684423804283
+          ]
+        },
+        "2": {
+          "n": 100,
+          "sampled_category_probabilities_mean": [
+            3.868907515425235e-05,
+            0.18713393807411194,
+            0.8128272891044617
+          ]
+        }
+      }
+    }
+  },
+  "source_matches_training_manifest": {
+    "src/delay_encoder.py": {
+      "current_sha256": "b3834d587b9fa3e39b48598091dc4d0f63eef4114db0593c70d75b5ab34b2c6e",
+      "recorded_sha256": "b3834d587b9fa3e39b48598091dc4d0f63eef4114db0593c70d75b5ab34b2c6e"
+    },
+    "src/merging.py": {
+      "current_sha256": "7eb19b2285604b872b638b8237e393ad696bf8a1d9e50ad017060a683da4a2fe",
+      "recorded_sha256": "7eb19b2285604b872b638b8237e393ad696bf8a1d9e50ad017060a683da4a2fe"
+    },
+    "src/wrapper.py": {
+      "current_sha256": "a4b869d6011c53f1a269f77e3a322b94c8b80f77b16b528fc3d941900ffd544f",
+      "recorded_sha256": "a4b869d6011c53f1a269f77e3a322b94c8b80f77b16b528fc3d941900ffd544f"
+    },
+    "train_sac_delay.py": {
+      "current_sha256": "2613ecbf7bf6961a7e3ab08d2bac09b5b66838328ac3b64c36569706617bf501",
+      "recorded_sha256": "2613ecbf7bf6961a7e3ab08d2bac09b5b66838328ac3b64c36569706617bf501"
+    }
+  }
+}

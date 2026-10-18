@@ -1,0 +1,254 @@
+"""Read existing logs only; export loss plots and descriptive convergence evidence."""
+from pathlib import Path
+import csv
+import hashlib
+import json
+import tempfile
+
+ROOT = Path(__file__).resolve().parent
+PROJECT = ROOT.parents[2]
+TRAIN = PROJECT / 'tmp/ai/antwerp-density-1m'
+(ROOT / 'cache').mkdir(exist_ok=True)
+tempfile.tempdir = str(ROOT / 'cache')
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+import numpy as np
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+SCENARIOS = [('easy', 'E', '#2171b5'), ('medium', 'M', '#c17b13'), ('hard', 'H', '#8650a0')]
+TAGS = ['train/actor_loss', 'train/critic_loss', 'train/ent_coef_loss',
+        'train/ent_coef', 'rollout/success_rate', 'train/learning_rate']
+data = {}
+summary = {'training_seed': 579071, 'training_steps': 1000000,
+           'smoothing': 'Trailing 50,000 environment-step median of logged points; visualization only',
+           'logging': 'SB3 dumps every four completed episodes; not all gradient updates are logged',
+           'windows': 'Descriptive unweighted statistics over logged values, not independent samples or confidence intervals',
+           'scenarios': {}}
+status = json.loads((TRAIN / 'status.json').read_text())
+
+
+def smooth(x, y, window=50000):
+    return np.array([np.median(y[(x > step-window) & (x <= step)]) for step in x])
+
+
+def stats(y):
+    return dict(n=len(y), median=float(np.median(y)), mean=float(np.mean(y)),
+                p10=float(np.quantile(y, .1)), p90=float(np.quantile(y, .9)),
+                min=float(np.min(y)), max=float(np.max(y)))
+
+
+with (ROOT / 'scalars.csv').open('w', newline='') as output:
+    writer = csv.writer(output)
+    writer.writerow(['scenario', 'tag', 'environment_step', 'value', 'wall_time'])
+    for scenario, letter, _ in SCENARIOS:
+        run = f'AT-B0-{letter}1M-S579071'
+        sources = list((TRAIN / run / 'tensorboard').rglob('*tfevents*'))
+        assert len(sources) == 1, sources
+        source = sources[0]
+        accumulator = EventAccumulator(str(source), size_guidance={'scalars': 0}).Reload()
+        item = dict(event_file=str(source), event_sha256=hashlib.sha256(source.read_bytes()).hexdigest(), metrics={})
+        data[scenario] = {}
+        for tag in TAGS:
+            values = accumulator.Scalars(tag)
+            x = np.array([v.step for v in values])
+            y = np.array([v.value for v in values])
+            assert np.all(np.isfinite(y)) and np.all(np.diff(x) > 0)
+            assert x[-1] <= 1000000
+            data[scenario][tag] = (x, y)
+            for v in values:
+                writer.writerow([scenario, tag, v.step, v.value, v.wall_time])
+            item['metrics'][tag] = dict(n=len(y), first_step=int(x[0]), last_step=int(x[-1]),
+                last_value=float(y[-1]), peak_value=float(np.max(y)), peak_step=int(x[np.argmax(y)]),
+                window_600k_800k=stats(y[(x >= 600000) & (x < 800000)]),
+                window_800k_1m=stats(y[x >= 800000]))
+        episodes = [json.loads(line) for line in (TRAIN / run / 'training.jsonl').read_text().splitlines()]
+        episodes = [r for r in episodes if r['event'] == 'episode']
+        episode_source = TRAIN / run / 'training.jsonl'
+        item['episode_source'] = str(episode_source)
+        item['episode_sha256'] = hashlib.sha256(episode_source.read_bytes()).hexdigest()
+        episode_x = np.array([r['steps'] for r in episodes])
+        episode_y = np.array([r['train/episode_reward'] for r in episodes])
+        assert np.all(np.isfinite(episode_y)) and np.all(np.diff(episode_x) > 0)
+        assert episode_x[-1] <= 1000000
+        data[scenario]['episode_return'] = (episode_x, episode_y)
+        recent = [r for r in episodes if r['steps'] >= 800000]
+        item['training_800k_1m'] = dict(episodes=len(recent),
+            successes=int(sum(r['train/success'] for r in recent)),
+            success_pct=float(np.mean([r['train/success'] for r in recent]) * 100),
+            mean_return=float(np.mean([r['train/episode_reward'] for r in recent])))
+        item['evaluation'] = {}
+        for safety in (0, 1):
+            item['evaluation'][str(safety)] = []
+            for step in (250000, 500000, 1000000):
+                g = status['evaluation_groups'][f'{run}-K{step}-SC{safety}']
+                assert g['episodes'] == 20
+                item['evaluation'][str(safety)].append(dict(steps=step, episodes=20,
+                    success_pct=g['success_rate'], mean_return=g['mean_return']))
+        summary['scenarios'][scenario] = item
+
+plt.rcParams.update({'font.family': 'DejaVu Sans', 'font.size': 10,
+                     'axes.spines.top': False, 'axes.spines.right': False,
+                     'axes.titleweight': 'bold', 'savefig.facecolor': 'white'})
+
+
+def decorate(ax):
+    ax.set_xlim(0, 1.02)
+    ax.set_xticks(np.arange(0, 1.01, .2))
+    ax.axvspan(.8, 1., color='#939393', alpha=.09, zorder=0)
+    ax.grid(True, alpha=.18, linewidth=.7)
+
+
+fig, axes = plt.subplots(3, 3, figsize=(15, 10), sharex=True, sharey='row')
+for col, (scenario, _, color) in enumerate(SCENARIOS):
+    for row, tag in enumerate(TAGS[:3]):
+        ax = axes[row, col]
+        x, y = data[scenario][tag]
+        ax.plot(x / 1e6, y, color=color, alpha=.32, linewidth=.85, marker='.', markersize=2)
+        ax.plot(x / 1e6, smooth(x, y), color=color, linewidth=2)
+        decorate(ax)
+        if row == 0:
+            ax.set_title(f'{scenario.title()}  |  {len(x)} logged points')
+        if row == 1:
+            assert np.all(y > 0)
+            ax.set_yscale('log')
+            ax.set_ylim(.2, 20000)
+        else:
+            ax.axhline(0, color='#777777', linewidth=.7, linestyle=':')
+        if col == 0:
+            ax.set_ylabel(['Actor loss', 'Critic loss (log scale)', 'Entropy-coefficient loss'][row])
+        if row == 2:
+            ax.set_xlabel('Environment steps (million)')
+        if scenario == 'hard' and tag == 'train/critic_loss':
+            peak = int(np.argmax(y))
+            ax.annotate(f'{y[peak]:,.1f} at {x[peak]:,} steps', xy=(x[peak]/1e6, y[peak]),
+                        xytext=(.23, 4500), arrowprops={'arrowstyle': '->', 'color': '#555555'},
+                        fontsize=9, color='#333333')
+fig.suptitle('SAC / GRU training losses across traffic demand levels', fontsize=17, y=.985)
+fig.legend(handles=[Line2D([0],[0], color='#555555', alpha=.35, linewidth=1, label='Raw logged values'),
+                    Line2D([0],[0], color='#555555', linewidth=2, label='Trailing 50k-step median')],
+           loc='upper center', bbox_to_anchor=(.5,.957), ncol=2, frameon=False)
+fig.text(.5,.016,'One training seed (579071). Shaded region: final 200k steps. No clipping; the Hard spike is retained.\n'
+         'Curves end at the last logged event, not necessarily at 1M. Loss magnitude is not task success.',
+         ha='center', fontsize=9, color='#555555')
+fig.tight_layout(rect=(0,.055,1,.92))
+fig.savefig(ROOT/'loss_curves.png', dpi=180)
+fig.savefig(ROOT/'loss_curves.pdf')
+plt.close(fig)
+
+fig, axes = plt.subplots(2, 3, figsize=(15, 8), sharex=True, sharey='row')
+for col, (scenario, _, color) in enumerate(SCENARIOS):
+    x, y = data[scenario]['train/ent_coef']
+    ax = axes[0,col]
+    ax.plot(x/1e6,y,color=color,linewidth=1.7)
+    ax.set_yscale('log')
+    ax.set_title(scenario.title())
+    decorate(ax)
+    ax = axes[1,col]
+    x,y = data[scenario]['rollout/success_rate']
+    ax.plot(x/1e6,y*100,color=color,linewidth=1.7,label='Training: last 100 episodes')
+    for safety,style,label in [(0,'o--','Deterministic eval: SC off'),(1,'s:','Deterministic eval: SC on')]:
+        rows=summary['scenarios'][scenario]['evaluation'][str(safety)]
+        xx=np.array([r['steps'] for r in rows])/1e6
+        yy=np.array([r['success_pct'] for r in rows])
+        ax.plot(xx,yy,style,color='#212121' if safety==0 else '#b44b36',linewidth=1.6,markersize=6,label=label)
+        if scenario == 'medium':
+            if safety == 1:
+                ax.annotate('0% (both)',(xx[-1],yy[-1]),xytext=(-12,10),
+                            textcoords='offset points',ha='right',fontsize=9)
+        else:
+            ax.annotate(f'{yy[-1]:.0f}%',(xx[-1],yy[-1]),xytext=(-12,9 if safety==0 else -14),
+                        textcoords='offset points',ha='right',fontsize=9)
+    ax.set_ylim(-5,105)
+    ax.set_xlabel('Environment steps (million)')
+    decorate(ax)
+axes[0,0].set_ylabel('Entropy coefficient alpha (log scale)')
+axes[1,0].set_ylabel('Successful arrival (%)')
+handles,labels=axes[1,0].get_legend_handles_labels()
+fig.legend(handles,labels,loc='upper center',bbox_to_anchor=(.5,.95),ncol=3,frameon=False,fontsize=9)
+fig.suptitle('Optimization stability and task performance are different checks',fontsize=17,y=.99)
+fig.text(.5,.018,'Training uses sampled actions and evolving policies/scenarios; evaluation uses frozen checkpoints and deterministic actions.\n'
+         'Each evaluation marker uses the same 20 development seeds. Joined markers do not measure intermediate checkpoints.',
+         ha='center',fontsize=9,color='#555555')
+fig.tight_layout(rect=(0,.07,1,.90))
+fig.savefig(ROOT/'convergence_diagnostics.png',dpi=180)
+fig.savefig(ROOT/'convergence_diagnostics.pdf')
+plt.close(fig)
+figure4_tags = ['episode_return', 'train/critic_loss', 'train/actor_loss']
+summary['figure4_style'] = {
+    'reference': 'https://arxiv.org/html/2403.11852v5#S5.SS5',
+    'rows': figure4_tags,
+    'smoothing': 'Arithmetic mean of available samples in (step - 50000, step]; partial window at start',
+    'scope': 'One GRU training seed per scenario; training SC off; no baseline or confidence band',
+    'axes': 'Return axes independently scaled; critic shared logarithmic scale; actor shared linear scale',
+    'scenarios': {},
+}
+fig, axes = plt.subplots(3, 3, figsize=(15, 10.5), sharex=True)
+color = '#287da8'
+with (ROOT/'figure4_data.csv').open('w', newline='') as output:
+    writer = csv.writer(output)
+    writer.writerow(['scenario', 'metric', 'environment_step', 'raw_value',
+                     'trailing_50k_mean', 'window_samples'])
+    for col, (scenario, _, _) in enumerate(SCENARIOS):
+        for row, tag in enumerate(figure4_tags):
+            ax = axes[row, col]
+            x, y = data[scenario][tag]
+            windows = [(x > step-50000) & (x <= step) for step in x]
+            trend = np.array([np.mean(y[mask]) for mask in windows])
+            counts = np.array([np.count_nonzero(mask) for mask in windows])
+            assert np.all(np.isfinite(trend)) and np.all(counts > 0)
+            for step, raw, mean, count in zip(x, y, trend, counts):
+                writer.writerow([scenario, tag, int(step), float(raw), float(mean), int(count)])
+            ax.plot(x/1e6, y, color=color, alpha=.22, linewidth=.7,
+                    marker='.' if row == 0 else None, markersize=1.6)
+            ax.plot(x/1e6, trend, color=color, linewidth=2.2)
+            ax.set_xlim(0, 1.01)
+            ax.set_xticks(np.arange(0, 1.01, .2))
+            ax.grid(True, linestyle='--', alpha=.3, linewidth=.65)
+            ax.tick_params(axis='both', labelsize=10)
+            if row == 0:
+                ax.set_title(scenario.title(), fontsize=14, pad=10)
+                ax.axhline(0, color='#777777', linewidth=.7, linestyle=':')
+                summary['figure4_style']['scenarios'][scenario] = {
+                    'completed_episodes': len(x), 'last_episode_step': int(x[-1]),
+                    'last_50k_mean_return': float(trend[-1]),
+                    'last_return_window_episodes': int(counts[-1]),
+                }
+            elif row == 1:
+                ax.set_yscale('log')
+                ax.set_ylim(.2, 20000)
+            else:
+                ax.set_ylim(-25, 75)
+                ax.axhline(0, color='#777777', linewidth=.7, linestyle=':')
+                ax.set_xlabel('Environment steps (million)')
+            if col == 0:
+                ax.set_ylabel(['Average return', 'Critic loss (log scale)', 'Actor loss'][row],
+                              fontsize=12, fontweight='bold')
+            if scenario == 'hard' and row == 1:
+                peak = int(np.argmax(y))
+                ax.annotate(f'Raw spike: {y[peak]:,.1f}', xy=(x[peak]/1e6, y[peak]),
+                            xytext=(.35, 4500), fontsize=9,
+                            arrowprops={'arrowstyle': '->', 'color': '#555555'})
+fig.suptitle('DAROM-GRU training dynamics on the Antwerp network', fontsize=17, y=.985)
+fig.legend(handles=[
+    Line2D([0], [0], color=color, alpha=.3, linewidth=1, label='Raw episode return / logged loss'),
+    Line2D([0], [0], color=color, linewidth=2.2, label='Trailing 50k-step arithmetic mean'),
+], loc='upper center', bbox_to_anchor=(.5, .953), ncol=2, frameon=False, fontsize=10)
+fig.text(.5, .018,
+         'Figure 4-style layout | GRU only | One training seed (579071) | Training SC off | 1M steps per scenario\n'
+         'Return axes use different ranges; critic axes are logarithmic. All raw points retained; no multi-seed uncertainty band.\n'
+         'Curves stop at the last available sample. Smoothing is descriptive, not a convergence test; these are training metrics.',
+         ha='center', fontsize=9, color='#555555', linespacing=1.5)
+fig.tight_layout(rect=(0, .09, 1, .92))
+fig.savefig(ROOT/'figure4_training_curves.png', dpi=200)
+fig.savefig(ROOT/'figure4_training_curves.pdf')
+plt.close(fig)
+(ROOT/'statistics.json').write_text(json.dumps(summary,indent=2,allow_nan=False)+'\n')
+print('Saved Figure 4-style training curves (PNG/PDF) and figure4_data.csv')
+print('Saved loss_curves and convergence_diagnostics (PNG/PDF), scalars.csv, statistics.json')
+for scenario,_,_ in SCENARIOS:
+    s=summary['scenarios'][scenario]
+    print(scenario,'points',s['metrics']['train/critic_loss']['n'],
+          'late critic median',s['metrics']['train/critic_loss']['window_800k_1m']['median'],
+          'late train success',s['training_800k_1m']['success_pct'])

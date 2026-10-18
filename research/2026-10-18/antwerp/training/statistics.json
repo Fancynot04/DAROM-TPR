@@ -1,0 +1,676 @@
+{
+  "training_seed": 579071,
+  "training_steps": 1000000,
+  "smoothing": "Trailing 50,000 environment-step median of logged points; visualization only",
+  "logging": "SB3 dumps every four completed episodes; not all gradient updates are logged",
+  "windows": "Descriptive unweighted statistics over logged values, not independent samples or confidence intervals",
+  "scenarios": {
+    "easy": {
+      "event_file": "${WORKSPACE}/DAROM-TPR/tmp/ai/antwerp-density-1m/AT-B0-E1M-S579071/tensorboard/AT-B0-E1M-S579071/SAC_1/events.out.tfevents.1791857163.server-0-Z790-EAGLE-AX.3942023.0",
+      "event_sha256": "2f57c3a024351d3532abe62f7243ff83535b6a3c1e23e6d9d2cf53ca48b55281",
+      "metrics": {
+        "train/actor_loss": {
+          "n": 122,
+          "first_step": 9608,
+          "last_step": 995324,
+          "last_value": 17.534914016723633,
+          "peak_value": 20.437973022460938,
+          "peak_step": 80034,
+          "window_600k_800k": {
+            "n": 22,
+            "median": 16.063180923461914,
+            "mean": 16.133860111236572,
+            "p10": 14.91684513092041,
+            "p90": 17.613378524780273,
+            "min": 14.572280883789062,
+            "max": 18.07508087158203
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": 17.95740509033203,
+            "mean": 18.020891996530388,
+            "p10": 16.912718772888184,
+            "p90": 19.033329963684082,
+            "min": 16.734643936157227,
+            "max": 19.191055297851562
+          }
+        },
+        "train/critic_loss": {
+          "n": 122,
+          "first_step": 9608,
+          "last_step": 995324,
+          "last_value": 0.7922296524047852,
+          "peak_value": 6.045245170593262,
+          "peak_step": 563014,
+          "window_600k_800k": {
+            "n": 22,
+            "median": 0.8078743517398834,
+            "mean": 0.8458581106229262,
+            "p10": 0.5931687176227569,
+            "p90": 1.1014179468154908,
+            "min": 0.4277980923652649,
+            "max": 1.789750337600708
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": 0.8377659916877747,
+            "mean": 0.9692918199759263,
+            "p10": 0.6023776531219482,
+            "p90": 1.5741611123085022,
+            "min": 0.46640896797180176,
+            "max": 1.914214849472046
+          }
+        },
+        "train/ent_coef_loss": {
+          "n": 122,
+          "first_step": 9608,
+          "last_step": 995324,
+          "last_value": -0.05327071249485016,
+          "peak_value": 0.6447463631629944,
+          "peak_step": 582886,
+          "window_600k_800k": {
+            "n": 22,
+            "median": 0.02953352779150009,
+            "mean": 0.08625699884512207,
+            "p10": -0.10573261007666587,
+            "p90": 0.3306743234395983,
+            "min": -0.1851578652858734,
+            "max": 0.5989434719085693
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": 0.008017960004508495,
+            "mean": 0.020830208220734045,
+            "p10": -0.27885374426841736,
+            "p90": 0.28908438980579376,
+            "min": -0.5193691253662109,
+            "max": 0.4705590605735779
+          }
+        },
+        "train/ent_coef": {
+          "n": 122,
+          "first_step": 9608,
+          "last_step": 995324,
+          "last_value": 0.043572016060352325,
+          "peak_value": 0.7525608539581299,
+          "peak_step": 9608,
+          "window_600k_800k": {
+            "n": 22,
+            "median": 0.04233812354505062,
+            "mean": 0.042378534308888695,
+            "p10": 0.04179487340152264,
+            "p90": 0.043115388602018356,
+            "min": 0.04135766252875328,
+            "max": 0.043306998908519745
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": 0.0433802455663681,
+            "mean": 0.04344311012671544,
+            "p10": 0.04319355450570583,
+            "p90": 0.0437869057059288,
+            "min": 0.04285840690135956,
+            "max": 0.04417525231838226
+          }
+        },
+        "rollout/success_rate": {
+          "n": 122,
+          "first_step": 9608,
+          "last_step": 995324,
+          "last_value": 0.8199999928474426,
+          "peak_value": 0.8899999856948853,
+          "peak_step": 303204,
+          "window_600k_800k": {
+            "n": 22,
+            "median": 0.75,
+            "mean": 0.7436363697052002,
+            "p10": 0.7300000190734863,
+            "p90": 0.75,
+            "min": 0.7200000286102295,
+            "max": 0.7699999809265137
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": 0.7699999809265137,
+            "mean": 0.7769230650021479,
+            "p10": 0.7549999952316284,
+            "p90": 0.8050000071525574,
+            "min": 0.75,
+            "max": 0.8199999928474426
+          }
+        },
+        "train/learning_rate": {
+          "n": 122,
+          "first_step": 9608,
+          "last_step": 995324,
+          "last_value": 2.9999999242136255e-05,
+          "peak_value": 2.9999999242136255e-05,
+          "peak_step": 9608,
+          "window_600k_800k": {
+            "n": 22,
+            "median": 2.9999999242136255e-05,
+            "mean": 2.9999999242136255e-05,
+            "p10": 2.9999999242136255e-05,
+            "p90": 2.9999999242136255e-05,
+            "min": 2.9999999242136255e-05,
+            "max": 2.9999999242136255e-05
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": 2.9999999242136255e-05,
+            "mean": 2.9999999242136255e-05,
+            "p10": 2.9999999242136255e-05,
+            "p90": 2.9999999242136255e-05,
+            "min": 2.9999999242136255e-05,
+            "max": 2.9999999242136255e-05
+          }
+        }
+      },
+      "episode_source": "${WORKSPACE}/DAROM-TPR/tmp/ai/antwerp-density-1m/AT-B0-E1M-S579071/training.jsonl",
+      "episode_sha256": "9b96a94d812e7d00b93b77ae13bcf210ba6b69e03d1ebb73557cd8574b3973d2",
+      "training_800k_1m": {
+        "episodes": 103,
+        "successes": 84,
+        "success_pct": 81.55339805825243,
+        "mean_return": 124.91983072966048
+      },
+      "evaluation": {
+        "0": [
+          {
+            "steps": 250000,
+            "episodes": 20,
+            "success_pct": 40.0,
+            "mean_return": 171.3096334135896
+          },
+          {
+            "steps": 500000,
+            "episodes": 20,
+            "success_pct": 45.0,
+            "mean_return": 174.5014081066725
+          },
+          {
+            "steps": 1000000,
+            "episodes": 20,
+            "success_pct": 20.0,
+            "mean_return": 172.44669951296515
+          }
+        ],
+        "1": [
+          {
+            "steps": 250000,
+            "episodes": 20,
+            "success_pct": 40.0,
+            "mean_return": 56.69337595174611
+          },
+          {
+            "steps": 500000,
+            "episodes": 20,
+            "success_pct": 55.0,
+            "mean_return": 189.5767163914685
+          },
+          {
+            "steps": 1000000,
+            "episodes": 20,
+            "success_pct": 15.0,
+            "mean_return": 70.07155744981003
+          }
+        ]
+      }
+    },
+    "medium": {
+      "event_file": "${WORKSPACE}/DAROM-TPR/tmp/ai/antwerp-density-1m/AT-B0-M1M-S579071/tensorboard/AT-B0-M1M-S579071/SAC_1/events.out.tfevents.1791857164.server-0-Z790-EAGLE-AX.3942022.0",
+      "event_sha256": "80a3b9eba29d0c2c51612d7483c40e307a82e8f0d8394776e4317342faa2d622",
+      "metrics": {
+        "train/actor_loss": {
+          "n": 120,
+          "first_step": 5529,
+          "last_step": 998750,
+          "last_value": 27.70452117919922,
+          "peak_value": 47.74884796142578,
+          "peak_step": 360376,
+          "window_600k_800k": {
+            "n": 24,
+            "median": 31.5407075881958,
+            "mean": 31.86950159072876,
+            "p10": 30.50956802368164,
+            "p90": 33.21749649047852,
+            "min": 29.618396759033203,
+            "max": 36.09297180175781
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": 29.7871150970459,
+            "mean": 29.85940801180326,
+            "p10": 27.67302131652832,
+            "p90": 32.3613224029541,
+            "min": 26.969144821166992,
+            "max": 33.749961853027344
+          }
+        },
+        "train/critic_loss": {
+          "n": 120,
+          "first_step": 5529,
+          "last_step": 998750,
+          "last_value": 1.994450569152832,
+          "peak_value": 16.114755630493164,
+          "peak_step": 591169,
+          "window_600k_800k": {
+            "n": 24,
+            "median": 2.187830924987793,
+            "mean": 3.044120187560717,
+            "p10": 1.3232248187065125,
+            "p90": 7.061330556869506,
+            "min": 1.0414948463439941,
+            "max": 11.496105194091797
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": 1.9956427812576294,
+            "mean": 2.30290615100127,
+            "p10": 1.2966484427452087,
+            "p90": 2.9306262731552124,
+            "min": 1.0167479515075684,
+            "max": 6.478022575378418
+          }
+        },
+        "train/ent_coef_loss": {
+          "n": 120,
+          "first_step": 5529,
+          "last_step": 998750,
+          "last_value": 0.21651270985603333,
+          "peak_value": 0.5099459886550903,
+          "peak_step": 167521,
+          "window_600k_800k": {
+            "n": 24,
+            "median": 0.04410061053931713,
+            "mean": 0.03537941180790464,
+            "p10": -0.21662241369485855,
+            "p90": 0.28403606414794924,
+            "min": -0.33030936121940613,
+            "max": 0.38054966926574707
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": -0.040980804711580276,
+            "mean": -0.025066530475249656,
+            "p10": -0.33371175825595856,
+            "p90": 0.2588924914598465,
+            "min": -0.5009413957595825,
+            "max": 0.3271712362766266
+          }
+        },
+        "train/ent_coef": {
+          "n": 120,
+          "first_step": 5529,
+          "last_step": 998750,
+          "last_value": 0.050493933260440826,
+          "peak_value": 0.8499636650085449,
+          "peak_step": 5529,
+          "window_600k_800k": {
+            "n": 24,
+            "median": 0.04923351854085922,
+            "mean": 0.049049821527053915,
+            "p10": 0.04793947115540505,
+            "p90": 0.049847066029906274,
+            "min": 0.047082748264074326,
+            "max": 0.05016206577420235
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": 0.049860404804348946,
+            "mean": 0.049962766181964144,
+            "p10": 0.04940618388354778,
+            "p90": 0.05079289898276329,
+            "min": 0.048605527728796005,
+            "max": 0.0511232428252697
+          }
+        },
+        "rollout/success_rate": {
+          "n": 120,
+          "first_step": 5529,
+          "last_step": 998750,
+          "last_value": 0.8500000238418579,
+          "peak_value": 0.8500000238418579,
+          "peak_step": 991030,
+          "window_600k_800k": {
+            "n": 24,
+            "median": 0.5,
+            "mean": 0.514999990661939,
+            "p10": 0.47999998927116394,
+            "p90": 0.5799999833106995,
+            "min": 0.44999998807907104,
+            "max": 0.5799999833106995
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": 0.7350000143051147,
+            "mean": 0.734230772807048,
+            "p10": 0.6399999856948853,
+            "p90": 0.8299999833106995,
+            "min": 0.6000000238418579,
+            "max": 0.8500000238418579
+          }
+        },
+        "train/learning_rate": {
+          "n": 120,
+          "first_step": 5529,
+          "last_step": 998750,
+          "last_value": 2.9999999242136255e-05,
+          "peak_value": 2.9999999242136255e-05,
+          "peak_step": 5529,
+          "window_600k_800k": {
+            "n": 24,
+            "median": 2.9999999242136255e-05,
+            "mean": 2.9999999242136255e-05,
+            "p10": 2.9999999242136255e-05,
+            "p90": 2.9999999242136255e-05,
+            "min": 2.9999999242136255e-05,
+            "max": 2.9999999242136255e-05
+          },
+          "window_800k_1m": {
+            "n": 26,
+            "median": 2.9999999242136255e-05,
+            "mean": 2.9999999242136255e-05,
+            "p10": 2.9999999242136255e-05,
+            "p90": 2.9999999242136255e-05,
+            "min": 2.9999999242136255e-05,
+            "max": 2.9999999242136255e-05
+          }
+        }
+      },
+      "episode_source": "${WORKSPACE}/DAROM-TPR/tmp/ai/antwerp-density-1m/AT-B0-M1M-S579071/training.jsonl",
+      "episode_sha256": "f31659132b95ee066e7b4b1a9689c5e9e8ca19512afd7ab099aaed12f3deb0fa",
+      "training_800k_1m": {
+        "episodes": 101,
+        "successes": 86,
+        "success_pct": 85.14851485148515,
+        "mean_return": 126.49889437987072
+      },
+      "evaluation": {
+        "0": [
+          {
+            "steps": 250000,
+            "episodes": 20,
+            "success_pct": 0.0,
+            "mean_return": -416.842612207427
+          },
+          {
+            "steps": 500000,
+            "episodes": 20,
+            "success_pct": 20.0,
+            "mean_return": -40.22592485160506
+          },
+          {
+            "steps": 1000000,
+            "episodes": 20,
+            "success_pct": 0.0,
+            "mean_return": 1.5759802971409016
+          }
+        ],
+        "1": [
+          {
+            "steps": 250000,
+            "episodes": 20,
+            "success_pct": 0.0,
+            "mean_return": -425.7621364600033
+          },
+          {
+            "steps": 500000,
+            "episodes": 20,
+            "success_pct": 0.0,
+            "mean_return": -191.79982392545702
+          },
+          {
+            "steps": 1000000,
+            "episodes": 20,
+            "success_pct": 0.0,
+            "mean_return": -85.28696427911335
+          }
+        ]
+      }
+    },
+    "hard": {
+      "event_file": "${WORKSPACE}/DAROM-TPR/tmp/ai/antwerp-density-1m/AT-B0-H1M-S579071/tensorboard/AT-B0-H1M-S579071/SAC_1/events.out.tfevents.1791856791.server-0-Z790-EAGLE-AX.3914268.0",
+      "event_sha256": "22e530814e7d393a762e7f02af76838754ee006d865accf749085bcc38306f21",
+      "metrics": {
+        "train/actor_loss": {
+          "n": 110,
+          "first_step": 13911,
+          "last_step": 991929,
+          "last_value": 21.734485626220703,
+          "peak_value": 64.80030822753906,
+          "peak_step": 101586,
+          "window_600k_800k": {
+            "n": 23,
+            "median": 31.40930938720703,
+            "mean": 30.40164159691852,
+            "p10": 26.310909271240234,
+            "p90": 33.82830657958984,
+            "min": 17.668006896972656,
+            "max": 36.572166442871094
+          },
+          "window_800k_1m": {
+            "n": 23,
+            "median": 29.282615661621094,
+            "mean": 28.225789526234504,
+            "p10": 21.876885986328126,
+            "p90": 35.16634826660156,
+            "min": 15.218059539794922,
+            "max": 36.044654846191406
+          }
+        },
+        "train/critic_loss": {
+          "n": 110,
+          "first_step": 13911,
+          "last_step": 991929,
+          "last_value": 9233.912109375,
+          "peak_value": 9233.912109375,
+          "peak_step": 991929,
+          "window_600k_800k": {
+            "n": 23,
+            "median": 4.974694728851318,
+            "mean": 19.73081264288529,
+            "p10": 3.108877658843994,
+            "p90": 53.65239334106446,
+            "min": 2.650193691253662,
+            "max": 106.23756408691406
+          },
+          "window_800k_1m": {
+            "n": 23,
+            "median": 6.2083210945129395,
+            "mean": 419.64463045286095,
+            "p10": 3.366835737228394,
+            "p90": 75.7821517944336,
+            "min": 2.382730007171631,
+            "max": 9233.912109375
+          }
+        },
+        "train/ent_coef_loss": {
+          "n": 110,
+          "first_step": 13911,
+          "last_step": 991929,
+          "last_value": 0.43978986144065857,
+          "peak_value": 0.6218906044960022,
+          "peak_step": 267473,
+          "window_600k_800k": {
+            "n": 23,
+            "median": -0.0952133908867836,
+            "mean": -0.04436021589714548,
+            "p10": -0.31571853160858154,
+            "p90": 0.307462614774704,
+            "min": -0.5055188536643982,
+            "max": 0.3938479721546173
+          },
+          "window_800k_1m": {
+            "n": 23,
+            "median": -0.053833045065402985,
+            "mean": -0.08013452378951985,
+            "p10": -0.46851558089256284,
+            "p90": 0.3279878973960877,
+            "min": -0.8807296752929688,
+            "max": 0.48481571674346924
+          }
+        },
+        "train/ent_coef": {
+          "n": 110,
+          "first_step": 13911,
+          "last_step": 991929,
+          "last_value": 0.027691107243299484,
+          "peak_value": 0.6614304780960083,
+          "peak_step": 13911,
+          "window_600k_800k": {
+            "n": 23,
+            "median": 0.03673473000526428,
+            "mean": 0.037023661415214126,
+            "p10": 0.033345204591751096,
+            "p90": 0.041583383828401564,
+            "min": 0.03282468393445015,
+            "max": 0.04461391642689705
+          },
+          "window_800k_1m": {
+            "n": 23,
+            "median": 0.032029587775468826,
+            "mean": 0.03224480597545271,
+            "p10": 0.028061740472912787,
+            "p90": 0.036601348966360095,
+            "min": 0.02729402296245098,
+            "max": 0.037537094205617905
+          }
+        },
+        "rollout/success_rate": {
+          "n": 110,
+          "first_step": 13911,
+          "last_step": 991929,
+          "last_value": 0.4300000071525574,
+          "peak_value": 0.47999998927116394,
+          "peak_step": 405910,
+          "window_600k_800k": {
+            "n": 23,
+            "median": 0.44999998807907104,
+            "mean": 0.4499999971493431,
+            "p10": 0.4399999976158142,
+            "p90": 0.46000000834465027,
+            "min": 0.4300000071525574,
+            "max": 0.4699999988079071
+          },
+          "window_800k_1m": {
+            "n": 23,
+            "median": 0.41999998688697815,
+            "mean": 0.4134782552719116,
+            "p10": 0.3919999897480011,
+            "p90": 0.4300000071525574,
+            "min": 0.3799999952316284,
+            "max": 0.4399999976158142
+          }
+        },
+        "train/learning_rate": {
+          "n": 110,
+          "first_step": 13911,
+          "last_step": 991929,
+          "last_value": 2.9999999242136255e-05,
+          "peak_value": 2.9999999242136255e-05,
+          "peak_step": 13911,
+          "window_600k_800k": {
+            "n": 23,
+            "median": 2.9999999242136255e-05,
+            "mean": 2.9999999242136255e-05,
+            "p10": 2.9999999242136255e-05,
+            "p90": 2.9999999242136255e-05,
+            "min": 2.9999999242136255e-05,
+            "max": 2.9999999242136255e-05
+          },
+          "window_800k_1m": {
+            "n": 23,
+            "median": 2.9999999242136255e-05,
+            "mean": 2.9999999242136255e-05,
+            "p10": 2.9999999242136255e-05,
+            "p90": 2.9999999242136255e-05,
+            "min": 2.9999999242136255e-05,
+            "max": 2.9999999242136255e-05
+          }
+        }
+      },
+      "episode_source": "${WORKSPACE}/DAROM-TPR/tmp/ai/antwerp-density-1m/AT-B0-H1M-S579071/training.jsonl",
+      "episode_sha256": "14bdd63ec52493309644ba2fe278615d5b38360fd518609eb27f9ef9d928d205",
+      "training_800k_1m": {
+        "episodes": 93,
+        "successes": 42,
+        "success_pct": 45.16129032258064,
+        "mean_return": -379.8960452336137
+      },
+      "evaluation": {
+        "0": [
+          {
+            "steps": 250000,
+            "episodes": 20,
+            "success_pct": 45.0,
+            "mean_return": -63.332958846377856
+          },
+          {
+            "steps": 500000,
+            "episodes": 20,
+            "success_pct": 25.0,
+            "mean_return": -185.25516298740882
+          },
+          {
+            "steps": 1000000,
+            "episodes": 20,
+            "success_pct": 45.0,
+            "mean_return": -539.7533032145865
+          }
+        ],
+        "1": [
+          {
+            "steps": 250000,
+            "episodes": 20,
+            "success_pct": 55.0,
+            "mean_return": -352.448466628543
+          },
+          {
+            "steps": 500000,
+            "episodes": 20,
+            "success_pct": 35.0,
+            "mean_return": -519.2065196865198
+          },
+          {
+            "steps": 1000000,
+            "episodes": 20,
+            "success_pct": 35.0,
+            "mean_return": -102.66348243851492
+          }
+        ]
+      }
+    }
+  },
+  "figure4_style": {
+    "reference": "https://arxiv.org/html/2403.11852v5#S5.SS5",
+    "rows": [
+      "episode_return",
+      "train/critic_loss",
+      "train/actor_loss"
+    ],
+    "smoothing": "Arithmetic mean of available samples in (step - 50000, step]; partial window at start",
+    "scope": "One GRU training seed per scenario; training SC off; no baseline or confidence band",
+    "axes": "Return axes independently scaled; critic shared logarithmic scale; actor shared linear scale",
+    "scenarios": {
+      "easy": {
+        "completed_episodes": 490,
+        "last_episode_step": 999327,
+        "last_50k_mean_return": 119.46031219482421,
+        "last_return_window_episodes": 25
+      },
+      "medium": {
+        "completed_episodes": 480,
+        "last_episode_step": 998750,
+        "last_50k_mean_return": 150.22666931152344,
+        "last_return_window_episodes": 25
+      },
+      "hard": {
+        "completed_episodes": 442,
+        "last_episode_step": 997643,
+        "last_50k_mean_return": -370.1730942104174,
+        "last_return_window_episodes": 23
+      }
+    }
+  }
+}

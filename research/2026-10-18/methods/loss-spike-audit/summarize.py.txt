@@ -1,0 +1,88 @@
+"""Reconstruct logged actor components and plot verified offline diagnostics."""
+from pathlib import Path
+import csv
+import hashlib
+import json
+import math
+import tempfile
+ROOT=Path(__file__).resolve().parent;PROJECT=ROOT.parents[2]
+groups={}
+source=PROJECT/'tmp/ai/training-loss-analysis/scalars.csv'
+for r in csv.DictReader(source.open()):
+ groups.setdefault((r['scenario'],int(r['environment_step'])),{})[r['tag']]=float(r['value'])
+rows=[];summary={}
+for (scenario,step),v in sorted(groups.items()):
+ if 'train/actor_loss' not in v:continue
+ a=v['train/ent_coef'];la=v['train/ent_coef_loss'];actor=v['train/actor_loss']
+ logp=-la/math.log(a)+2;term=a*logp
+ rows.append(dict(scenario=scenario,environment_step=step,actor_loss=actor,alpha=a,alpha_loss=la,
+  reconstructed_mean_logp=logp,reconstructed_entropy_term=term,reconstructed_mean_min_q=term-actor))
+for name in ('easy','medium','hard'):
+ selected=[r for r in rows if r['scenario']==name];summary[name]={'first':selected[0],'last':selected[-1]}
+ check=json.loads((ROOT/f'{name}.json').read_text())
+ assert all(m['gradient_steps']==1 and m['target_entropy']==-2 for m in check['checkpoints'].values())
+with (ROOT/'actor_decomposition.csv').open('w',newline='') as f:
+ w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
+(ROOT/'actor_decomposition.json').write_text(json.dumps({'method':'Algebra from alpha, alpha_loss, actor_loss; gradient_steps=1, target_entropy=-2; rounded logged values', 'scenarios':summary},indent=2)+'\n')
+
+(ROOT/'cache').mkdir(exist_ok=True);tempfile.tempdir=str(ROOT/'cache')
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import numpy as np
+full=json.loads((ROOT/'hard_full_scan.json').read_text())
+tail=json.loads((ROOT/'tail_checks.json').read_text())
+plt.rcParams.update({'font.family':'DejaVu Sans','font.size':10,'axes.spines.top':False,'axes.spines.right':False})
+fig,axes=plt.subplots(2,2,figsize=(13,8.8))
+ax=axes[0,0];x=np.arange(3)
+dq=[];dh=[]
+for name in ('easy','medium','hard'):
+ s=summary[name];dq.append(s['first']['reconstructed_mean_min_q']-s['last']['reconstructed_mean_min_q'])
+ dh.append(s['last']['reconstructed_entropy_term']-s['first']['reconstructed_entropy_term'])
+ax.bar(x,dq,color='#287da8',label='Change in -Q term')
+ax.bar(x,dh,bottom=dq,color='#e08b36',label='Change in entropy term')
+ax.set_xticks(x,['Easy','Medium','Hard']);ax.set_ylabel('Actor loss change: first to last logged point')
+ax.set_title('A. Logged actor loss rise is dominated by -Q',loc='left',fontsize=11)
+ax.legend(frameon=False,fontsize=9)
+ax=axes[0,1]
+hard=[(step,v) for (name,step),v in sorted(groups.items()) if name=='hard' and step>950000]
+xx=[s/1e6 for s,v in hard];yy=[v['train/critic_loss'] for s,v in hard]
+ax.plot(xx,yy,'o-',color='#a34334');ax.set_yscale('log');ax.set_ylim(1,40000)
+ax.set_title('B. Hard: last five recorded critic losses',loc='left',fontsize=11)
+ax.set_xlabel('Environment steps (millions)');ax.set_ylabel('Latest minibatch MSE at logging time')
+ax.annotate('9233.9 at 991,929\nEpisode outcome: arrived',xy=(xx[-1],yy[-1]),xytext=(.965,13000),
+ arrowprops={'arrowstyle':'->'},fontsize=9)
+ax=axes[1,0]
+rank=np.array([1,10,100,1000]);frac=[100*full['td_error_concentration'][str(k)] for k in rank]
+ax.plot(rank,frac,'o-',color='#287da8');ax.set_xscale('log');ax.set_ylim(0,105)
+ax.set_title('C. Final Hard model: error concentrates in rare samples',loc='left',fontsize=11)
+ax.set_xlabel('Number of largest-error transitions (out of 999,999)');ax.set_ylabel('Share of total squared TD error (%)')
+for a,b in zip(rank,frac):ax.annotate(f'{b:.1f}%',(a,b),xytext=(5,-15),textcoords='offset points',fontsize=9)
+ax=axes[1,1]
+chosen=[r for r in tail['rows'] if r['replay_step']==69085]
+ax.plot([r['checkpoint']/1e6 for r in chosen],[r['sampled_target_q_mean'] for r in chosen],'o-',color='#a34334')
+for r in chosen:ax.annotate(f"{r['sampled_target_q_mean']:.0f}",(r['checkpoint']/1e6,r['sampled_target_q_mean']),
+ xytext=(-8,12),textcoords='offset points',fontsize=9)
+ax.set_ylim(-600,7800);ax.set_xlabel('Saved checkpoint (millions of steps)');ax.set_ylabel('Next-state target Q (128 sampled actions)')
+ax.set_title('D. Same rare replay state: target value grows abnormally',loc='left',fontsize=11)
+for ax in axes.flat:ax.grid(alpha=.2,ls='--',axis='y')
+fig.suptitle('Antwerp SAC loss investigation: historical logs + frozen-model checks',fontsize=15)
+fig.text(.5,.045,'A/B: historical logged values. C/D: new offline checks with saved models; no optimization or SUMO.\n'
+ 'C/D establish a present rare-state value instability, not the exact sampled batch that caused the historical spike.',ha='center',fontsize=9)
+fig.tight_layout(rect=(0,.09,1,.95))
+for ext in ('pdf','png'):fig.savefig(ROOT/f'loss_spike_diagnostics.{ext}',dpi=180)
+plt.close(fig)
+sources=[source,PROJECT/'train_sac_delay.py',PROJECT/'src/merging.py',PROJECT/'src/delay_encoder.py',
+ Path('${WORKSPACE}/DAROM-original/.venv/lib/python3.12/site-packages/stable_baselines3/sac/sac.py'),
+ Path('${WORKSPACE}/DAROM-original/.venv/lib/python3.12/site-packages/stable_baselines3/common/off_policy_algorithm.py'),
+ Path('${WORKSPACE}/DAROM-original/.venv/lib/python3.12/site-packages/stable_baselines3/common/logger.py')]
+hashes={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}
+for name in ('easy','medium','hard'):
+ r=json.loads((ROOT/f'{name}.json').read_text());p=Path(r['replay'])
+ with p.open('rb') as stream:hashes[str(p)]=hashlib.file_digest(stream,'sha256').hexdigest()
+ for m in r['checkpoints'].values():
+  p=Path(m['model']);actual=hashlib.sha256(p.read_bytes()).hexdigest();assert actual==m['sha256'];hashes[str(p)]=actual
+(ROOT/'validation.json').write_text(json.dumps({'source_sha256':hashes,'replay_episode_boundaries':'all match logged episode steps',
+ 'replay_nonfinite_values':False,'models_modified':False,'optimization_performed':False,'sumo_started':False,
+ 'historical_spike_exact_minibatch_available':False,'original_figure_unchanged':True},indent=2)+'\n')
+print('Actor components, diagnostic figure, and source/model/replay fingerprints saved.')

@@ -1,0 +1,99 @@
+{
+  "group": "AT-T3-1M-1500-20261014",
+  "created_utc": "2026-10-14T10:54:05.435978+00:00",
+  "checkpoints": {
+    "easy": {
+      "model": "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-E1M-S579071/AT-B0-E1M-S579071/AT-B0-E1M-S579071_1000000_steps.zip",
+      "checkpoint_sha256": "f93388f250c73bb43992aa0f0854155abc1884abc4099d368780e08cc8cb9519",
+      "experiment_id": "AT-B0-E1M-S579071",
+      "steps": 1000000
+    },
+    "medium": {
+      "model": "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-M1M-S579071/AT-B0-M1M-S579071/AT-B0-M1M-S579071_1000000_steps.zip",
+      "checkpoint_sha256": "79d0873f150a3bbc1992b9c9936a20aa23ab742fafdbb3a24ec748f247896bf7",
+      "experiment_id": "AT-B0-M1M-S579071",
+      "steps": 1000000
+    },
+    "hard": {
+      "model": "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-H1M-S579071/AT-B0-H1M-S579071/AT-B0-H1M-S579071_1000000_steps.zip",
+      "checkpoint_sha256": "83a1f36cdd73794caa89c3f050f65cf4fdf3219a9e3679bd113df9c4683a2843",
+      "experiment_id": "AT-B0-H1M-S579071",
+      "steps": 1000000
+    }
+  },
+  "source_sha256": {
+    "src/wrapper.py": "a4b869d6011c53f1a269f77e3a322b94c8b80f77b16b528fc3d941900ffd544f",
+    "src/utils.py": "c6fafcdd062d67ca2ed0afdd5cdcccbebda7050d725e26c68a1a9e760dec0d68",
+    "src/merging.py": "7eb19b2285604b872b638b8237e393ad696bf8a1d9e50ad017060a683da4a2fe",
+    "src/diagnostics.py": "ebeab97fd64a0ac548341a465725c589112c617206b82b4371003b9256c920df",
+    "src/delay_encoder.py": "b3834d587b9fa3e39b48598091dc4d0f63eef4114db0593c70d75b5ab34b2c6e",
+    "src/geometry.py": "718b982bb3de086619be53393b2d923b6eeb0068f3561ede8994e20be6b73bcd",
+    "src/safety_controller.py": "184116265fc4249432de590e28a60b07e93b89d97b59102fbd7d8df1d981eae5",
+    "sumo_new/Antwerp.net.xml": "bcde9bb77493ce026bd37b6764d87f6fc292553dba11979683755e792945013d",
+    "sumo_new/Antwerp_hard.rou.xml": "f1c08f2975180bae387c0976b29e88ede9eddd07eebb5d5ca694f641e4691b36",
+    "evaluate_sac_delay.py": "79bbbc0a1bbf1ef46cfa2adf675fc9bec4a059c6f381a654464a48d5c66bf7b4",
+    "src/evaluation_metrics.py": "1cc16f9ec0136a8095cbe773e910928756c9d4ef3b49b7b7b8c18f32e72292d9",
+    "sumo_new/Antwerp_easy.rou.xml": "f084f6fd6bcaa1b983e917d96c1366542db3fe399b094978ab5d6aaa3383c8f3",
+    "sumo_new/Antwerp_medium.rou.xml": "12d1428ba8d80e05d7dc85196932b70b2a273ca95ddbcb89f814918e614f3b27"
+  },
+  "worktree": "${WORKSPACE}/DAROM-TPR/tmp/ai/table3-metrics/worktree",
+  "worktree_commit": "7d1710fc1c9a0a5ab9b758dc0b742064e85d2f00",
+  "runner_sha256": "d979bd9a438602952c9891d358b78e28668aa386507d475f8f22cdd34c7e4d88",
+  "training_seed": 579071,
+  "training_steps": 1000000,
+  "seed_starts": [
+    710001,
+    720001,
+    730001
+  ],
+  "episodes_per_batch": 500,
+  "batches": 3,
+  "total_episodes": 9000,
+  "concurrency": 4,
+  "device": "cpu",
+  "torch_threads": 1,
+  "deterministic": true,
+  "delay_mode": "uniform",
+  "max_delay": 20,
+  "safety_version": "original baseline; no bumper-clearance fix",
+  "evaluation_variance": "three evaluation batches of one training seed; not training-seed variance",
+  "no_merge_definition": "legacy Table III timeout proxy; unmerged/merged timeouts separately reported",
+  "pilot": "six archived development cases, seed 680001; excluded from formal totals",
+  "formal_seed_ranges": [
+    [
+      710001,
+      710500
+    ],
+    [
+      720001,
+      720500
+    ],
+    [
+      730001,
+      730500
+    ]
+  ],
+  "per_episode_timeout_seconds": 1800,
+  "pilot_runner_sha256": "1fc322b21a3d2d279b625f229f3f8adf815118e39af3b8ff493b5897741c3f21",
+  "formal_authorized": true,
+  "formal_authorization": {
+    "recorded_utc": "2026-10-14T11:10:37.868997+00:00",
+    "instruction": "ok\uff0c\u8ba1\u5212\u4e00\u4e0b\u539f\u8bba\u6587\u53c2\u6570\u7684\u8bc4\u4f30\u56de\u5408\uff0c\u7136\u540e\u751f\u6210TABLE III",
+    "scope": "Existing Antwerp Easy/Medium/Hard 1M checkpoints; SC off/on; 500 episodes x 3 batches each; 9000 total; two CPU workers only"
+  },
+  "reporting": {
+    "main_table_spread": "sample std across three evaluation batches",
+    "success_interval": "pooled-episode Wilson 95% interval",
+    "training_seed_count": 1,
+    "completed_pilot_included": false
+  },
+  "scheduler_revisions": [
+    {
+      "previous_sha256": "ebe2c16d721f43b77ec45a565eb6e3c4e49adc367a849df8a5c2a9658da79cff",
+      "previous_concurrency": 2,
+      "changed_utc": "2026-10-14T11:18:04.727721+00:00",
+      "reason": "\u5982\u679c\u6709\u8d44\u6e90\u7684\u8bdd\uff0c\u6700\u597d\u5e76\u884c\u8bc4\u4f30"
+    }
+  ],
+  "maximum_concurrency": 4
+}

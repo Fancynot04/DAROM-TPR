@@ -1,0 +1,71 @@
+{
+  "method": "Algebra from alpha, alpha_loss, actor_loss; gradient_steps=1, target_entropy=-2; rounded logged values",
+  "scenarios": {
+    "easy": {
+      "first": {
+        "scenario": "easy",
+        "environment_step": 9608,
+        "actor_loss": -15.989960670471191,
+        "alpha": 0.7525608539581299,
+        "alpha_loss": -0.9278442859649658,
+        "reconstructed_mean_logp": -1.2639150615021126,
+        "reconstructed_entropy_term": -0.9511729980145721,
+        "reconstructed_mean_min_q": 15.03878767245662
+      },
+      "last": {
+        "scenario": "easy",
+        "environment_step": 995324,
+        "actor_loss": 17.534914016723633,
+        "alpha": 0.043572016060352325,
+        "alpha_loss": -0.05327071249485016,
+        "reconstructed_mean_logp": 1.9829987458635918,
+        "reconstructed_entropy_term": 0.08640325320242694,
+        "reconstructed_mean_min_q": -17.448510763521206
+      }
+    },
+    "medium": {
+      "first": {
+        "scenario": "medium",
+        "environment_step": 5529,
+        "actor_loss": -10.638126373291016,
+        "alpha": 0.8499636650085449,
+        "alpha_loss": -0.5383481383323669,
+        "reconstructed_mean_logp": -1.3116546700502782,
+        "reconstructed_entropy_term": -1.1148588105815083,
+        "reconstructed_mean_min_q": 9.523267562709508
+      },
+      "last": {
+        "scenario": "medium",
+        "environment_step": 998750,
+        "actor_loss": 27.70452117919922,
+        "alpha": 0.050493933260440826,
+        "alpha_loss": 0.21651270985603333,
+        "reconstructed_mean_logp": 2.072511657720328,
+        "reconstructed_entropy_term": 0.10464926532641582,
+        "reconstructed_mean_min_q": -27.599871913872803
+      }
+    },
+    "hard": {
+      "first": {
+        "scenario": "hard",
+        "environment_step": 13911,
+        "actor_loss": -2.6901581287384033,
+        "alpha": 0.6614304780960083,
+        "alpha_loss": -1.355079174041748,
+        "reconstructed_mean_logp": -1.278282008628783,
+        "reconstructed_entropy_term": -0.8454946801088618,
+        "reconstructed_mean_min_q": 1.8446634486295417
+      },
+      "last": {
+        "scenario": "hard",
+        "environment_step": 991929,
+        "actor_loss": 21.734485626220703,
+        "alpha": 0.027691107243299484,
+        "alpha_loss": 0.43978986144065857,
+        "reconstructed_mean_logp": 2.1226187675441346,
+        "reconstructed_entropy_term": 0.05877766392870481,
+        "reconstructed_mean_min_q": -21.675707962291998
+      }
+    }
+  }
+}

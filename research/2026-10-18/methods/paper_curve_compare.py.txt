@@ -1,0 +1,98 @@
+"""Compare recorded D training with vector-digitized Fig.4 Hard/GRU lines.
+
+Paper lines are figure estimates, not the authors' raw training records.
+Axis coordinates were checked against rendered PDF page 9 and SVG grid lines.
+No training configuration or running process is changed.
+"""
+import csv
+import json
+import os
+import re
+import xml.etree.ElementTree as ET
+from pathlib import Path
+import numpy as np
+out=Path(__file__).resolve().parent
+os.environ['MPLCONFIGDIR']=str(out/'matplotlib-cache')
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+root=out.parents[2]
+run=root/'runs/D-long/D-seed42-from0-20261017T022231Z-7c46cd52'
+cutoff=500000
+rows=[json.loads(s) for s in (run/'metrics.jsonl').read_text().splitlines() if s.endswith('}')]
+rows=[r for r in rows if r['env_steps']<=cutoff]
+(out/'current-metrics-through-500k.json').write_text(json.dumps(rows))
+tree=ET.parse(out/'paper-page9.svg').getroot()
+paths=[e for e in tree.iter() if e.get('stroke','').startswith('rgb(18.03894%')]
+assert len(paths)==10
+left,right=932.186453,1266.338497
+definitions={
+    'return': (2,1022.565008,(1106.002087-855.678615)/600,'train/reward_mean_100'),
+    'critic': (5,521.171780,(785.099655-521.171780)/80,'train/critic_loss'),
+    'actor': (8,333.291541,(406.598723-186.664944)/150,'train/actor_loss'),
+}
+paper={}
+summary={'cutoff_steps':cutoff,'source':'https://arxiv.org/pdf/2403.11852v5#page=9',
+         'method':'Fig.4 Hard GRU blue opaque vector line, axis calibrated; approximate displayed values, not raw logs',
+         'paper_smoothing':'unspecified','current_smoothing':{'return':'last 100 completed episodes','loss':'trailing 100 log samples = 10k environment steps'},
+         'checkpoints':[],'paper_late_6m_to_7m':{},'evaluations':{}}
+for name,(idx,zero,scale,key) in definitions.items():
+    path=paths[idx]
+    assert set(re.findall(r'[A-Za-z]',path.get('d'))) <= {'M','L'}
+    xy=np.array(list(map(float,re.findall(r'-?\d+(?:\.\d+)?',path.get('d'))))).reshape(-1,2)
+    # One actor segment reverses x by about 0.00077M near 1.08M;
+    # sort it for interpolation. This is outside the matched 0-0.5M window.
+    xy=xy[np.argsort(xy[:,0],kind='stable')]
+    steps=(xy[:,0]-left)/(right-left)*7e6
+    value=(xy[:,1]-zero)/scale
+    paper[name]=(steps,value)
+    with (out/f'paper-hard-gru-{name}-digitized.csv').open('w') as f:
+        writer=csv.writer(f);writer.writerow(['env_steps_estimated','figure_value_estimated']);writer.writerows(zip(steps,value))
+    grid=np.linspace(6e6,7e6,1001)
+    late=np.interp(grid,steps,value)
+    summary['paper_late_6m_to_7m'][name]={'median_estimate':float(np.median(late)),'min_estimate':float(min(late)),'max_estimate':float(max(late))}
+for step in (100000,250000,500000):
+    record={'step':step}
+    for name,(_,_,_,key) in definitions.items():
+        current=[r[key] for r in rows if key in r and step-10000<r['env_steps']<=step]
+        record[name]={'paper_figure_estimate':float(np.interp(step,*paper[name])),
+                      'current_latest':current[-1], 'current_last10k_mean':float(np.mean(current))}
+    summary['checkpoints'].append(record)
+for p in sorted(run.glob('eval-*/results.json')):
+    if int(p.parent.name.split('-')[1])<=cutoff:
+        summary['evaluations'][p.parent.name]=json.loads(p.read_text())['metrics']
+summary['nonfinite_logged_values']=sum(not np.isfinite(v) for r in rows for v in r.values() if isinstance(v,(float,int)))
+(out/'comparison-summary.json').write_text(json.dumps(summary,indent=2))
+print(json.dumps(summary,indent=2))
+
+fig,axes=plt.subplots(3,2,figsize=(13,11))
+titles={'return':'Training return','critic':'Critic loss','actor':'Actor loss'}
+for i,(name,(_,_,_,key)) in enumerate(definitions.items()):
+    selected=[r for r in rows if key in r]
+    x=np.array([r['env_steps'] for r in selected])/1e6
+    y=np.array([r[key] for r in selected])
+    if name!='return':
+        x=x[99:];y=np.convolve(y,np.ones(100)/100,mode='valid')
+    for j,limit in enumerate((7,.5)):
+        ax=axes[i,j]
+        ax.plot(paper[name][0]/1e6,paper[name][1],color='#0072B2',label='Paper Hard / GRU (digitized figure)',linewidth=1.6)
+        ax.plot(x,y,color='#D55E00',label='Current D / seed 42',linewidth=1.8)
+        ax.set_xlim(0,limit);ax.set_ylabel(titles[name]);ax.set_xlabel('Environment steps (millions)')
+        ax.grid(alpha=.25)
+        if j==0:
+            ax.axvspan(0,.5,color='#D55E00',alpha=.06)
+            ax.axvline(.5,color='#D55E00',linestyle=':',alpha=.7)
+        else:
+            visible=(paper[name][0]<=cutoff)
+            vals=np.concatenate([paper[name][1][visible],y])
+            span=max(vals)-min(vals)
+            ax.set_ylim(min(vals)-.07*span,max(vals)+.07*span)
+axes[0,0].set_title('Full paper budget: 0-7M (current coverage shaded)')
+axes[0,1].set_title('Matched early training: 0-0.5M')
+axes[0,0].legend(fontsize=8)
+fig.suptitle('DAROM Fig.4 Hard/GRU vs current D run at 500,000 steps',fontsize=14)
+fig.text(.5,.015,'Paper: displayed vector curves, unknown smoothing / seed aggregation. Current: reward mean over 100 episodes; loss mean over 10k steps.\nDifferent early trajectories are visible; this comparison does not establish their cause or final performance.',ha='center',fontsize=9)
+fig.tight_layout(rect=(0,.06,1,.96))
+fig.savefig(out/'paper-vs-current-500k.png',dpi=180)
+fig.savefig(out/'paper-vs-current-500k.pdf')

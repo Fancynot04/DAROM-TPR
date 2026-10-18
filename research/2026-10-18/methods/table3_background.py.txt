@@ -1,0 +1,494 @@
+"""Resume-safe parallel evaluation of frozen Antwerp 1M checkpoints only."""
+import argparse
+from collections import Counter, defaultdict
+import csv
+from datetime import datetime, timezone, timedelta
+import fcntl
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import signal
+import socket
+import statistics
+import subprocess
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parent
+PROJECT = ROOT.parents[2]
+WORKTREE = PROJECT / 'tmp/ai/table3-metrics/worktree'
+ARCHIVE = PROJECT / 'tmp/ai/antwerp-density-1m'
+GROUP = 'AT-T3-1M-1500-20261014'
+SEEDS = [710001, 720001, 730001]
+SCENARIOS = [('easy', 'E'), ('medium', 'M'), ('hard', 'H')]
+PYTHON = '${WORKSPACE}/DAROM-original/.venv/bin/python'
+MOTION = ['mean_speed_mps', 'mean_jerk_mps3', 'mean_abs_jerk_mps3', 'rms_jerk_mps3']
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def digest(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def save(path, obj):
+    temporary = path.with_suffix(path.suffix + '.pending')
+    with temporary.open('w') as stream:
+        json.dump(obj, stream, indent=2, allow_nan=False)
+        stream.write('\n')
+    temporary.replace(path)
+
+
+def append(path, obj):
+    with path.open('a') as stream:
+        stream.write(json.dumps(obj, allow_nan=False)+'\n')
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def jobs(phase):
+    if phase == 'pilot':
+        seeds = [(0, 680001)]
+    else:
+        # Each traffic/safety/batch receives early samples; SC pairs share seeds.
+        seeds = [(batch+1, start+index) for index in range(500)
+                 for batch, start in enumerate(SEEDS)]
+    return [dict(name=f'{scenario}-B{batch}-S{seed}-SC{safety}', scenario=scenario,
+                 batch=batch, seed=seed, safety=bool(safety))
+            for batch, seed in seeds for scenario, _ in SCENARIOS for safety in (0, 1)]
+
+
+def prepare():
+    if (ROOT/'manifest.json').exists():
+        raise RuntimeError('Manifest already exists; use status/launch to resume')
+    ledger = [json.loads(line) for line in (ARCHIVE/'checkpoints.jsonl').read_text().splitlines()]
+    checkpoints = {}
+    for scenario, letter in SCENARIOS:
+        entry = next(r for r in ledger if r['experiment_id'] == f'AT-B0-{letter}1M-S579071'
+                     and r['steps'] == 1000000)
+        assert digest(entry['model']) == entry['checkpoint_sha256']
+        checkpoints[scenario] = {k: entry[k] for k in ('model', 'checkpoint_sha256', 'experiment_id', 'steps')}
+    previous = json.loads((PROJECT/'tmp/ai/table3-metrics/hard1m-evaluation/manifest.json').read_text())
+    guarded = dict(previous['source_sha256'])
+    for scenario, _ in SCENARIOS:
+        relative = f'sumo_new/Antwerp_{scenario}.rou.xml'
+        assert digest(PROJECT/relative) == digest(WORKTREE/relative)
+        guarded[relative] = digest(WORKTREE/relative)
+    for relative, expected in guarded.items():
+        assert digest(WORKTREE/relative) == expected, relative
+        if (PROJECT/relative).exists() and relative != 'evaluate_sac_delay.py':
+            assert digest(PROJECT/relative) == expected, relative
+    for phase in ('pilot', 'formal'):
+        (ROOT/phase/'episodes').mkdir(parents=True, exist_ok=True)
+    manifest = dict(group=GROUP, created_utc=now(), checkpoints=checkpoints,
+                    source_sha256=guarded, worktree=str(WORKTREE),
+                    worktree_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=WORKTREE, text=True).strip(),
+                    runner_sha256=digest(__file__), training_seed=579071, training_steps=1000000,
+                    seed_starts=SEEDS, episodes_per_batch=500, batches=3,
+                    total_episodes=9000, concurrency=2, device='cpu', torch_threads=1,
+                    deterministic=True, delay_mode='uniform', max_delay=20,
+                    safety_version='original baseline; no bumper-clearance fix',
+                    evaluation_variance='three evaluation batches of one training seed; not training-seed variance',
+                    no_merge_definition='legacy Table III timeout proxy; unmerged/merged timeouts separately reported',
+                    pilot='six archived development cases, seed 680001; excluded from formal totals',
+                    formal_seed_ranges=[[s, s+499] for s in SEEDS],
+                    per_episode_timeout_seconds=1800)
+    save(ROOT/'manifest.json', manifest)
+    print(json.dumps(manifest, indent=2))
+
+
+def manifest():
+    result = json.loads((ROOT/'manifest.json').read_text())
+    assert result['runner_sha256'] == digest(__file__), 'Runner changed after manifest freeze'
+    return result
+
+
+def guard(m):
+    for relative, expected in m['source_sha256'].items():
+        assert digest(WORKTREE/relative) == expected, relative
+    for checkpoint in m['checkpoints'].values():
+        assert digest(checkpoint['model']) == checkpoint['checkpoint_sha256']
+
+
+def episode(phase, name, output):
+    m = manifest()
+    guard(m)
+    job = next(j for j in jobs(phase) if j['name'] == name)
+    assert output.parent == ROOT/phase/'episodes'
+    assert not output.exists()
+    sys.path.insert(0, str(WORKTREE))
+    import numpy as np
+    import torch
+    from stable_baselines3 import SAC
+    import evaluate_sac_delay as evaluation
+    from unittest.mock import patch
+    torch.set_num_threads(1)
+    checkpoint = m['checkpoints'][job['scenario']]
+    model = SAC.load(checkpoint['model'], device='cpu')
+    assert model.num_timesteps == 1000000 and model.seed == 579071
+    count = 0
+    original_factory = evaluation.make_env
+
+    def make_env(*args, **kwargs):
+        env = original_factory(*args, **kwargs)
+        if job['safety']:
+            original_action = env.action
+
+            def action(value):
+                nonlocal count
+                proposed = np.asarray(value).copy()
+                result = original_action(value)
+                count += int(not np.array_equal(proposed, result))
+                return result
+
+            env.action = action
+        return env
+
+    started = time.monotonic()
+    with patch.object(evaluation, 'make_env', side_effect=make_env):
+        report = evaluation.evaluate_runs(model, job['scenario'], 'uniform', job['safety'],
+                                          'full', 1, [job['seed']])
+    record = report['runs'][0]['episode_results'][0]
+    record['safety_interventions'] = count
+    report.update(group=GROUP, job=job, phase=phase, checkpoint=checkpoint['model'],
+                  checkpoint_sha256=checkpoint['checkpoint_sha256'],
+                  evaluation_wall_seconds=time.monotonic()-started, finished_utc=now())
+    assert record['motion']['speed_samples'] + record['motion']['excluded_speed_samples'] == record['steps']
+    assert record['success'] == (record['outcome'] == 'Arrived' and not record['ego_teleported'])
+    if phase == 'pilot':
+        old_name = f"{checkpoint['experiment_id']}-K1000000-S{job['seed']}-SC{int(job['safety'])}"
+        old_dir = PROJECT / ('tmp/ai/table3-metrics/hard1m-evaluation/evaluation'
+                             if job['scenario'] == 'hard' else 'tmp/ai/table3-metrics/latest-evaluation/evaluation')
+        prior = json.loads((old_dir/f'{old_name}.json').read_text())
+        assert prior['checkpoint_sha256'] == report['checkpoint_sha256']
+        previous = prior['runs'][0]['episode_results'][0]
+        for key in ('seed', 'steps', 'outcome', 'merged', 'ego_teleported', 'success', 'return', 'motion'):
+            assert record[key] == previous[key], (name, key, record[key], previous[key])
+        assert record['reset_info']['scene_files'] == previous['reset_info']['scene_files']
+        report['archived_parity'] = True
+    # Never overwrite successful per-episode records; retries have separate names.
+    with output.open('x') as stream:
+        json.dump(report, stream, allow_nan=False)
+        stream.write('\n')
+    print('DONE', name, record['outcome'], record['return'], 'seconds', report['evaluation_wall_seconds'], flush=True)
+
+
+def rate(records, predicate):
+    return 100*sum(predicate(r) for r in records)/len(records)
+
+
+def metrics(records):
+    mean = lambda values: statistics.mean(v for v in values if v is not None) if any(v is not None for v in values) else None
+    return dict(success_pct=rate(records, lambda r: r['success']),
+                collision_pct=rate(records, lambda r: r['outcome'] == 'Collision'),
+                timeout_pct=rate(records, lambda r: r['outcome'] == 'Max Steps'),
+                unmerged_timeout_pct=rate(records, lambda r: r['outcome'] == 'Max Steps' and not r['merged']),
+                merged_timeout_pct=rate(records, lambda r: r['outcome'] == 'Max Steps' and r['merged']),
+                raw_arrival_pct=rate(records, lambda r: r['outcome'] == 'Arrived'),
+                teleported_arrival_pct=rate(records, lambda r: r['outcome'] == 'Arrived' and r['ego_teleported']),
+                ego_teleport_pct=rate(records, lambda r: r['ego_teleported']),
+                emergency_stopping_pct=rate(records, lambda r: r['outcome'] == 'Emergency Stopping'),
+                mean_return=mean([r['return'] for r in records]),
+                mean_safety_interventions=mean([r['safety_interventions'] for r in records]),
+                **{key: mean([r['motion'][key] for r in records]) for key in MOTION})
+
+
+def table(reports):
+    grouped = defaultdict(list)
+    for report in reports.values():
+        grouped[(report['job']['scenario'], report['job']['safety'])].append(report)
+    rows = []
+    for (scenario, safety), values in sorted(grouped.items()):
+        records = [v['runs'][0]['episode_results'][0] for v in values]
+        batches = {}
+        for batch in (1, 2, 3):
+            part = [v['runs'][0]['episode_results'][0] for v in values if v['job']['batch'] == batch]
+            if part:
+                batches[str(batch)] = dict(episodes=len(part), **metrics(part))
+        means = metrics(records)
+        complete = len(records) == 1500 and len(batches) == 3 and all(b['episodes'] == 500 for b in batches.values())
+        deviations = {key: statistics.stdev([b[key] for b in batches.values()])
+                      if complete and all(b[key] is not None for b in batches.values()) else None for key in means}
+        n = len(records)
+        p = means['success_pct']/100
+        z = 1.959963984540054
+        center = (p+z*z/(2*n))/(1+z*z/n)
+        half = z*math.sqrt(p*(1-p)/n+z*z/(4*n*n))/(1+z*z/n)
+        rows.append(dict(scenario=scenario, safety=safety, episodes=n, complete=complete,
+                         metrics=means, std_across_three_evaluation_batches=deviations,
+                         success_ci95_wilson_pct=[100*(center-half), 100*(center+half)],
+                         motion_missing={key: sum(r['motion'][key] is None for r in records) for key in MOTION},
+                         batches=batches))
+    return dict(group=GROUP, updated_utc=now(), scope='One 1M checkpoint per density; three evaluation batches',
+                complete=len(rows) == 6 and all(row['complete'] for row in rows), rows=rows)
+
+
+def export_table(directory, reports):
+    """Publish provisional results clearly; finalize only at 9000 records."""
+    result = table(reports)
+    save(directory/'table3.json', result)
+    columns = [('success_pct', 'Success (%)', 2), ('collision_pct', 'Collision (%)', 2),
+               ('timeout_pct', 'No Merge / timeout (%)', 2), ('mean_return', 'Avg Return', 2),
+               ('mean_speed_mps', 'Avg Ego Vel (m/s)', 3), ('mean_jerk_mps3', 'Avg Jerk (m/s^3)', 4)]
+    by_group = {(r['scenario'], r['safety']): r for r in result['rows']}
+    count = sum(r['episodes'] for r in result['rows'])
+    lines = ['# TABLE III — Antwerp GRU, 1M training steps', '',
+             f"Status: {'COMPLETE' if result['complete'] else 'IN PROGRESS — provisional estimates'}; {count}/9000 episodes.",
+             f"Updated (UTC): {result['updated_utc']}", '',
+             '| Difficulty | Method | Episodes | '+' | '.join(label for _, label, _ in columns)+' |',
+             '|---|---|---:|'+ '|'.join('---:' for _ in columns)+'|']
+    for scenario, _ in SCENARIOS:
+        for safety in (False, True):
+            row = by_group.get((scenario, safety))
+            cells = []
+            for key, _, precision in columns:
+                mean = row['metrics'][key] if row else None
+                std = row['std_across_three_evaluation_batches'][key] if row else None
+                cells.append('—' if mean is None else f'{mean:.{precision}f}'
+                             + (f' ± {std:.{precision}f}' if std is not None else ''))
+            method = 'DAROM-GRU + SC' if safety else 'DAROM-GRU w/o SC'
+            n = row['episodes'] if row else 0
+            lines.append(f'| {scenario.title()} | {method} | {n}/1500 | '+' | '.join(cells)+' |')
+    lines += ['', '- Each row: one checkpoint, three batches of 500 episodes; training seed 579071.',
+              '- Deterministic actions, uniform delay up to 20 steps; existing baseline safety controller.',
+              '- Final ± values are sample standard deviations across three evaluation batches, not training-seed variation or a confidence interval.',
+              '- Partial rows show pooled means only; no final spread estimate until all three batches are complete.',
+              '- Success excludes any ego teleport. No Merge follows the legacy timeout proxy; true unmerged and merged timeouts are separate in JSON/CSV.',
+              '- Motion uses equal episode weight across all outcomes; signed jerk may cancel. Absolute/RMS jerk, missing counts and success Wilson 95% intervals are retained in JSON.',
+              '- This covers the GRU safety-on/off rows only, not the paper\'s other algorithms or its 7M training budget.',
+              '- Evaluation episode seeds: 710001–710500, 720001–720500, 730001–730500; paired across safety settings.', '']
+    target = directory/'table3.md'
+    temporary = target.with_suffix('.md.pending')
+    temporary.write_text('\n'.join(lines))
+    temporary.replace(target)
+    if result['rows']:
+        keys = list(result['rows'][0]['metrics'])
+        target = directory/'table3.csv'
+        temporary = target.with_suffix('.csv.pending')
+        with temporary.open('w', newline='') as stream:
+            writer = csv.writer(stream)
+            writer.writerow(['scenario', 'safety', 'episodes', 'complete']+keys+[key+'_batch_std' for key in keys])
+            for scenario, _ in SCENARIOS:
+                for safety in (False, True):
+                    row = by_group.get((scenario, safety))
+                    if row:
+                        writer.writerow([scenario, safety, row['episodes'], row['complete']]
+                                        +[row['metrics'][k] for k in keys]
+                                        +[row['std_across_three_evaluation_batches'][k] for k in keys])
+        temporary.replace(target)
+    return result
+
+
+def validate_report(path, job, m):
+    report = json.loads(path.read_text())
+    assert report['job'] == job and report['checkpoint_sha256'] == m['checkpoints'][job['scenario']]['checkpoint_sha256']
+    assert report['deterministic'] and report['training_timesteps'] == 1000000
+    assert report['evaluation_seeds'] == [job['seed']] and report['total_episodes'] == 1
+    assert report['training_safety'] is False and report['evaluation_safety'] == job['safety']
+    record = report['runs'][0]['episode_results'][0]
+    assert record['seed'] == job['seed'] and record['steps'] > 0
+    assert record['motion']['speed_samples'] + record['motion']['excluded_speed_samples'] == record['steps']
+    assert record['reset_info']['step_length'] == .1
+    for item in record['reset_info']['scene_files'].values():
+        assert m['source_sha256'][item['path']] == item['sha256']
+    if job['batch'] == 0:
+        assert report['archived_parity'] is True
+    return report
+
+
+def concurrency_limit(m, phase):
+    control = ROOT/'control.json'
+    value = (json.loads(control.read_text())['concurrency']
+             if phase == 'formal' and control.exists() else m['concurrency'])
+    if type(value) is not int or not 1 <= value <= m.get('maximum_concurrency', m['concurrency']):
+        raise ValueError('Concurrency must be an integer within the authorized limit')
+    return value
+
+
+def supervisor(phase):
+    m = manifest()
+    guard(m)
+    directory = ROOT/phase
+    lock = (directory/'supervisor.lock').open('a')
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+    if phase == 'formal':
+        assert m.get('formal_authorized') is True, 'Formal evaluation needs explicit authorization'
+        pilot = json.loads((ROOT/'pilot/status.json').read_text())
+        assert pilot['state'] == 'completed' and pilot['completed'] == 6
+    all_jobs = jobs(phase)
+    pending = []
+    reports = {}
+    for job in all_jobs:
+        successes = list((directory/'episodes').glob(job['name']+'.attempt*.json'))
+        if successes:
+            assert len(successes) == 1
+            reports[job['name']] = validate_report(successes[0], job, m)
+        else:
+            pending.append(job)
+    active = {}
+    errors = []
+    started = now()
+    session_start = time.monotonic()
+    initial_completed = len(reports)
+    launched = 0
+    stopping = False
+    durations = []
+    prior_status = json.loads((directory/'status.json').read_text()) if (directory/'status.json').exists() else {}
+    original_started = prior_status.get('started_utc', started)
+
+    def write_status(state):
+        elapsed = time.monotonic()-session_start
+        new_n = len(reports)-initial_completed
+        throughput = new_n/elapsed if new_n else None
+        remaining = (len(all_jobs)-len(reports))/throughput if throughput else None
+        status = dict(group=GROUP, phase=phase, state=state, pid=os.getpid(), started_utc=original_started,
+                      session_started_utc=started, updated_utc=now(), concurrency=m['concurrency'],
+                      completed=len(reports), total=len(all_jobs), pending=len(pending), errors=errors,
+                      active=[dict(name=v['job']['name'], pid=p.pid, elapsed_seconds=round(time.monotonic()-v['start'], 1))
+                              for p, v in active.items()],
+                      observed_episodes_per_hour=throughput*3600 if throughput else None,
+                      eta_remaining_hours=remaining/3600 if remaining is not None else None,
+                      eta_finish_utc=(datetime.now(timezone.utc)+timedelta(seconds=remaining)).isoformat()
+                      if remaining is not None else None,
+                      eta_note='Provisional throughput estimate; refine after balanced 60+ formal episodes',
+                      session_wall_seconds=elapsed)
+        save(directory/'status.json', status)
+        return status
+
+    print(now(), 'START', phase, len(reports), '/', len(all_jobs), 'concurrency', m['concurrency'], flush=True)
+    last_refresh = 0.0
+    try:
+        if phase == 'formal':
+            export_table(directory, reports)
+        while pending or active:
+            m['concurrency'] = concurrency_limit(m, phase)
+            while pending and len(active) < m['concurrency'] and not stopping:
+                job = pending.pop(0)
+                guard(m)
+                logs = list((directory/'episodes').glob(job['name']+'.attempt*.log'))
+                attempt = len(logs)+1
+                output = directory/'episodes'/f"{job['name']}.attempt{attempt}.json"
+                log_path = output.with_suffix('.log')
+                handle = log_path.open('x')
+                command = [PYTHON, '-B', '-u', str(Path(__file__).resolve()), 'episode', '--phase', phase,
+                           '--name', job['name'], '--output', str(output)]
+                child = subprocess.Popen(command, cwd=WORKTREE, stdin=subprocess.DEVNULL,
+                                         stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
+                active[child] = dict(job=job, output=output, handle=handle, start=time.monotonic(), attempt=attempt)
+                launched += 1
+                print(now(), 'LAUNCH', job['name'], 'pid', child.pid, flush=True)
+            for child, task in list(active.items()):
+                timed_out = time.monotonic()-task['start'] > m['per_episode_timeout_seconds']
+                if timed_out and child.poll() is None:
+                    os.killpg(child.pid, signal.SIGTERM)
+                    try:
+                        child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(child.pid, signal.SIGKILL)
+                        child.wait(timeout=5)
+                if child.poll() is None:
+                    continue
+                task['handle'].close()
+                del active[child]
+                elapsed = time.monotonic()-task['start']
+                try:
+                    assert child.returncode == 0 and not timed_out, f'Evaluator exit {child.returncode}; timeout={timed_out}'
+                    report = validate_report(task['output'], task['job'], m)
+                    reports[task['job']['name']] = report
+                    durations.append(elapsed)
+                    rec = report['runs'][0]['episode_results'][0]
+                    append(directory/'progress.jsonl', dict(name=task['job']['name'], finished_utc=now(),
+                           wall_seconds=elapsed, completed=len(reports), outcome=rec['outcome'],
+                           success=rec['success'], return_value=rec['return'], report=str(task['output'])))
+                    if phase == 'formal':
+                        export_table(directory, reports)
+                    print(now(), 'DONE', task['job']['name'], len(reports), '/', len(all_jobs), flush=True)
+                except Exception as error:
+                    failure = dict(name=task['job']['name'], error=repr(error), log=str(task['output'].with_suffix('.log')),
+                                   finished_utc=now())
+                    errors.append(failure)
+                    append(directory/'errors.jsonl', failure)
+                    # Fail closed: finish owned active episodes, schedule no new ones.
+                    stopping = True
+                    print(now(), 'ERROR', failure, flush=True)
+            if stopping and not active:
+                break
+            if time.monotonic()-last_refresh >= 5:
+                write_status('stopping_after_error' if stopping else 'running')
+                last_refresh = time.monotonic()
+            time.sleep(.5)
+        state = write_status('failed' if errors else 'completed')
+        if phase == 'pilot' and not errors:
+            save(directory/'timing.json', dict(total_wall_seconds=state['session_wall_seconds'],
+                 completed=len(reports), concurrency=m['concurrency'],
+                 episode_wall_seconds=durations,
+                 extrapolated_9000_wall_hours=state['session_wall_seconds']/len(reports)*9000/3600,
+                 warning='Only one archived seed per configuration; refine with formal balanced samples'))
+        if phase == 'formal':
+            result = export_table(directory, reports)
+            if not errors:
+                assert result['complete'] and len(reports) == 9000
+        print(now(), state['state'].upper(), len(reports), '/', len(all_jobs), flush=True)
+    except Exception as error:
+        errors.append(dict(error=repr(error), finished_utc=now()))
+        # Preserve results from existing children; do not orphan a new supervisor.
+        for child, task in active.items():
+            child.wait()
+            task['handle'].close()
+        active.clear()
+        write_status('failed')
+        raise
+
+
+def launch(phase):
+    m = manifest()
+    guard(m)
+    if phase == 'formal':
+        assert m.get('formal_authorized') is True, 'Formal evaluation needs explicit authorization'
+        status = json.loads((ROOT/'pilot/status.json').read_text())
+        assert status['state'] == 'completed' and status['completed'] == 6
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+    directory = ROOT/phase
+    lock = (directory/'supervisor.lock').open('a')
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    fcntl.flock(lock, fcntl.LOCK_UN)
+    lock.close()
+    with (directory/'supervisor.log').open('a') as stream:
+        child = subprocess.Popen([PYTHON, '-B', '-u', str(Path(__file__).resolve()),
+                                  'supervisor', '--phase', phase], cwd=PROJECT,
+                                 stdin=subprocess.DEVNULL, stdout=stream, stderr=subprocess.STDOUT,
+                                 start_new_session=True)
+    append(directory/'launches.jsonl', dict(pid=child.pid, phase=phase, launched_utc=now(), group=GROUP))
+    time.sleep(1)
+    assert child.poll() is None, f'Supervisor exited: {child.returncode}'
+    print(json.dumps(dict(group=GROUP, phase=phase, pid=child.pid, status=str(directory/'status.json'))))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('action', choices=['prepare', 'launch', 'supervisor', 'episode', 'status'])
+    parser.add_argument('--phase', choices=['pilot', 'formal'], default='pilot')
+    parser.add_argument('--name')
+    parser.add_argument('--output', type=Path)
+    args = parser.parse_args()
+    if args.action == 'prepare':
+        prepare()
+    elif args.action == 'launch':
+        launch(args.phase)
+    elif args.action == 'supervisor':
+        supervisor(args.phase)
+    elif args.action == 'episode':
+        episode(args.phase, args.name, args.output)
+    else:
+        print((ROOT/args.phase/'status.json').read_text())
+
+
+if __name__ == '__main__':
+    main()

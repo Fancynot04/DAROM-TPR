@@ -1,0 +1,644 @@
+{
+  "created_utc": "2026-10-18T08:31:54.021319+00:00",
+  "files": [
+    {
+      "path": "antwerp/evaluation/manifest.json",
+      "source": "DAROM-TPR/tmp/ai/table3-1m-1500/manifest.json",
+      "source_sha256": "4fae67037c8c09be99abf04bddc7e3d08bbb30c7b3e636854697abae6149fc7c",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/evaluation/table3.md",
+      "source": "DAROM-TPR/tmp/ai/table3-1m-1500/formal/table3.md",
+      "source_sha256": "b2c0d42d12d9570ec37a9afe84205af69e89ba9021b26a0f06c7dda63014d057",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/evaluation/table3.csv",
+      "source": "DAROM-TPR/tmp/ai/table3-1m-1500/formal/table3.csv",
+      "source_sha256": "d9919c0a874256556fc8fac6ff686adad093948a74e38a4c08d80fccee30e40e",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/evaluation/table3.json",
+      "source": "DAROM-TPR/tmp/ai/table3-1m-1500/formal/table3.json",
+      "source_sha256": "0d8320a3f14a45380c8850097505f33da463f4247131b635d4ee0429f4255f9d",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/evaluation/episodes.jsonl",
+      "source": "DAROM-TPR/tmp/ai/table3-1m-1500/formal/episodes/*.json",
+      "transformation": "selected episode fields; source file hashes embedded per row; reset command omitted"
+    },
+    {
+      "path": "antwerp/evaluation/source_reference/src/wrapper.py.txt",
+      "source": "DAROM-TPR/tmp/ai/table3-metrics/worktree/src/wrapper.py",
+      "source_sha256": "a4b869d6011c53f1a269f77e3a322b94c8b80f77b16b528fc3d941900ffd544f",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "antwerp/evaluation/source_reference/src/utils.py.txt",
+      "source": "DAROM-TPR/tmp/ai/table3-metrics/worktree/src/utils.py",
+      "source_sha256": "c6fafcdd062d67ca2ed0afdd5cdcccbebda7050d725e26c68a1a9e760dec0d68",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "antwerp/evaluation/source_reference/src/merging.py.txt",
+      "source": "DAROM-TPR/tmp/ai/table3-metrics/worktree/src/merging.py",
+      "source_sha256": "7eb19b2285604b872b638b8237e393ad696bf8a1d9e50ad017060a683da4a2fe",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "antwerp/evaluation/source_reference/src/diagnostics.py.txt",
+      "source": "DAROM-TPR/tmp/ai/table3-metrics/worktree/src/diagnostics.py",
+      "source_sha256": "ebeab97fd64a0ac548341a465725c589112c617206b82b4371003b9256c920df",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "antwerp/evaluation/source_reference/src/delay_encoder.py.txt",
+      "source": "DAROM-TPR/tmp/ai/table3-metrics/worktree/src/delay_encoder.py",
+      "source_sha256": "b3834d587b9fa3e39b48598091dc4d0f63eef4114db0593c70d75b5ab34b2c6e",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "antwerp/evaluation/source_reference/src/geometry.py.txt",
+      "source": "DAROM-TPR/tmp/ai/table3-metrics/worktree/src/geometry.py",
+      "source_sha256": "718b982bb3de086619be53393b2d923b6eeb0068f3561ede8994e20be6b73bcd",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "antwerp/evaluation/source_reference/src/safety_controller.py.txt",
+      "source": "DAROM-TPR/tmp/ai/table3-metrics/worktree/src/safety_controller.py",
+      "source_sha256": "184116265fc4249432de590e28a60b07e93b89d97b59102fbd7d8df1d981eae5",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "antwerp/evaluation/source_reference/evaluate_sac_delay.py.txt",
+      "source": "DAROM-TPR/tmp/ai/table3-metrics/worktree/evaluate_sac_delay.py",
+      "source_sha256": "79bbbc0a1bbf1ef46cfa2adf675fc9bec4a059c6f381a654464a48d5c66bf7b4",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "antwerp/evaluation/source_reference/src/evaluation_metrics.py.txt",
+      "source": "DAROM-TPR/tmp/ai/table3-metrics/worktree/src/evaluation_metrics.py",
+      "source_sha256": "1cc16f9ec0136a8095cbe773e910928756c9d4ef3b49b7b7b8c18f32e72292d9",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "methods/table3_background.py.txt",
+      "source": "DAROM-TPR/tmp/ai/table3-1m-1500/background.py",
+      "source_sha256": "d979bd9a438602952c9891d358b78e28668aa386507d475f8f22cdd34c7e4d88",
+      "transformation": "workspace path replaced",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "antwerp/training/convergence_diagnostics.png",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/convergence_diagnostics.png",
+      "source_sha256": "11dd24533c5f5cc86f6028c051e2ba3f26852e8759f26688be8c145df7d826d9",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/training/figure4_data.csv",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/figure4_data.csv",
+      "source_sha256": "2928ff7eda79ce3f89537563f8e94365f07b3e42b6745ab51a16b444a7711a68",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/training/figure4_training_curves.png",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/figure4_training_curves.png",
+      "source_sha256": "36c398230d9000e9dd995e217303886a029fcbc211e176785839d915cc3fbabf",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/training/loss_curves.png",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/loss_curves.png",
+      "source_sha256": "3bd73db76126fe7d37ea9da1356ab889d9174cfc3439bfcb6fae008ed9b07912",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/training/original_comparison_statistics.json",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/original_comparison_statistics.json",
+      "source_sha256": "23620940c464f6d1da0e4645f5b02717832a172282fe44a43a8d2b950fd1639d",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/training/original_episodes.csv",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/original_episodes.csv",
+      "source_sha256": "271086a2f5db263c45013cd9c8b9d8b7307c51d50aec597352621fe8a84726c9",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/training/original_evaluations.csv",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/original_evaluations.csv",
+      "source_sha256": "8cc490d3218a98903728d04f45cc760c2e8ead94f6cfc66016c3e5fa0ca88c69",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/training/original_reproduction_training.png",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/original_reproduction_training.png",
+      "source_sha256": "6e2a9f9e2dca474f1fe4bfea905b1b77d740a3eb11068a335d5d9386d973cea1",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/training/original_training_scalars.csv",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/original_training_scalars.csv",
+      "source_sha256": "9cc09019833e676d3344db19c62d5c15af3be538138acd12b7a56add9955354d",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/training/original_vs_antwerp_1m.png",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/original_vs_antwerp_1m.png",
+      "source_sha256": "ed214fc537a85ea17718d54dd1e13e308fd05c52edc875da86b8cbd3f0fbe274",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/training/scalars.csv",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/scalars.csv",
+      "source_sha256": "42ef3c3121f11e2a8c5eb899b420f4a575c811b83439e859bda23fc71d435a8c",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/training/statistics.json",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/statistics.json",
+      "source_sha256": "f537cf1517b4f2a52f653d1af19aeb153126cd64d219f6ac3afc675037ba0a15",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "methods/training-loss-analysis/compare_original.py.txt",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/compare_original.py",
+      "source_sha256": "f133eea5375b3f6f91b189872cfa41ce57fe1ec9dbfd8277a3a2b86b089c702a",
+      "transformation": "workspace path replaced",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "methods/training-loss-analysis/plot_losses.py.txt",
+      "source": "DAROM-TPR/tmp/ai/training-loss-analysis/plot_losses.py",
+      "source_sha256": "26e012398e57f89069f1dd4e7f168c0a9773f0e2419f6dab74effbe1e19a3c33",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "antwerp/loss_audit/actor_decomposition.csv",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/actor_decomposition.csv",
+      "source_sha256": "82cf135e75c7ffd5e41573d24d4b869d0d9c6215ab54153006bd59eb390b3091",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/loss_audit/actor_decomposition.json",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/actor_decomposition.json",
+      "source_sha256": "efab39ec256087102e0e5b74661cc8594b3edffafbde16cb9f3b54f25e7ae72b",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/loss_audit/easy.json",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/easy.json",
+      "source_sha256": "0f7d432062891705d976a962ae017695b08db46cf8790ec5a0e4ea34467500eb",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/loss_audit/hard.json",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/hard.json",
+      "source_sha256": "b280d7ea0a07dbf41d91fe586d40078e476e14fd98ddc8f33b91cf73db24067f",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/loss_audit/hard_full_scan.json",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/hard_full_scan.json",
+      "source_sha256": "7e4df2fdc2de96992b741d00a1e68b00f064437ae6f18a72253ea7e0c6082102",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/loss_audit/hard_loss_tail.json",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/hard_loss_tail.json",
+      "source_sha256": "1c38385deaaf097e0f928ca9a70076b7f8299d4e95bccffe423f625bfee27a6a",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/loss_audit/loss_spike_diagnostics.png",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/loss_spike_diagnostics.png",
+      "source_sha256": "eb24d7d1103a6d3d2f6431d7f36c272a339cc62a255faa87e55c6ab12023f03d",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/loss_audit/medium.json",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/medium.json",
+      "source_sha256": "19945138ccd5c69ae8d7d9607a44a91c803f0b6ff32fa27d2c5166f4ba6712d3",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/loss_audit/tail_checks.json",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/tail_checks.json",
+      "source_sha256": "3b5992e0fc52697d8639fde5d6f69909876dee4e25a30cd29327347552d72e3e",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "antwerp/loss_audit/validation.json",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/validation.json",
+      "source_sha256": "82155505071ff7c7907c632bb14fa041553d3f6d3d51f607bdbf1ea21ef994fe",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "methods/loss-spike-audit/audit.py.txt",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/audit.py",
+      "source_sha256": "060bc0d3085aab0df4dde857ecb2828c2234f7d0e22d811200741fff574f7c3c",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "methods/loss-spike-audit/check_tail.py.txt",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/check_tail.py",
+      "source_sha256": "bea643efddf17b11df9c0993b66c07030dc5629738ef11cf8739fadd0e8987d8",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "methods/loss-spike-audit/scan_hard.py.txt",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/scan_hard.py",
+      "source_sha256": "a53e6c0a5d9b7fe81db49b04bf033d3506fdd74812331a60c895417cc05de5fe",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "methods/loss-spike-audit/summarize.py.txt",
+      "source": "DAROM-TPR/tmp/ai/loss-spike-audit/summarize.py",
+      "source_sha256": "3e168e05518cf911f7baefc45ae3df6990c5f8890dd17e1a1705e21887d8a963",
+      "transformation": "workspace path replaced",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "antwerp/action_modes/results.json",
+      "source": "DAROM-TPR/tmp/ai/action-mode-audit/results.json",
+      "source_sha256": "8d6d474705f1949102016bf93f215478dac91c27ca88eba31562cae2c5a84ea4",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "methods/action-mode-audit/paired_eval.py.txt",
+      "source": "DAROM-TPR/tmp/ai/action-mode-audit/paired_eval.py",
+      "source_sha256": "080416776910fe25d81c3ee5859c465ac586f415fccc230c4daffb217e6ff245",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "methods/action-mode-audit/probe.py.txt",
+      "source": "DAROM-TPR/tmp/ai/action-mode-audit/probe.py",
+      "source_sha256": "94a4b9be79761154aee499f29a2e420aa0a9ccce7e2a779274f612c1b60d269d",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "reproduction/paper_comparison/comparison-summary.json",
+      "source": "DAROM-reproduction/tmp/ai/paper-curve-comparison/comparison-summary.json",
+      "source_sha256": "8c46849b98665c84c3a024e4c85e51dff020aa9310dde18420d21e23c9c170a7",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/paper_comparison/paper-hard-gru-actor-digitized.csv",
+      "source": "DAROM-reproduction/tmp/ai/paper-curve-comparison/paper-hard-gru-actor-digitized.csv",
+      "source_sha256": "863189139dcc597ba3c61839b0dc8f4c3975b2c38525c1ad07facd7c350573f4",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/paper_comparison/paper-hard-gru-critic-digitized.csv",
+      "source": "DAROM-reproduction/tmp/ai/paper-curve-comparison/paper-hard-gru-critic-digitized.csv",
+      "source_sha256": "55d3d155b903618bf9f691b855dd7a620197a7678880e41f348a8d3041d5be98",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/paper_comparison/paper-hard-gru-return-digitized.csv",
+      "source": "DAROM-reproduction/tmp/ai/paper-curve-comparison/paper-hard-gru-return-digitized.csv",
+      "source_sha256": "1bf4554be99b3d30a7acb0bd54527378ae16d0c919d961e09c076a76c0e17cdc",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/paper_comparison/paper-vs-current-500k.png",
+      "source": "DAROM-reproduction/tmp/ai/paper-curve-comparison/paper-vs-current-500k.png",
+      "source_sha256": "e8327e67ba3c05cbbb08bc89e086809bb84a7b1abc29030561bcf94bf9acb7dc",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "methods/paper_curve_compare.py.txt",
+      "source": "DAROM-reproduction/tmp/ai/paper-curve-comparison/compare.py",
+      "source_sha256": "90bf5c27939c3f78a30133c7e3f5443c2c0683671e06e828ab8dd8f14a2d8e5a",
+      "transformation": "byte exact",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "methods/periodic_forge.py.txt",
+      "source": "DAROM-reproduction/tmp/ai/evaluation-frequency/periodic_forge.py",
+      "source_sha256": "bd3e6baa7f45b64cbc83903780068eb22ac8fe554a68f2b2aac80ef44c375998",
+      "transformation": "workspace path replaced",
+      "status": "historical method reference; not a supported entry point"
+    },
+    {
+      "path": "reproduction/source/src/delay_encoder.py",
+      "source": "DAROM-reproduction/src/delay_encoder.py",
+      "source_sha256": "928ba8960c4284c0ae3c1788b7efe9d27fb292c6cc8f674509957cf28750b754",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/src/merging.py",
+      "source": "DAROM-reproduction/src/merging.py",
+      "source_sha256": "67944a68e312e29fdfead339aa95f43ccc2ba3b9c5ca57e5789bc5b67e2d2fff",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/src/safety_controller.py",
+      "source": "DAROM-reproduction/src/safety_controller.py",
+      "source_sha256": "fb781bee2fa72cc5af69322e6aa596f94f125c3eb483dbf14de469787368d362",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/src/utils.py",
+      "source": "DAROM-reproduction/src/utils.py",
+      "source_sha256": "65761095120053d7bbd2a29def4db9c57366623f3bd16a37e7b8005e22ae492f",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/src/wrapper.py",
+      "source": "DAROM-reproduction/src/wrapper.py",
+      "source_sha256": "bae70cf143139415150d42e4c04bac86a10c4faa326d7c96ec194942f4e658ef",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/experiments/__init__.py",
+      "source": "DAROM-reproduction/experiments/__init__.py",
+      "source_sha256": "8d9dfb6006b8046acef7fd945bac206bfff5d14cc3147ebf6c5cd7d72d8f75e3",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/experiments/checkpoints.py",
+      "source": "DAROM-reproduction/experiments/checkpoints.py",
+      "source_sha256": "2deabb6bf536ef2d3eb603dbfc51f0533925a6e6a49998e718ad1e10ed661856",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/experiments/d_long.json",
+      "source": "DAROM-reproduction/experiments/d_long.json",
+      "source_sha256": "ce717faa881a9722b80ba224dc76b952ecbf08fa8067763dcc7d1e4f3cd373aa",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/experiments/first_round.json",
+      "source": "DAROM-reproduction/experiments/first_round.json",
+      "source_sha256": "8260133ddb67c50d565745d3686ef0c726654509ecfcae70d8bb0bf28720927d",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/experiments/long_run.py",
+      "source": "DAROM-reproduction/experiments/long_run.py",
+      "source_sha256": "17a877870776db793b9b987d771d37b61291b543718dc084c1d301ca48b9c803",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/experiments/run.py",
+      "source": "DAROM-reproduction/experiments/run.py",
+      "source_sha256": "5a3443f38ec39883cb37ff765e86f99421382b6e7cbe05785d981727bc58c93f",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/experiments/suite.py",
+      "source": "DAROM-reproduction/experiments/suite.py",
+      "source_sha256": "665dc10ee22f11f15f1ea632ef7c3d05b3d715041ce6b441a3c0d3cc68abb616",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/tests/test_long_resume.py",
+      "source": "DAROM-reproduction/tests/test_long_resume.py",
+      "source_sha256": "aee2b120cd686de2020d2cafff7f354b8346bc3fbb70076fd70c774dc21ae935",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/tests/test_reproduction.py",
+      "source": "DAROM-reproduction/tests/test_reproduction.py",
+      "source_sha256": "ae305231c812a4544beefa8ec9cc65bcefa1543710d23cd2929f55fcdd112be7",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/sumo_files/mergingP.net.xml",
+      "source": "DAROM-reproduction/sumo_files/mergingP.net.xml",
+      "source_sha256": "cc4df6c5837fa1efd0687630eef18c23707db2e7c049d73bfb87583110853531",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/sumo_files/mergingP.neteditcfg",
+      "source": "DAROM-reproduction/sumo_files/mergingP.neteditcfg",
+      "source_sha256": "33ea842a67b63eddb9c362192c7c36347f5153669e9be7ebab3d3ae7724aeae5",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/sumo_files/mergingP.rou.xml",
+      "source": "DAROM-reproduction/sumo_files/mergingP.rou.xml",
+      "source_sha256": "49bb847df212a8589e1ae6c464ac07f17c18d1cc6d8ecbc0c6bcc6682499071d",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/sumo_files/mergingP.sumocfg",
+      "source": "DAROM-reproduction/sumo_files/mergingP.sumocfg",
+      "source_sha256": "468a1aabe609dfe614e335b1f781751b25a513bd7e4a371b0476a29086cec03e",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/sumo_files/mergingP_easy.rou.xml",
+      "source": "DAROM-reproduction/sumo_files/mergingP_easy.rou.xml",
+      "source_sha256": "33ea842a67b63eddb9c362192c7c36347f5153669e9be7ebab3d3ae7724aeae5",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/sumo_files/mergingP_hard.rou.xml",
+      "source": "DAROM-reproduction/sumo_files/mergingP_hard.rou.xml",
+      "source_sha256": "49bb847df212a8589e1ae6c464ac07f17c18d1cc6d8ecbc0c6bcc6682499071d",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/sumo_files/mergingP_medium.rou.xml",
+      "source": "DAROM-reproduction/sumo_files/mergingP_medium.rou.xml",
+      "source_sha256": "180555aef84fce0afef1a63fa1e103e670dd7d64b68b5f94234ea6f27e2791e6",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/sumo_files/viewsettings.xml",
+      "source": "DAROM-reproduction/sumo_files/viewsettings.xml",
+      "source_sha256": "33454710898b47ee2ae4c9f1aa3cc66dfac207118deb67e27787021cf8da11cc",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/docs/reproduction-experiment-plan.md",
+      "source": "DAROM-reproduction/docs/reproduction-experiment-plan.md",
+      "source_sha256": "8881edf9342a0284ba5a9b0f77d6728af646fd79545640c3fefe450acf76fd6e",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/README.md",
+      "source": "DAROM-reproduction/README.md",
+      "source_sha256": "e42ef2a34f3bacf12345a92ee4fead35b635acda2bab1fc902a5743dd18d84ab",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/.gitignore",
+      "source": "DAROM-reproduction/.gitignore",
+      "source_sha256": "89d21823763b5270eb6c890f6cd601abdaf3f36a144ba18fca39f9034db24a24",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/requirements.txt",
+      "source": "DAROM-reproduction/requirements.txt",
+      "source_sha256": "7e8cc720ab1c458ea9cbadd6fe300483307da180f0f79bfcf8d8687452e4af84",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/config.yaml",
+      "source": "DAROM-reproduction/config.yaml",
+      "source_sha256": "cb9bea413288dd414594a129e7c5d324ffd7f27e1318d5ce4266b2cd874edf24",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/train_sac_delay.py",
+      "source": "DAROM-reproduction/train_sac_delay.py",
+      "source_sha256": "a54b549634176c4e82f0e1d00e88d42d2ba4fac276f586ec989c89c7f13b1bcd",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/source/evaluate_sac_delay.py",
+      "source": "DAROM-reproduction/evaluate_sac_delay.py",
+      "source_sha256": "a54307952baa2c4c5ee5b73bb63b09d34abbf09353f3b618eed5a63b51b79e64",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/run_metadata/D-seed42-from0-20261017T022231Z-7c46cd52/config.json",
+      "source": "DAROM-reproduction/runs/D-long/D-seed42-from0-20261017T022231Z-7c46cd52/config.json",
+      "source_sha256": "65d290147d44c5cc3576f8218f6f94290c3c9ffda8e5437ba49e6a3db20cd19c",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/run_metadata/D-seed42-from0-20261017T022231Z-7c46cd52/environment.json",
+      "source": "DAROM-reproduction/runs/D-long/D-seed42-from0-20261017T022231Z-7c46cd52/environment.json",
+      "source_sha256": "9b0de1e41d22f244799d34cf35cf34e8dc49206c38ec4e8a4e73d893a2a5a954",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/run_metadata/D-seed42-from0-20261017T022231Z-7c46cd52/source-hashes.json",
+      "source": "DAROM-reproduction/runs/D-long/D-seed42-from0-20261017T022231Z-7c46cd52/source-hashes.json",
+      "source_sha256": "9ba924053f598d2464ef0c22e107f69ee0552dace935aa56180a89f2f1c3fba9",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/run_metadata/D-seed42-from0-20261017T022231Z-7c46cd52/parent.json",
+      "source": "DAROM-reproduction/runs/D-long/D-seed42-from0-20261017T022231Z-7c46cd52/parent.json",
+      "source_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/run_metadata/D-seed42-from657971-20261017T075908Z-435a663a/config.json",
+      "source": "DAROM-reproduction/runs/D-long/D-seed42-from657971-20261017T075908Z-435a663a/config.json",
+      "source_sha256": "ee45967249abdc4720af80b36401fa7e791c044bc546f71727a0102058d3d5cd",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/run_metadata/D-seed42-from657971-20261017T075908Z-435a663a/environment.json",
+      "source": "DAROM-reproduction/runs/D-long/D-seed42-from657971-20261017T075908Z-435a663a/environment.json",
+      "source_sha256": "9b0de1e41d22f244799d34cf35cf34e8dc49206c38ec4e8a4e73d893a2a5a954",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/run_metadata/D-seed42-from657971-20261017T075908Z-435a663a/source-hashes.json",
+      "source": "DAROM-reproduction/runs/D-long/D-seed42-from657971-20261017T075908Z-435a663a/source-hashes.json",
+      "source_sha256": "9ba924053f598d2464ef0c22e107f69ee0552dace935aa56180a89f2f1c3fba9",
+      "transformation": "byte exact",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/run_metadata/D-seed42-from657971-20261017T075908Z-435a663a/parent.json",
+      "source": "DAROM-reproduction/runs/D-long/D-seed42-from657971-20261017T075908Z-435a663a/parent.json",
+      "source_sha256": "d3523d026fc3b4a674e701dd00964467cf6b3ca537576d5baf4d35d661d18ad2",
+      "transformation": "workspace path replaced",
+      "status": "archived evidence"
+    },
+    {
+      "path": "reproduction/paper_comparison/d_snapshot_comparison.png",
+      "source": "tools/plot_curves.py --window 50000",
+      "transformation": "Rendered from archived d_metrics.csv and digitized paper CSVs; critic axis symlog",
+      "status": "validated archive figure"
+    }
+  ],
+  "notes": [
+    "${WORKSPACE} replaces the machine-specific workspace path in text files.",
+    "Models, replay buffers, raw runtime logs and credentials are not included.",
+    "Method references are archival source text, not supported executable tools."
+  ]
+}

@@ -1,0 +1,123 @@
+"""Offline diagnostics of saved SAC models and replay; never optimizes or runs SUMO."""
+from pathlib import Path
+import csv
+import gc
+import hashlib
+import json
+import pickle
+import sys
+
+ROOT = Path(__file__).resolve().parent
+PROJECT = ROOT.parents[2]
+sys.path.insert(0, str(PROJECT))
+import numpy as np
+import torch
+from stable_baselines3 import SAC
+torch.set_num_threads(1)
+
+
+def save(name, value):
+    (ROOT/name).write_text(json.dumps(value, indent=2, allow_nan=False)+'\n')
+
+
+def stats(x):
+    x = np.asarray(x).reshape(-1)
+    assert np.isfinite(x).all()
+    return dict(n=len(x), mean=float(x.mean()), min=float(x.min()), max=float(x.max()),
+                p50=float(np.quantile(x,.5)), p95=float(np.quantile(x,.95)), p99=float(np.quantile(x,.99)))
+
+
+def evaluate(model, buffer, indexes):
+    result = []
+    torch.manual_seed(20261015)
+    alpha = model.log_ent_coef.detach().exp()
+    for start in range(0,len(indexes),512):
+        ids = indexes[start:start+512]
+        obs=torch.as_tensor(buffer.observations[ids,0])
+        nxt=torch.as_tensor(buffer.next_observations[ids,0])
+        act=torch.as_tensor(buffer.actions[ids,0])
+        reward=torch.as_tensor(buffer.rewards[ids]).reshape(-1,1)
+        done=torch.as_tensor(buffer.dones[ids]*(1-buffer.timeouts[ids])).reshape(-1,1)
+        with torch.no_grad():
+            a, logp=model.actor.action_log_prob(obs)
+            qpi=torch.cat(model.critic(obs,a),dim=1).min(1).values
+            an,logpn=model.actor.action_log_prob(nxt)
+            qnext=torch.cat(model.critic_target(nxt,an),dim=1).min(1,keepdim=True).values
+            target=reward+(1-done)*model.gamma*(qnext-alpha*logpn.reshape(-1,1))
+            qs=torch.cat(model.critic(obs,act),dim=1)
+            error=(qs-target).square().mean(1)
+            out=torch.stack([alpha*logp,qpi,alpha*logp-qpi,qs[:,0],qs[:,1],target[:,0],error,logp],1)
+        result.append(out.numpy())
+    out=np.concatenate(result)
+    names=['alpha_log_prob','q_policy','actor_objective','q1_replay','q2_replay','td_target','squared_td_error','log_prob']
+    summary={name:stats(out[:,i]) for i,name in enumerate(names)}
+    summary['batch_mse']=stats(np.array([out[i:i+512,6].mean() for i in range(0,len(out),512)]))
+    order=np.argsort(out[:,6])[-10:][::-1]
+    summary['largest_td_errors']=[dict(index=int(indexes[i]),environment_step=int(indexes[i])+1,
+           reward=float(buffer.rewards[indexes[i],0]),done=float(buffer.dones[indexes[i],0]),
+           timeout=float(buffer.timeouts[indexes[i],0]),
+           **{name:float(out[i,j]) for j,name in enumerate(names)}) for i in order]
+    return summary
+
+
+scalars=list(csv.DictReader((PROJECT/'tmp/ai/training-loss-analysis/scalars.csv').open()))
+save('hard_loss_tail.json',[r for r in scalars if r['scenario']=='hard' and int(r['environment_step'])>950000])
+for scenario,letter in [('hard','H'),('easy','E'),('medium','M')]:
+    run=f'AT-B0-{letter}1M-S579071'
+    base=PROJECT/'models_experiments/antwerp-density-1m'/run/run
+    replay=base/f'{run}_replay_buffer_1000000_steps.pkl'
+    print('LOAD',scenario,str(replay),flush=True)
+    with replay.open('rb') as stream: buffer=pickle.load(stream)
+    n=buffer.size()
+    assert buffer.n_envs==1 and not buffer.optimize_memory_usage and not buffer.full
+    assert n==999999
+    rewards=buffer.rewards[:n,0]
+    episodes=[r for r in map(json.loads,(PROJECT/f'tmp/ai/antwerp-density-1m/{run}/training.jsonl').read_text().splitlines())
+              if r['event']=='episode']
+    assert np.array_equal(np.flatnonzero(buffer.dones[:n,0])+1,[e['steps'] for e in episodes])
+    summary=dict(scenario=scenario,replay=str(replay),buffer_size=n,position=buffer.pos,
+         step_mapping='Index i is environment step i+1, verified against all episode ends',
+         reward=stats(rewards),reward_abs_over_200=int((np.abs(rewards)>200).sum()),
+         dones=int(buffer.dones[:n].sum()),timeouts=int(buffer.timeouts[:n].sum()),
+         observations_finite=bool(np.isfinite(buffer.observations[:n]).all()),
+         next_observations_finite=bool(np.isfinite(buffer.next_observations[:n]).all()),
+         observation_abs_max=float(np.abs(buffer.observations[:n]).max()),
+         actions=stats(buffer.actions[:n]),checkpoints={})
+    largest=np.argsort(np.abs(rewards))[-12:][::-1]
+    summary['largest_abs_rewards']=[dict(environment_step=int(i)+1,reward=float(rewards[i]),
+           ego=buffer.observations[i,0,:3].tolist(),next_ego=buffer.next_observations[i,0,:3].tolist(),
+           done=float(buffer.dones[i,0]),timeout=float(buffer.timeouts[i,0])) for i in largest]
+    if scenario=='hard':
+        summary['spike_neighborhood']=[dict(environment_step=i+1,reward=float(rewards[i]),
+              ego=buffer.observations[i,0,:3].tolist(),next_ego=buffer.next_observations[i,0,:3].tolist(),
+              done=float(buffer.dones[i,0])) for i in range(991920,991931)]
+        summary['episodes_after_960k']=[e for e in episodes if e['steps']>960000]
+    save(f'{scenario}.json',summary)
+    rng=np.random.default_rng(20261015)
+    common=rng.choice(249999,8192,replace=False)
+    sampled=rng.choice(n,16384,replace=False)
+    targeted=np.unique(np.r_[np.argsort(np.abs(rewards))[-512:],np.flatnonzero(buffer.dones[:n,0]),
+                             np.arange(991400,992400) if scenario=='hard' else np.array([],dtype=int)])
+    for step in ([250000,750000,1000000] if scenario=='hard' else [250000,1000000]):
+        path=base/f'{run}_{step}_steps.zip'
+        model=SAC.load(path,device='cpu')
+        model.policy.set_training_mode(False)
+        assert all(torch.isfinite(p).all() for p in model.policy.parameters())
+        info=dict(model=str(path),sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+             num_timesteps=model.num_timesteps,n_updates=model._n_updates,train_freq=str(model.train_freq),
+             gradient_steps=model.gradient_steps,learning_starts=model.learning_starts,
+             batch_size=model.batch_size,gamma=model.gamma,alpha=float(model.log_ent_coef.detach().exp()),
+             target_entropy=model.target_entropy,common_first_250k=evaluate(model,buffer,common))
+        if step==1000000:
+            info['uniform_full_replay']=evaluate(model,buffer,sampled)
+            info['targeted_not_population_estimate']=evaluate(model,buffer,targeted)
+        summary['checkpoints'][str(step)]=info
+        save(f'{scenario}.json',summary)
+        print('DONE',scenario,step,'actor',round(info['common_first_250k']['actor_objective']['mean'],4),
+              'alpha_logp',round(info['common_first_250k']['alpha_log_prob']['mean'],4),
+              'mse',round(info['common_first_250k']['squared_td_error']['mean'],4),flush=True)
+        del model
+        gc.collect()
+    del buffer
+    gc.collect()
+print('COMPLETE: no optimization or simulation performed',flush=True)

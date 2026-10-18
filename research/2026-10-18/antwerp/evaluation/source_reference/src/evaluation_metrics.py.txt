@@ -1,0 +1,71 @@
+"""Physical motion statistics for Table III evaluation, independent of rewards."""
+
+import math
+
+import numpy as np
+
+
+MOTION_METRICS = ('mean_speed_mps', 'mean_acceleration_mps2', 'mean_jerk_mps3',
+                  'mean_abs_jerk_mps3', 'rms_jerk_mps3')
+
+
+class EpisodeMotion:
+    """Sample pre-action ego speed; never differentiate across teleport gaps."""
+
+    def __init__(self, dt):
+        self.dt = float(dt)
+        if not math.isfinite(self.dt) or self.dt <= 0:
+            raise ValueError('Motion metrics require a finite positive step_length')
+        self.speeds, self.accelerations, self.jerks = [], [], []
+        self.previous_speed = self.previous_acceleration = None
+        self.excluded_samples = 0
+
+    def observe(self, observation, info):
+        valid = info.get('ego_on_road', True) and not info.get('ego_teleporting', False)
+        if not valid or info.get('teleport_started', False) or info.get('teleport_ended', False):
+            self.previous_speed = self.previous_acceleration = None
+        if not valid:
+            self.excluded_samples += 1
+            return
+        speed = float(np.asarray(observation).reshape(-1)[2])
+        if not math.isfinite(speed):
+            raise ValueError('Non-finite ego speed in evaluation observation')
+        self.speeds.append(speed)
+        if self.previous_speed is not None:
+            acceleration = (speed - self.previous_speed) / self.dt
+            self.accelerations.append(acceleration)
+            if self.previous_acceleration is not None:
+                self.jerks.append((acceleration - self.previous_acceleration) / self.dt)
+            self.previous_acceleration = acceleration
+        self.previous_speed = speed
+
+    def result(self):
+        def mean(values):
+            return float(np.mean(values)) if values else None
+
+        return {'mean_speed_mps': mean(self.speeds),
+                'mean_acceleration_mps2': mean(self.accelerations),
+                'mean_jerk_mps3': mean(self.jerks),
+                'mean_abs_jerk_mps3': mean([abs(j) for j in self.jerks]),
+                'rms_jerk_mps3': math.sqrt(mean([j * j for j in self.jerks])) if self.jerks else None,
+                'speed_samples': len(self.speeds),
+                'acceleration_samples': len(self.accelerations),
+                'jerk_samples': len(self.jerks),
+                'excluded_speed_samples': self.excluded_samples,
+                'step_length_seconds': self.dt}
+
+
+def distribution(values, unit):
+    """Missing samples remain null; a single sample has no spread estimate."""
+    present = [value for value in values if value is not None]
+    std = float(np.std(present, ddof=1)) if len(present) > 1 else None
+    return {'mean': float(np.mean(present)) if present else None, 'std': std,
+            'ci95_half_width': 1.96 * std / math.sqrt(len(present)) if std is not None else None,
+            'sample_count': len(present), 'missing_count': len(values) - len(present),
+            'aggregation_unit': unit}
+
+
+def summarize_motion(records):
+    """Upstream convention: equal weight per episode, not per time step."""
+    return {key: distribution([record['motion'][key] for record in records], 'episode_mean')
+            for key in MOTION_METRICS}

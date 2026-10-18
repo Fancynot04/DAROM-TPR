@@ -1,0 +1,105 @@
+"""Explicitly launched, sequential CPU paired evaluations; defaults to dry run."""
+import argparse
+from collections import Counter, deque
+import hashlib
+import json
+from pathlib import Path
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parents[3]
+OUT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+
+
+def digest(p):
+    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--execute', action='store_true')
+    args = parser.parse_args()
+    audit = json.loads((OUT / 'results.json').read_text())
+    guarded = audit['source_matches_training_manifest']
+    for name, entry in guarded.items():
+        assert digest(ROOT / name) == entry['current_sha256'], name
+    training_manifest = json.loads((ROOT / 'tmp/ai/antwerp-density-1m/manifest.json').read_text())
+    scene_maps = [v for v in training_manifest.values()
+                  if isinstance(v, dict) and 'sumo_new/Antwerp.net.xml' in v]
+    assert len(scene_maps) == 1
+    scene_hashes = {k: v for k, v in scene_maps[0].items() if k.startswith('sumo_new/')}
+    for name, expected in scene_hashes.items():
+        assert digest(ROOT / name) == expected, name
+    modes = [('deterministic', None)] + [('stochastic', s) for s in (91001, 91002, 91003)]
+    jobs = [dict(scenario=scenario, scene_seed=seed, action_mode=mode, action_seed=action_seed)
+            for scenario in ('easy', 'medium') for seed in (680001, 680002)
+            for mode, action_seed in modes]
+    for scenario in ('easy', 'medium'):
+        entry = audit['scenarios'][scenario]
+        assert digest(entry['model']) == entry['model_sha256']
+    plan = dict(jobs=jobs, total_episodes=len(jobs), device='cpu', torch_threads=1,
+                concurrent_evaluations=1, safety=False, delay_mode='uniform',
+                scope='Exploratory paired cases, not population success estimates',
+                execute=args.execute)
+    print(json.dumps(plan, indent=2), flush=True)
+    if not args.execute:
+        return
+    # No imports below this point or simulation launches occur during dry run.
+    import numpy as np
+    import torch
+    from stable_baselines3 import SAC
+    from evaluate_sac_delay import make_env, validate_checkpoint_setup
+    from src.merging import parseAction
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+    destination = OUT / ('paired-' + time.strftime('%Y%m%dT%H%M%S'))
+    destination.mkdir(exist_ok=False)
+    (destination / 'plan.json').write_text(json.dumps(plan, indent=2))
+    results = []
+    for index, job in enumerate(jobs):
+        for name, entry in guarded.items():
+            assert digest(ROOT / name) == entry['current_sha256']
+        for name, expected in scene_hashes.items():
+            assert digest(ROOT / name) == expected, name
+        entry = audit['scenarios'][job['scenario']]
+        assert digest(entry['model']) == entry['model_sha256']
+        model = SAC.load(entry['model'], device='cpu')
+        validate_checkpoint_setup(model, 'full', False)
+        env = make_env(job['scene_seed'], job['scenario'], 'uniform', False, 'full')
+        started = time.monotonic()
+        counts = Counter()
+        tail = deque(maxlen=20)
+        try:
+            obs, reset_info = env.reset(seed=job['scene_seed'])
+            torch.manual_seed(job['action_seed'] or 91000)
+            total = 0.0
+            for step in range(1, 6001):
+                action, _ = model.predict(obs, deterministic=job['action_mode'] == 'deterministic')
+                parsed = parseAction(action)
+                counts[str(parsed[1])] += 1
+                obs, reward, terminated, truncated, info = env.step(action)
+                total += float(reward)
+                tail.append(dict(step=step, lane=info.get('lane'), action=np.asarray(action).tolist(),
+                                 parsed_action=[float(v) for v in parsed], reward=float(reward),
+                                 ego=np.asarray(obs[:3]).tolist()))
+                if terminated or truncated:
+                    break
+            else:
+                raise RuntimeError('Episode failed to terminate within its declared bound')
+            record = dict(**job, steps=step, outcome=info['message'], success=bool(info['is_success']),
+                          ego_teleported=bool(info['ego_teleported']), merged=bool(info['merged']),
+                          episode_return=total, lane_command_counts=dict(counts),
+                          reset_info=reset_info, last_20_steps=list(tail),
+                          checkpoint_sha256=entry['model_sha256'], seconds=time.monotonic()-started)
+        finally:
+            env.close()
+        assert digest(entry['model']) == entry['model_sha256']
+        results.append(record)
+        (destination / f'episode-{index:02d}.json').write_text(json.dumps(record, indent=2))
+        (destination / 'results.json').write_text(json.dumps(results, indent=2))
+        print(json.dumps({k: v for k, v in record.items() if k not in ('reset_info', 'last_20_steps')}), flush=True)
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,232 @@
+"""Independent, append-only sync of the D training's existing scalar logs."""
+import json
+import fcntl
+import math
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+
+ROOT = Path('${WORKSPACE}/DAROM-reproduction')
+HERE = Path(__file__).resolve().parent / 'forge-periodic'
+OLD = ROOT / 'runs/D-long/D-seed42-from0-20261017T022231Z-7c46cd52'
+NEW = ROOT / 'runs/D-long/D-seed42-from657971-20261017T075908Z-435a663a'
+RUN_ID = '118fna3s'
+RUN_PATH = 'arlikache-anhui-university/DAROM-reproduction/' + RUN_ID
+INTERVAL = 300
+BATCH = 250
+for key, name in [('TMPDIR', 'tmp'), ('WANDB_CACHE_DIR', 'cache'),
+                  ('WANDB_CONFIG_DIR', 'config'), ('WANDB_DATA_DIR', 'data')]:
+    location = HERE / name
+    location.mkdir(parents=True, exist_ok=True)
+    os.environ[key] = str(location)
+import wandb
+
+
+def save(name, value):
+    destination = HERE / name
+    pending = destination.with_suffix('.pending')
+    pending.write_text(json.dumps(value, indent=2) + '\n')
+    pending.replace(destination)
+
+
+def local_rows():
+    rows = []
+    for directory in (OLD, NEW):
+        with (directory / 'metrics.jsonl').open() as stream:
+            for line in stream:
+                if not line.endswith('\n'):
+                    break
+                row = json.loads(line)
+                assert all(isinstance(v, (int, float)) and math.isfinite(v) for v in row.values())
+                if rows:
+                    assert row['env_steps'] >= rows[-1]['env_steps']
+                rows.append(row)
+    return rows
+
+
+def api():
+    return wandb.Api(overrides={'base_url': 'https://api.wandb.ai'}, timeout=25)
+
+
+def check_row(remote, local, index):
+    assert int(remote['_step']) == index, ('unexpected cloud step', index)
+    for key, value in local.items():
+        assert key in remote and abs(remote[key] - value) < 1e-8, ('cloud/local mismatch', index, key)
+
+
+def audit(report_name='initial-audit.json'):
+    rows = local_rows()
+    remote = api().run(RUN_PATH)
+    last = remote.lastHistoryStep
+    assert last < len(rows), ('cloud is ahead of known local history', last, len(rows))
+    history = list(remote.scan_history(max_step=last + 1, page_size=1000, use_cache=False))
+    save('latest-audit-snapshot.json', {'last_step_at_start': last, 'history': history})
+    print(json.dumps({'queried_last_step': last, 'scan_rows': len(history),
+        'unique_steps': len({r['_step'] for r in history}),
+        'first_steps': [r['_step'] for r in history[:3]],
+        'last_steps': [r['_step'] for r in history[-3:]]}), flush=True)
+    # SDK scans may repeat rows where exported parquet overlaps a page boundary.
+    # Validate EVERY returned copy against local values before counting unique steps.
+    by_step = {}
+    for row in history:
+        index = int(row['_step'])
+        assert 0 <= index <= last
+        check_row(row, rows[index], index)
+        by_step[index] = row
+    assert set(by_step) == set(range(last + 1)), ('cloud history has gaps', len(by_step), last)
+    result = {'run_id': remote.id, 'state': remote.state,
+              'cloud_records': len(by_step), 'scan_duplicate_rows': len(history) - len(by_step),
+              'cloud_last_env_steps': by_step[last]['env_steps'] if by_step else None,
+              'local_records': len(rows), 'local_last_env_steps': rows[-1]['env_steps'],
+              'existing_cloud_is_exact_local_prefix': True}
+    save(report_name, result)
+    print(json.dumps(result, indent=2), flush=True)
+    return len(by_step)
+
+
+def alive(pid):
+    proc = Path(f'/proc/{pid}/stat')
+    return proc.exists() and proc.read_text().split(') ', 1)[1].split()[0] != 'Z'
+
+
+def sync():
+    os.nice(10)
+    with (HERE / 'sync.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert not alive(1969400) and not alive(1969452), 'Original cloud writer still active'
+        assert json.loads((NEW / 'config.json').read_text())['tracking']['mode'] == 'disabled'
+        next_row = audit()
+        connection = api()
+        run = wandb.init(entity='arlikache-anhui-university', project='DAROM-reproduction',
+            id=RUN_ID, resume='must', name='D-seed42-from0-7c46cd52',
+            group='D-long-5f31457fe8c0', mode='online', dir=str(HERE), save_code=False,
+            settings=wandb.Settings(base_url='https://api.wandb.ai', disable_git=True,
+                disable_code=True, console='off', x_disable_meta=True, x_disable_stats=True,
+                x_disable_machine_info=True, x_save_requirements=False, init_timeout=60,
+                finish_timeout=30, x_file_stream_max_bytes=32768,
+                x_file_stream_transmit_interval=2, x_file_stream_timeout_seconds=30))
+        stopping = []
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, lambda number, frame: stopping.append(number))
+        try:
+            print(json.dumps({'sdk_step': run.step, 'sdk_starting_step': run.starting_step,
+                'expected_next_step': next_row, 'resumed': run.resumed}), flush=True)
+            assert run.resumed and run.starting_step == next_row, (
+                'resume position changed', run.starting_step, next_row)
+            run.define_metric('env_steps')
+            run.define_metric('*', step_metric='env_steps')
+            acknowledged = next_row
+            cycle = 0
+            initial_rows = local_rows()
+            state = {'pid': os.getpid(), 'run_id': RUN_ID, 'interval_seconds': INTERVAL,
+                'acknowledged_records': acknowledged, 'queued_records': next_row,
+                'cloud_last_env_steps': initial_rows[acknowledged - 1]['env_steps'] if acknowledged else None,
+                'source_directories': [str(OLD), str(NEW)]}
+            while not stopping:
+                rows = local_rows()
+                target = len(rows)
+                while next_row < target and not stopping:
+                    end = min(next_row + BATCH, target)
+                    for index in range(next_row, end):
+                        run.log(rows[index], step=index, commit=True)
+                    next_row = end
+                    # Only one bounded batch may be unacknowledged at a time.
+                    # Network ambiguity never triggers re-logging or cursor advancement.
+                    while not stopping:
+                        time.sleep(5)
+                        try:
+                            connection.flush()
+                            remote = connection.run(RUN_PATH)
+                            last = remote.lastHistoryStep
+                            if last >= next_row:
+                                raise AssertionError('Another writer advanced the cloud run')
+                            if last == next_row - 1:
+                                acknowledged = next_row
+                            state = {
+                                'pid': os.getpid(), 'run_id': RUN_ID, 'interval_seconds': INTERVAL,
+                                'state': 'backfilling' if acknowledged == next_row else 'waiting_for_cloud',
+                                'acknowledged_records': acknowledged,
+                                'cloud_last_env_steps': rows[acknowledged - 1]['env_steps'] if acknowledged else None,
+                                'queued_records': next_row, 'cycle_target_records': target,
+                                'source_directories': [str(OLD), str(NEW)],
+                                'updated_at': datetime.now(timezone.utc).isoformat(),
+                            }
+                            save('status.json', state)
+                            if acknowledged == next_row:
+                                print(json.dumps({'acknowledged_records': acknowledged,
+                                    'env_steps': state['cloud_last_env_steps']}), flush=True)
+                                break
+                        except AssertionError:
+                            raise
+                        except Exception as error:
+                            save('network-wait.json', {'error_type': type(error).__name__,
+                                'updated_at': datetime.now(timezone.utc).isoformat(),
+                                'queued_records': next_row, 'acknowledged_records': acknowledged,
+                                'training_affected': False})
+                            time.sleep(10)
+                if stopping:
+                    break
+                cycle += 1
+                state.update(state='up_to_date', completed_cycles=cycle,
+                    next_poll_after_seconds=INTERVAL, updated_at=datetime.now(timezone.utc).isoformat())
+                save('status.json', state)
+                training = json.loads((NEW / 'status.json').read_text())
+                if training['status'] in ('completed', 'paused', 'failed') and not alive(training.get('pid', 2395485)):
+                    if len(local_rows()) == acknowledged:
+                        break
+                deadline = time.monotonic() + INTERVAL
+                while not stopping and time.monotonic() < deadline:
+                    time.sleep(min(5, max(0, deadline - time.monotonic())))
+        except BaseException as error:
+            save('failure.json', {'error_type': type(error).__name__,
+                'updated_at': datetime.now(timezone.utc).isoformat(), 'training_affected': False})
+            raise
+        finally:
+            run.finish()
+
+
+def launch():
+    record = HERE / 'launch.json'
+    previous = []
+    if record.exists():
+        old = json.loads(record.read_text())
+        if alive(old['pid']):
+            raise RuntimeError('Sync already running; refusing a second writer.')
+        previous = old.get('previous_attempts', []) + [
+            {k:v for k,v in old.items() if k != 'previous_attempts'}]
+    command = [str(ROOT / '.venv/bin/python'), '-B', '-u', str(Path(__file__).resolve()), 'sync']
+    log = HERE / ('sync-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '.log')
+    with log.open('x') as stream:
+        child = subprocess.Popen(command, cwd=ROOT, stdin=subprocess.DEVNULL,
+            stdout=stream, stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+    record = {'pid': child.pid, 'command': command, 'log': str(log),
+        'interval_seconds': INTERVAL, 'run_id': RUN_ID,
+        'started_at': datetime.now(timezone.utc).isoformat(), 'previous_attempts': previous}
+    save('launch.json', record)
+    print(json.dumps(record, indent=2), flush=True)
+
+
+if __name__ == '__main__':
+    if sys.argv[1:] == ['audit']:
+        audit()
+    elif sys.argv[1:] == ['verify']:
+        audit('verified-history.json')
+    elif sys.argv[1:] == ['inspect-resume']:
+        remote = api().run(RUN_PATH)
+        result = remote._exec('''query ResumeReadOnly($entity: String!, $project: String!, $name: String!) {
+          model(name: $project, entityName: $entity) {
+            bucket(name: $name) { historyLineCount historyTail summaryMetrics }
+          }
+        }''')
+        save('resume-response.json', result)
+        print(json.dumps(result, indent=2), flush=True)
+    elif sys.argv[1:] == ['sync']:
+        sync()
+    elif sys.argv[1:] == ['launch']:
+        launch()
+    else:
+        raise SystemExit('usage: periodic_forge.py audit | launch | sync')

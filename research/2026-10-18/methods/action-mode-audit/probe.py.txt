@@ -1,0 +1,97 @@
+"""Frozen-policy action audit; CPU only, no SUMO or gradient updates."""
+import gc
+import hashlib
+import json
+import pickle
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[3]
+OUT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+import numpy as np
+import torch
+from stable_baselines3 import SAC
+
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
+manifest = json.loads((ROOT / 'tmp/ai/antwerp-density-1m/manifest.json').read_text())
+report = {'scope': 'Frozen 1M policies on sampled historical training observations; not rollout success rates',
+          'sample_seed': 20261018, 'samples_per_scenario': 8192,
+          'transition_window': '800001 through 999999',
+          'class_order': ['right (-1)', 'keep (0)', 'left (+1)'],
+          'method': 'Exact Normal CDF probabilities before tanh, with lane thresholds +/-atanh(1/3)',
+          'scenarios': {}}
+hash_maps = [v for v in manifest.values() if isinstance(v, dict) and 'src/delay_encoder.py' in v]
+report['source_matches_training_manifest'] = {
+    p: {'current_sha256': hashlib.sha256((ROOT / p).read_bytes()).hexdigest(),
+        'recorded_sha256': hash_maps[0].get(p) if hash_maps else None}
+    for p in ['src/delay_encoder.py', 'src/merging.py', 'src/wrapper.py', 'train_sac_delay.py']}
+for info in report['source_matches_training_manifest'].values():
+    assert info['recorded_sha256'] == info['current_sha256'], info
+
+def classes(x):
+    return np.where(x < -1/3, 0, np.where(x > 1/3, 2, 1))
+
+for scenario, letter in [('easy', 'E'), ('medium', 'M')]:
+    run = f'AT-B0-{letter}1M-S579071'
+    base = ROOT / 'models_experiments/antwerp-density-1m' / run / run
+    model_path = base / f'{run}_1000000_steps.zip'
+    with (base / f'{run}_replay_buffer_1000000_steps.pkl').open('rb') as stream:
+        buffer = pickle.load(stream)
+    assert buffer.size() == 999999
+    ids = np.sort(np.random.default_rng(20261018).choice(np.arange(800000, 999999), 8192, replace=False))
+    observations = buffer.observations[ids, 0].copy()
+    historical_actions = buffer.actions[ids, 0].copy()
+    del buffer
+    gc.collect()
+    before = hashlib.sha256(model_path.read_bytes()).hexdigest()
+    model = SAC.load(model_path, device='cpu')
+    model.policy.set_training_mode(False)
+    params = []
+    with torch.inference_mode():
+        for start in range(0, len(ids), 512):
+            obs = torch.as_tensor(observations[start:start+512])
+            mean, log_std, _ = model.actor.get_action_dist_params(obs)
+            action = model.actor(obs, deterministic=True)
+            assert torch.allclose(action, mean.tanh())
+            params.append(torch.stack([mean[:, 1], log_std[:, 1].exp()], dim=1))
+    params = torch.cat(params)
+    mean, std = params[:, 0], params[:, 1]
+    normal = torch.distributions.Normal(mean, std)
+    bound = float(np.arctanh(1/3))
+    p_right = normal.cdf(torch.full_like(mean, -bound))
+    p_left = 1 - normal.cdf(torch.full_like(mean, bound))
+    probs = torch.stack([p_right, 1-p_right-p_left, p_left], 1).numpy()
+    det_action = np.tanh(mean.numpy())
+    det = classes(det_action)
+    hist = classes(historical_actions[:, 1])
+    episodes = [r for r in map(json.loads, (ROOT / f'tmp/ai/antwerp-density-1m/{run}/training.jsonl').read_text().splitlines())
+                if r.get('event') == 'episode' and 800000 < r['steps'] <= 1000000]
+    groups = {}
+    for c in range(3):
+        mask = det == c
+        groups[str(c)] = {'n': int(mask.sum()), 'sampled_category_probabilities_mean': probs[mask].mean(0).tolist() if mask.any() else None}
+    disagreement = 1-probs[np.arange(len(det)), det]
+    result = {'model': str(model_path), 'model_sha256': before, 'gamma': model.gamma,
+        'training_safety': getattr(model, 'training_safety', None), 'use_sde': model.use_sde,
+        'training_last200k_episodes': len(episodes),
+        'training_last200k_successes': sum(int(r['train/success']) for r in episodes),
+        'training_last200k_arrivals': sum(int(r['train/arrival']) for r in episodes),
+        'training_last200k_teleported_episodes': sum(int(r['train/ego_teleported']) for r in episodes),
+        'deterministic_category_fractions': (np.bincount(det, minlength=3)/len(det)).tolist(),
+        'sampled_category_probabilities_mean': probs.mean(0).tolist(),
+        'historical_sampled_action_category_fractions': (np.bincount(hist, minlength=3)/len(hist)).tolist(),
+        'expected_category_disagreement': float(disagreement.mean()),
+        'disagreement_probability_over_25pct_fraction': float((disagreement>.25).mean()),
+        'deterministic_keep_with_sampled_change_probability_over_50pct_fraction': float(((det==1)&((probs[:,0]+probs[:,2])>.5)).mean()),
+        'deterministic_action_near_threshold_within_0_1_physical_fraction': float((np.abs(np.abs(det_action*5)-5/3)<.1).mean()),
+        'latent_std_quantiles': np.quantile(std.numpy(), [.1,.5,.9]).tolist(),
+        'conditional_on_deterministic_category': groups}
+    assert hashlib.sha256(model_path.read_bytes()).hexdigest() == before
+    report['scenarios'][scenario] = result
+    (OUT / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
+    print(json.dumps({scenario: result}), flush=True)
+    del model
+    gc.collect()
+print('COMPLETE: no simulation or optimization; checkpoint hashes unchanged', flush=True)

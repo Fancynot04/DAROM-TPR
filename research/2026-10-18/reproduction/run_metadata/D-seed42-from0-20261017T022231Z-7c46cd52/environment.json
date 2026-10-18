@@ -1,0 +1,46 @@
+{
+  "packages": {
+    "torch": {
+      "target": "2.8.0",
+      "installed": "2.8.0",
+      "matches": true
+    },
+    "stable-baselines3": {
+      "target": "2.7.0",
+      "installed": "2.7.0",
+      "matches": true
+    },
+    "numpy": {
+      "target": "2.2.6",
+      "installed": "2.2.6",
+      "matches": true
+    },
+    "gymnasium": {
+      "target": "1.2.1",
+      "installed": "1.2.1",
+      "matches": true
+    },
+    "cloudpickle": {
+      "target": "3.1.1",
+      "installed": "3.1.1",
+      "matches": true
+    },
+    "traci": {
+      "target": "1.18.0",
+      "installed": "1.18.0",
+      "matches": true
+    },
+    "sumolib": {
+      "target": "1.18.0",
+      "installed": "1.18.0",
+      "matches": true
+    }
+  },
+  "sumo": "Eclipse SUMO sumo Version 1.18.0",
+  "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "executable": "${WORKSPACE}/DAROM-reproduction/.venv/bin/python",
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "torch_threads": 2,
+  "torch_interop_threads": 1
+}

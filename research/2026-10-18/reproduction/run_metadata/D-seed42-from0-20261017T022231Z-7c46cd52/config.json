@@ -1,0 +1,136 @@
+{
+  "study": "hard-uniform-D-long-7m",
+  "upstream_commit": "eabd572fc0aece579e5b553bdc7af27a8b81d03a",
+  "training_seeds": [
+    42
+  ],
+  "total_timesteps": 7000000,
+  "environment": {
+    "scenario": "hard",
+    "radius": 50,
+    "max_delay": 20,
+    "delay_mode": "uniform",
+    "training_safety": false
+  },
+  "sac": {
+    "learning_rate": 3e-05,
+    "batch_size": 512,
+    "buffer_size": 1000000,
+    "learning_starts": 100,
+    "gamma": 0.99,
+    "tau": 0.005,
+    "train_freq": 1,
+    "gradient_steps": 1,
+    "target_update_interval": 1,
+    "ent_coef": "auto",
+    "target_entropy": "auto",
+    "use_sde": false
+  },
+  "network": {
+    "net_arch": [
+      256,
+      256
+    ],
+    "gru_hidden": 64
+  },
+  "groups": {
+    "D": {
+      "hist_len": 20,
+      "features_dim": 256,
+      "expected_state_dim": 93
+    }
+  },
+  "evaluation": {
+    "steps": [
+      100000,
+      250000,
+      500000,
+      750000,
+      1000000,
+      1250000,
+      1500000,
+      1750000,
+      2000000,
+      2250000,
+      2500000,
+      2750000,
+      3000000,
+      3250000,
+      3500000,
+      3750000,
+      4000000,
+      4250000,
+      4500000,
+      4750000,
+      5000000,
+      5250000,
+      5500000,
+      5750000,
+      6000000,
+      6250000,
+      6500000,
+      6750000,
+      7000000
+    ],
+    "episode_seed_start": 100001,
+    "episodes_per_mode": 32,
+    "modes": [
+      "no_sc",
+      "original_sc"
+    ],
+    "device": "cpu",
+    "timeout_seconds": 3600
+  },
+  "runtime": {
+    "device": "cuda",
+    "torch_threads": 2,
+    "torch_interop_threads": 1,
+    "parallel_runs": 1,
+    "scalar_interval": 100,
+    "output_root": "runs/D-long"
+  },
+  "tracking": {
+    "mode": "online",
+    "base_url": "https://api.wandb.ai",
+    "dashboard_url": "https://forge.coreweave.com/wandb/arlikache-anhui-university/DAROM-reproduction",
+    "flush_interval_seconds": 2.0,
+    "entity": "arlikache-anhui-university",
+    "project": "DAROM-reproduction",
+    "upload_code": false,
+    "upload_models": false
+  },
+  "target_packages": {
+    "torch": "2.8.0",
+    "stable-baselines3": "2.7.0",
+    "numpy": "2.2.6",
+    "gymnasium": "1.2.1",
+    "cloudpickle": "3.1.1",
+    "traci": "1.18.0",
+    "sumolib": "1.18.0"
+  },
+  "checkpointing": {
+    "interval_steps": 2000000,
+    "milestone_steps": [
+      2000000,
+      4000000,
+      6000000,
+      7000000
+    ],
+    "retain_all": true,
+    "environment_restore": "deterministic_episode_replay",
+    "schema_version": 1
+  },
+  "final_test": {
+    "episodes_per_seed": 500,
+    "episode_seed_starts": [
+      200001,
+      210001,
+      220001
+    ],
+    "modes": [
+      "no_sc",
+      "original_sc"
+    ],
+    "automatic": false
+  }
+}

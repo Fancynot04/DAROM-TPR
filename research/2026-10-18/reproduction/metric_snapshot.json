@@ -1,0 +1,20 @@
+{
+  "captured_utc": "2026-10-18T08:31:54.021204+00:00",
+  "segments": [
+    {
+      "segment": "D-seed42-from0-20261017T022231Z-7c46cd52",
+      "captured_prefix_sha256": "00b43f26a067030c8559171570d35ef37756d3e27e8190dbd28bede26b1987a8",
+      "captured_bytes": 2991327,
+      "rows": 10610,
+      "last_env_steps": 657900
+    },
+    {
+      "segment": "D-seed42-from657971-20261017T075908Z-435a663a",
+      "captured_prefix_sha256": "38eb57184bace884065dafdecbdad814cfc8540790933de4a19b21936dce700f",
+      "captured_bytes": 25483620,
+      "rows": 86968,
+      "last_env_steps": 6332700
+    }
+  ],
+  "policy": "Complete frozen prefixes, selected scalar columns; original order retained, no interpolation or smoothing."
+}

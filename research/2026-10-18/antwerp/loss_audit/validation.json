@@ -1,0 +1,28 @@
+{
+  "source_sha256": {
+    "${WORKSPACE}/DAROM-TPR/tmp/ai/training-loss-analysis/scalars.csv": "42ef3c3121f11e2a8c5eb899b420f4a575c811b83439e859bda23fc71d435a8c",
+    "${WORKSPACE}/DAROM-TPR/train_sac_delay.py": "2613ecbf7bf6961a7e3ab08d2bac09b5b66838328ac3b64c36569706617bf501",
+    "${WORKSPACE}/DAROM-TPR/src/merging.py": "7eb19b2285604b872b638b8237e393ad696bf8a1d9e50ad017060a683da4a2fe",
+    "${WORKSPACE}/DAROM-TPR/src/delay_encoder.py": "b3834d587b9fa3e39b48598091dc4d0f63eef4114db0593c70d75b5ab34b2c6e",
+    "${WORKSPACE}/DAROM-original/.venv/lib/python3.12/site-packages/stable_baselines3/sac/sac.py": "ead503c743da378ccb5183bba5a3fb7387ec079aa6aa611d3043fa172355e8b6",
+    "${WORKSPACE}/DAROM-original/.venv/lib/python3.12/site-packages/stable_baselines3/common/off_policy_algorithm.py": "ec895fa4b7ce96550b0acdfea3a73561db568f863b24c0b77d106f3f67e540a7",
+    "${WORKSPACE}/DAROM-original/.venv/lib/python3.12/site-packages/stable_baselines3/common/logger.py": "d2533d0fe929aa533ecb373c040a5e7f1c88852667e367f0a8d923e1efe5fa5e",
+    "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-E1M-S579071/AT-B0-E1M-S579071/AT-B0-E1M-S579071_replay_buffer_1000000_steps.pkl": "669fa3d64409b4b0093e32efd1ab398d99c8484bb4e9b2a1cd9938fd9a64d5cc",
+    "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-E1M-S579071/AT-B0-E1M-S579071/AT-B0-E1M-S579071_250000_steps.zip": "712c5b63e7c220ba163bba9e051ed8a5596e608754470dd3e525f7cb8ffa4c3c",
+    "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-E1M-S579071/AT-B0-E1M-S579071/AT-B0-E1M-S579071_1000000_steps.zip": "f93388f250c73bb43992aa0f0854155abc1884abc4099d368780e08cc8cb9519",
+    "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-M1M-S579071/AT-B0-M1M-S579071/AT-B0-M1M-S579071_replay_buffer_1000000_steps.pkl": "e43773eec059efc47494e21e07e5d3a0a2412a386c2ebf796fd9dd0ad1bfdbf8",
+    "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-M1M-S579071/AT-B0-M1M-S579071/AT-B0-M1M-S579071_250000_steps.zip": "2a36ef684c5b5e74c79e697ac797bac26f31ebeeaff62d2b1548b354dbfee57f",
+    "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-M1M-S579071/AT-B0-M1M-S579071/AT-B0-M1M-S579071_1000000_steps.zip": "79d0873f150a3bbc1992b9c9936a20aa23ab742fafdbb3a24ec748f247896bf7",
+    "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-H1M-S579071/AT-B0-H1M-S579071/AT-B0-H1M-S579071_replay_buffer_1000000_steps.pkl": "4c600673978cd33446111bb0e7894ef9499237f76bd9299270735eeb1e9ca979",
+    "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-H1M-S579071/AT-B0-H1M-S579071/AT-B0-H1M-S579071_250000_steps.zip": "7fb675911609214764424fd9d98050e8992216c6889f1ed69d73bff98db712e0",
+    "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-H1M-S579071/AT-B0-H1M-S579071/AT-B0-H1M-S579071_750000_steps.zip": "b8a503b49eea3257139c5012a42b6ff6f768ef8b542b771d238e444e9125ff7e",
+    "${WORKSPACE}/DAROM-TPR/models_experiments/antwerp-density-1m/AT-B0-H1M-S579071/AT-B0-H1M-S579071/AT-B0-H1M-S579071_1000000_steps.zip": "83a1f36cdd73794caa89c3f050f65cf4fdf3219a9e3679bd113df9c4683a2843"
+  },
+  "replay_episode_boundaries": "all match logged episode steps",
+  "replay_nonfinite_values": false,
+  "models_modified": false,
+  "optimization_performed": false,
+  "sumo_started": false,
+  "historical_spike_exact_minibatch_available": false,
+  "original_figure_unchanged": true
+}

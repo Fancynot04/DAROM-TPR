@@ -1,0 +1,287 @@
+"""Read-only comparison of existing original and Antwerp training records.
+
+W&B framing reference (not imported or executed):
+https://github.com/wandb/wandb/blob/v0.19.0/wandb/sdk/internal/datastore.py
+Only allowlisted training metrics/config are exported; no W&B API/init/sync.
+"""
+from pathlib import Path
+import csv
+import hashlib
+import json
+import math
+import struct
+import tempfile
+import zlib
+
+ROOT = Path(__file__).resolve().parent
+PROJECT = ROOT.parents[2]
+ORIGINAL = PROJECT.parent / 'DAROM-original'
+RUN = ORIGINAL / 'wandb/offline-run-20260919_193523-oh9urrvb/run-oh9urrvb.wandb'
+from wandb.proto.wandb_internal_pb2 import Record
+
+
+def records(path):
+    """Validate every fragment checksum and read with rb, never r+b."""
+    with path.open('rb') as stream:
+        assert struct.unpack('<4sHB', stream.read(7)) == (b':W&B', 0xBEE1, 0)
+        parts = []
+        while True:
+            remaining = 32768 - stream.tell() % 32768
+            if remaining < 7:
+                padding = stream.read(remaining)
+                assert padding == b'\0' * remaining
+            header = stream.read(7)
+            if not header:
+                assert not parts, 'Unfinished fragmented record'
+                break
+            assert len(header) == 7
+            checksum, length, kind = struct.unpack('<IHB', header)
+            assert kind in (1, 2, 3, 4)
+            assert length <= 32768 - stream.tell() % 32768
+            payload = stream.read(length)
+            assert len(payload) == length
+            assert zlib.crc32(payload, zlib.crc32(bytes([kind]))) & 0xffffffff == checksum
+            if kind == 1:
+                assert not parts
+                yield Record.FromString(payload)
+            elif kind == 2:
+                assert not parts
+                parts = [payload]
+            else:
+                assert parts
+                parts.append(payload)
+                if kind == 4:
+                    yield Record.FromString(b''.join(parts))
+                    parts = []
+
+
+def key(item):
+    return item.key or '/'.join(item.nested_key)
+
+
+episodes = []
+evaluations = []
+config = {}
+run_git_commit = None
+counts = {}
+total_steps = 0
+allowed_config = {'algo', 'seed', 'total_timesteps', 'policy', 'encoder_mode', 'delay_mode', 'radius'}
+allowed_metrics = {'train/episode_reward', 'train/episode_length', 'train/mean_episode_reward',
+                   'train/mean_episode_length', '_timestamp',
+                   'eval/step', 'eval/arrival_rate', 'eval/mean_reward'}
+for record in records(RUN):
+    kind = record.WhichOneof('record_type')
+    counts[kind] = counts.get(kind, 0) + 1
+    if kind == 'run':
+        run_git_commit = record.run.git.commit
+        for item in record.run.config.update:
+            if key(item) in allowed_config:
+                config[key(item)] = json.loads(item.value_json)
+    elif kind == 'config':
+        for item in record.config.update:
+            if key(item) in allowed_config:
+                config[key(item)] = json.loads(item.value_json)
+    elif kind == 'history':
+        values = {key(item): json.loads(item.value_json) for item in record.history.item
+                  if key(item) in allowed_metrics}
+        if 'train/episode_reward' in values:
+            assert 'train/episode_length' in values
+            length = int(values['train/episode_length'])
+            assert length > 0 and math.isfinite(values['train/episode_reward'])
+            total_steps += length
+            episodes.append({'environment_step': total_steps, 'episode_length': length,
+                             'episode_return': values['train/episode_reward'],
+                             'logged_cumulative_mean_return': values['train/mean_episode_reward'],
+                             'wall_time': values.get('_timestamp')})
+        if 'eval/step' in values:
+            evaluations.append({k: values[k] for k in
+                                ('eval/step', 'eval/arrival_rate', 'eval/mean_reward')})
+assert episodes and total_steps <= 10000000
+with (ROOT/'original_episodes.csv').open('w', newline='') as stream:
+    writer = csv.DictWriter(stream, fieldnames=list(episodes[0]))
+    writer.writeheader()
+    writer.writerows(episodes)
+summary = {'original_run': str(RUN), 'original_config': config,
+           'original_git_commit_at_run': run_git_commit,
+           'completed_episodes': len(episodes), 'last_episode_step': total_steps,
+           'episode_step_derivation': 'Cumulative logged episode lengths; no training steps available in episode records',
+           'wandb_fragment_checksums': 'all verified', 'record_counts': counts}
+with RUN.open('rb') as stream:
+    summary['wandb_sha256'] = hashlib.file_digest(stream, 'sha256').hexdigest()
+assert len(evaluations) == 100
+with (ROOT/'original_evaluations.csv').open('w', newline='') as stream:
+    writer = csv.DictWriter(stream, fieldnames=list(evaluations[0]))
+    writer.writeheader()
+    writer.writerows(evaluations)
+print('Extracted', len(episodes), 'episodes and', len(evaluations), 'evaluation checkpoints', flush=True)
+
+(ROOT/'cache').mkdir(exist_ok=True)
+tempfile.tempdir = str(ROOT/'cache')
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+import numpy as np
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+
+TAGS = ['episode_return', 'train/critic_loss', 'train/actor_loss']
+original_event = list((ORIGINAL/'runs/GRU-uniform-delay-full').rglob('*tfevents*'))
+assert len(original_event) == 1
+accumulator = EventAccumulator(str(original_event[0]), size_guidance={'scalars': 0}).Reload()
+original = {'episode_return': (np.array([e['environment_step'] for e in episodes]),
+                               np.array([e['episode_return'] for e in episodes]))}
+summary['event_source'] = str(original_event[0])
+summary['event_sha256'] = hashlib.sha256(original_event[0].read_bytes()).hexdigest()
+for tag in TAGS[1:] + ['train/ent_coef', 'train/ent_coef_loss']:
+    vals = accumulator.Scalars(tag)
+    x = np.array([v.step for v in vals])
+    y = np.array([v.value for v in vals])
+    assert np.all(np.diff(x) > 0) and np.all(np.isfinite(y))
+    original[tag] = (x, y)
+assert original['train/actor_loss'][0].tolist() == [e['environment_step'] for e in episodes[3::4]]
+summary['episode_step_validation'] = 'All 5113 TensorBoard points match every fourth completed episode exactly'
+
+# Confirm all episode means against an independently logged cumulative mean.
+returns = original['episode_return'][1]
+cumulative = np.cumsum(returns)/np.arange(1, len(returns)+1)
+logged = np.array([e['logged_cumulative_mean_return'] for e in episodes])
+assert np.allclose(cumulative, logged, rtol=1e-5, atol=1e-4)
+summary['cumulative_episode_mean_validation'] = 'passed for every episode'
+
+
+def rolling(x, y):
+    starts = np.searchsorted(x, x-50000, side='right')
+    ends = np.arange(len(x))+1
+    sums = np.concatenate(([0.], np.cumsum(y)))
+    return (sums[ends]-sums[starts])/(ends-starts)
+
+
+def describe(x, y, lo, hi):
+    z = y[(x >= lo) & (x < hi)]
+    return {'n': len(z), 'mean': float(np.mean(z)), 'median': float(np.median(z)),
+            'min': float(np.min(z)), 'max': float(np.max(z))}
+
+
+summary['windows'] = {}
+for lo, hi in [(0, 100000), (800000, 1000000), (6000000, 7000000),
+               (7000000, 8000000), (8000000, 9000000), (9000000, 10000000)]:
+    summary['windows'][f'{lo}-{hi}'] = {tag: describe(*original[tag], lo, hi) for tag in TAGS}
+summary['original_peaks'] = {
+    tag: {'max': float(np.max(original[tag][1])),
+          'max_step': int(original[tag][0][np.argmax(original[tag][1])]),
+          'min': float(np.min(original[tag][1])),
+          'min_step': int(original[tag][0][np.argmin(original[tag][1])])} for tag in TAGS[1:]}
+summary['plotting'] = 'Trailing 50k environment-step arithmetic mean, identical for both runs; no clipping of raw values'
+summary['provenance_limit'] = (
+    'Original archived code points to historical ${WORKSPACE}/DAROM/sumo_files/mergingP.sumocfg; '
+    'that directory no longer exists. Present original default route matches its Hard route; '
+    'run config does not record scenario or runtime scene hashes. Do not assume exact historical traffic parity.')
+
+with (ROOT/'original_training_scalars.csv').open('w', newline='') as stream:
+    writer = csv.writer(stream)
+    writer.writerow(['metric', 'environment_step', 'raw_value', 'trailing_50k_mean'])
+    for tag, (x, y) in original.items():
+        for step, value, mean in zip(x, y, rolling(x, y)):
+            writer.writerow([tag, int(step), float(value), float(mean)])
+
+antwerp = {}
+with (ROOT/'figure4_data.csv').open() as stream:
+    rows = list(csv.DictReader(stream))
+for scenario in ('easy', 'medium', 'hard'):
+    antwerp[scenario] = {}
+    for tag in TAGS:
+        selected = [r for r in rows if r['scenario'] == scenario and r['metric'] == tag]
+        x = np.array([int(r['environment_step']) for r in selected])
+        y = np.array([float(r['raw_value']) for r in selected])
+        assert np.allclose(rolling(x, y), [float(r['trailing_50k_mean']) for r in selected])
+        antwerp[scenario][tag] = (x, y)
+
+plt.rcParams.update({'font.family': 'DejaVu Sans', 'font.size': 10,
+                     'axes.spines.top': False, 'axes.spines.right': False,
+                     'savefig.facecolor': 'white'})
+blue, orange = '#287da8', '#d16a2a'
+
+
+def draw(ax, x, y, color, limit):
+    mask = x <= limit
+    mean = rolling(x, y)
+    ax.plot(x[mask]/1e6, y[mask], color=color, alpha=.2, linewidth=.6)
+    ax.plot(x[mask]/1e6, mean[mask], color=color, linewidth=1.8)
+    ax.grid(True, alpha=.25, linestyle='--', linewidth=.6)
+    ax.set_xlim(0, limit/1e6)
+
+
+fig, axes = plt.subplots(3, 2, figsize=(13, 10), sharex='col')
+for col, limit in enumerate((1000000, 10000000)):
+    for row, tag in enumerate(TAGS):
+        ax = axes[row, col]
+        draw(ax, *original[tag], blue, limit)
+        if row == 0:
+            ax.set_title(['Original reproduction: first 1M steps', 'Original reproduction: full 10M steps'][col],
+                         fontsize=13, fontweight='bold')
+        if row == 1:
+            ax.set_yscale('log')
+        if row == 2 and col == 1:
+            ax.set_yscale('symlog', linthresh=80)
+            ax.set_yticks([-2000, -1000, -100, -40, 0, 60])
+            ax.set_yticklabels(['-2000', '-1000', '-100', '-40', '0', '60'])
+            ax.set_ylabel('Actor loss (symlog beyond +/-80)')
+        if row == 2:
+            ax.axhline(0, color='#555555', linewidth=.7, linestyle=':')
+            ax.set_xlabel('Environment steps (million)')
+        if col == 0:
+            ax.set_ylabel(['Training episode return', 'Critic loss (log scale)', 'Actor loss'][row])
+        if col == 1:
+            ax.axvline(1, color='#555555', linewidth=.8, linestyle=':')
+            ax.axvline(7, color='#999999', linewidth=.8, linestyle='--')
+axes[1, 1].annotate('Raw peak: 3.76 million', xy=(8.27865, 3756378.5), xytext=(3.8, 2e6),
+                    arrowprops={'arrowstyle': '->', 'color': '#555555'}, fontsize=9)
+fig.suptitle('Existing DAROM-original reproduction: actual training history', fontsize=16, y=.985)
+fig.legend(handles=[Line2D([0], [0], color=blue, alpha=.25, label='Raw values'),
+                    Line2D([0], [0], color=blue, linewidth=2, label='Trailing 50k-step arithmetic mean')],
+           loc='upper center', bbox_to_anchor=(.5, .95), ncol=2, frameon=False)
+fig.text(.5, .018,
+         'GRU-uniform-delay-full | Seed 42 | One local reproduction, not the paper\'s original training records\n'
+         'Full-history vertical guides: 1M and 7M steps. Raw outliers retained; axes differ between panels.\n'
+         'Current default original scene matches Hard; historical scene hashes were not recorded.',
+         ha='center', fontsize=9, color='#555555')
+fig.tight_layout(rect=(0, .08, 1, .92))
+fig.savefig(ROOT/'original_reproduction_training.png', dpi=180)
+fig.savefig(ROOT/'original_reproduction_training.pdf')
+plt.close(fig)
+
+fig, axes = plt.subplots(3, 3, figsize=(15, 10), sharex=True)
+for col, scenario in enumerate(('easy', 'medium', 'hard')):
+    for row, tag in enumerate(TAGS):
+        ax = axes[row, col]
+        draw(ax, *original[tag], blue, 1000000)
+        draw(ax, *antwerp[scenario][tag], orange, 1000000)
+        if row == 0:
+            ax.set_title(f'Antwerp {scenario.title()} vs original reference', fontsize=12, fontweight='bold')
+        if row == 1:
+            ax.set_yscale('log')
+            ax.set_ylim(.2, 20000)
+        if row == 2:
+            ax.set_ylim(-25, 80)
+            ax.axhline(0, color='#777777', linewidth=.7, linestyle=':')
+            ax.set_xlabel('Environment steps (million)')
+        if col == 0:
+            ax.set_ylabel(['Training episode return', 'Critic loss (log scale)', 'Actor loss'][row])
+fig.suptitle('Equal training budget: DAROM-original vs Antwerp, first 1M steps', fontsize=16, y=.985)
+fig.legend(handles=[Line2D([0], [0], color=blue, linewidth=2, label='Original reproduction (seed 42)'),
+                    Line2D([0], [0], color=orange, linewidth=2, label='Antwerp migration (seed 579071)')],
+           loc='upper center', bbox_to_anchor=(.5, .95), ncol=2, frameon=False)
+fig.text(.5, .016,
+         'Thin: raw samples. Bold: identical trailing 50k-step arithmetic mean. Return axes use independent ranges.\n'
+         'The SAME original run is repeated as a reference in all columns; these are not matched-density or matched-seed trials.\n'
+         'Training metrics only; neither visual similarity nor lower loss proves successful transfer.',
+         ha='center', fontsize=9, color='#555555')
+fig.tight_layout(rect=(0, .08, 1, .92))
+fig.savefig(ROOT/'original_vs_antwerp_1m.png', dpi=180)
+fig.savefig(ROOT/'original_vs_antwerp_1m.pdf')
+plt.close(fig)
+summary['evaluation_at_1m_7m_10m'] = [r for r in evaluations if r['eval/step'] in (1000000, 7000000, 10000000)]
+(ROOT/'original_comparison_statistics.json').write_text(json.dumps(summary, indent=2)+'\n')
+print(json.dumps({k: summary[k] for k in ['original_config', 'original_git_commit_at_run',
+      'completed_episodes', 'last_episode_step', 'evaluation_at_1m_7m_10m', 'windows']}, indent=2), flush=True)
+print('Saved original reproduction and equal-budget comparison (PNG/PDF).', flush=True)

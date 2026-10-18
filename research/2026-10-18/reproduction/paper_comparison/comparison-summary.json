@@ -1,0 +1,134 @@
+{
+  "cutoff_steps": 500000,
+  "source": "https://arxiv.org/pdf/2403.11852v5#page=9",
+  "method": "Fig.4 Hard GRU blue opaque vector line, axis calibrated; approximate displayed values, not raw logs",
+  "paper_smoothing": "unspecified",
+  "current_smoothing": {
+    "return": "last 100 completed episodes",
+    "loss": "trailing 100 log samples = 10k environment steps"
+  },
+  "checkpoints": [
+    {
+      "step": 100000,
+      "return": {
+        "paper_figure_estimate": -226.79542445225903,
+        "current_latest": 64.77404999656893,
+        "current_last10k_mean": 56.214274991164935
+      },
+      "critic": {
+        "paper_figure_estimate": 7.59042867488631,
+        "current_latest": 25.804162979125977,
+        "current_last10k_mean": 27.81450422286987
+      },
+      "actor": {
+        "paper_figure_estimate": 61.73957967072975,
+        "current_latest": -3.7616026401519775,
+        "current_last10k_mean": -1.7169078832864761
+      }
+    },
+    {
+      "step": 250000,
+      "return": {
+        "paper_figure_estimate": -220.8902393476751,
+        "current_latest": 82.31860373063843,
+        "current_last10k_mean": 85.73601019969308
+      },
+      "critic": {
+        "paper_figure_estimate": 7.741246118809606,
+        "current_latest": 15.862910270690918,
+        "current_last10k_mean": 20.713562545776366
+      },
+      "actor": {
+        "paper_figure_estimate": 52.44570008624086,
+        "current_latest": -15.254966735839844,
+        "current_last10k_mean": -13.736798753738404
+      }
+    },
+    {
+      "step": 500000,
+      "return": {
+        "paper_figure_estimate": -179.8295363860624,
+        "current_latest": 92.0835457223063,
+        "current_last10k_mean": 97.3611573105813
+      },
+      "critic": {
+        "paper_figure_estimate": 8.994439623276996,
+        "current_latest": 20.901599884033203,
+        "current_last10k_mean": 14.540280528068543
+      },
+      "actor": {
+        "paper_figure_estimate": 40.62540249601784,
+        "current_latest": -18.916179656982422,
+        "current_last10k_mean": -20.055863971710206
+      }
+    }
+  ],
+  "paper_late_6m_to_7m": {
+    "return": {
+      "median_estimate": 150.58621637695322,
+      "min_estimate": 131.49944105902907,
+      "max_estimate": 159.75274642855302
+    },
+    "critic": {
+      "median_estimate": 2.764303943784423,
+      "min_estimate": 1.37300901505797,
+      "max_estimate": 5.317259501748353
+    },
+    "actor": {
+      "median_estimate": -36.78108595752815,
+      "min_estimate": -37.91224165704861,
+      "max_estimate": -33.783102073385415
+    }
+  },
+  "evaluations": {
+    "eval-100000": {
+      "eval/no_sc/success_rate": 0.71875,
+      "eval/no_sc/collision_rate": 0.125,
+      "eval/no_sc/timeout_rate": 0.0,
+      "eval/no_sc/emergency_stop_rate": 0.15625,
+      "eval/no_sc/mean_reward": 74.0147368279459,
+      "eval/no_sc/mean_length": 170.34375,
+      "eval/no_sc/sc_intervention_rate": 0.0,
+      "eval/original_sc/success_rate": 0.84375,
+      "eval/original_sc/collision_rate": 0.0,
+      "eval/original_sc/timeout_rate": 0.0,
+      "eval/original_sc/emergency_stop_rate": 0.15625,
+      "eval/original_sc/mean_reward": 122.43421442489516,
+      "eval/original_sc/mean_length": 189.75,
+      "eval/original_sc/sc_intervention_rate": 0.2814558629776021
+    },
+    "eval-250000": {
+      "eval/no_sc/success_rate": 0.78125,
+      "eval/no_sc/collision_rate": 0.21875,
+      "eval/no_sc/timeout_rate": 0.0,
+      "eval/no_sc/emergency_stop_rate": 0.0,
+      "eval/no_sc/mean_reward": 91.9058276447796,
+      "eval/no_sc/mean_length": 168.84375,
+      "eval/no_sc/sc_intervention_rate": 0.0,
+      "eval/original_sc/success_rate": 0.96875,
+      "eval/original_sc/collision_rate": 0.03125,
+      "eval/original_sc/timeout_rate": 0.0,
+      "eval/original_sc/emergency_stop_rate": 0.0,
+      "eval/original_sc/mean_reward": 157.20206950745046,
+      "eval/original_sc/mean_length": 199.125,
+      "eval/original_sc/sc_intervention_rate": 0.2033898305084746
+    },
+    "eval-500000": {
+      "eval/no_sc/success_rate": 0.9375,
+      "eval/no_sc/collision_rate": 0.0625,
+      "eval/no_sc/timeout_rate": 0.0,
+      "eval/no_sc/emergency_stop_rate": 0.0,
+      "eval/no_sc/mean_reward": 148.04308636931373,
+      "eval/no_sc/mean_length": 193.34375,
+      "eval/no_sc/sc_intervention_rate": 0.0,
+      "eval/original_sc/success_rate": 0.96875,
+      "eval/original_sc/collision_rate": 0.03125,
+      "eval/original_sc/timeout_rate": 0.0,
+      "eval/original_sc/emergency_stop_rate": 0.0,
+      "eval/original_sc/mean_reward": 162.66926327564994,
+      "eval/original_sc/mean_length": 198.46875,
+      "eval/original_sc/sc_intervention_rate": 0.08565580223586837
+    }
+  },
+  "nonfinite_logged_values": 0
+}

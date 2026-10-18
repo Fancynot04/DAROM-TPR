@@ -1,0 +1,65 @@
+"""Scan every saved Hard transition with frozen final weights, CPU inference only."""
+from pathlib import Path
+import hashlib
+import json
+import pickle
+import sys
+import time
+ROOT=Path(__file__).resolve().parent
+PROJECT=ROOT.parents[2]
+sys.path.insert(0,str(PROJECT))
+import numpy as np
+import torch
+from stable_baselines3 import SAC
+torch.set_num_threads(1)
+torch.manual_seed(20261015)
+run='AT-B0-H1M-S579071'
+base=PROJECT/'models_experiments/antwerp-density-1m'/run/run
+replay=base/f'{run}_replay_buffer_1000000_steps.pkl'
+model_path=base/f'{run}_1000000_steps.zip'
+with replay.open('rb') as f:b=pickle.load(f)
+n=b.size()
+model=SAC.load(model_path,device='cpu');model.policy.set_training_mode(False)
+alpha=model.log_ent_coef.detach().exp()
+out=np.empty((n,5),np.float32)
+t=time.monotonic()
+for start in range(0,n,1024):
+    end=min(start+1024,n)
+    obs=torch.as_tensor(b.observations[start:end,0]);nxt=torch.as_tensor(b.next_observations[start:end,0])
+    act=torch.as_tensor(b.actions[start:end,0]);rew=torch.as_tensor(b.rewards[start:end])
+    done=torch.as_tensor(b.dones[start:end]*(1-b.timeouts[start:end]))
+    with torch.no_grad():
+        actions,logp=model.actor.action_log_prob(nxt)
+        qn=torch.cat(model.critic_target(nxt,actions),1).min(1,keepdim=True).values
+        y=rew+(1-done)*model.gamma*(qn-alpha*logp.reshape(-1,1))
+        q=torch.cat(model.critic(obs,act),1)
+        mse=(q-y).square().mean(1)
+        out[start:end]=torch.cat([q,y,mse[:,None],logp[:,None]],1).numpy()
+    if start%(1024*100)==0:print('SCANNED',end,'/',n,'seconds',round(time.monotonic()-t,1),flush=True)
+assert np.isfinite(out).all()
+np.savez_compressed(ROOT/'hard_transition_td.npz',q1=out[:,0],q2=out[:,1],target=out[:,2],mse=out[:,3],next_logp=out[:,4])
+episodes=[r for r in map(json.loads,(PROJECT/f'tmp/ai/antwerp-density-1m/{run}/training.jsonl').read_text().splitlines()) if r['event']=='episode']
+ends=np.array([e['steps'] for e in episodes])
+order=np.argsort(out[:,3])[::-1]
+summary={'model_sha256':hashlib.sha256(model_path.read_bytes()).hexdigest(),'n':n,
+ 'scope':'Frozen 1M model, every saved replay transition, one sampled next action per transition; not historical training minibatches',
+ 'alpha':float(alpha),'mean_mse':float(out[:,3].mean()),'median_mse':float(np.median(out[:,3])),
+ 'mse_quantiles':{str(p):float(np.quantile(out[:,3],p)) for p in (.9,.99,.999,.9999,1)},
+ 'q_abs_over_1000':int((np.max(np.abs(out[:,:2]),axis=1)>1000).sum()),
+ 'td_error_concentration':{str(k):float(out[order[:k],3].sum(dtype=np.float64)/out[:,3].sum(dtype=np.float64)) for k in (1,10,100,1000)},
+ 'chronological_blocks':[], 'top_transitions':[]}
+for start in range(0,n,100000):
+ end=min(start+100000,n);a=out[start:end,3]
+ summary['chronological_blocks'].append(dict(start_step=start+1,end_step=end,mean_mse=float(a.mean()),
+   max_mse=float(a.max()),q_abs_over_1000=int((np.max(np.abs(out[start:end,:2]),axis=1)>1000).sum())))
+for i in order[:30]:
+ ep_index=int(np.searchsorted(ends,i+1));ep=episodes[ep_index] if ep_index<len(episodes) else None
+ summary['top_transitions'].append(dict(step=int(i)+1,reward=float(b.rewards[i,0]),
+   done=float(b.dones[i,0]),timeout=float(b.timeouts[i,0]),q1=float(out[i,0]),q2=float(out[i,1]),
+   target=float(out[i,2]),mse=float(out[i,3]),contribution_to_batch512=float(out[i,3]/512),
+   observation=b.observations[i,0].tolist(),next_observation=b.next_observations[i,0].tolist(),
+   action=b.actions[i,0].tolist(),episode=ep))
+summary['post_spike_experience_mse']=float(out[991929:,3].mean())
+summary['elapsed_seconds']=time.monotonic()-t
+(ROOT/'hard_full_scan.json').write_text(json.dumps(summary,indent=2,allow_nan=False)+'\n')
+print('DONE',json.dumps({k:summary[k] for k in ('n','mean_mse','median_mse','q_abs_over_1000','td_error_concentration','elapsed_seconds')}),flush=True)

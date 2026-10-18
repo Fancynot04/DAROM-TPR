@@ -1,0 +1,5 @@
+{
+  "head": "eabd572fc0aece579e5b553bdc7af27a8b81d03a",
+  "status_at_capture": " M .gitignore\n M README.md\n M src/merging.py\n M src/wrapper.py\n M train_sac_delay.py\n?? docs/\n?? experiments/\n?? tests/\n",
+  "note": "Working-tree contents are authoritative; HEAD alone does not identify uncommitted reproduction changes."
+}

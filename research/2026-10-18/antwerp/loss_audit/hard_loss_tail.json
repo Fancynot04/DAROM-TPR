@@ -1,0 +1,212 @@
+[
+  {
+    "scenario": "hard",
+    "tag": "train/actor_loss",
+    "environment_step": "958789",
+    "value": "32.397483825683594",
+    "wall_time": "1791901682.7206619"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/actor_loss",
+    "environment_step": "966692",
+    "value": "30.465864181518555",
+    "wall_time": "1791902013.0321517"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/actor_loss",
+    "environment_step": "972961",
+    "value": "32.54933547973633",
+    "wall_time": "1791902273.6391184"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/actor_loss",
+    "environment_step": "984204",
+    "value": "30.311052322387695",
+    "wall_time": "1791902827.284167"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/actor_loss",
+    "environment_step": "991929",
+    "value": "21.734485626220703",
+    "wall_time": "1791903151.0625188"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/critic_loss",
+    "environment_step": "958789",
+    "value": "14.306265830993652",
+    "wall_time": "1791901682.7206664"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/critic_loss",
+    "environment_step": "966692",
+    "value": "2.382730007171631",
+    "wall_time": "1791902013.0321639"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/critic_loss",
+    "environment_step": "972961",
+    "value": "3.968498468399048",
+    "wall_time": "1791902273.6391308"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/critic_loss",
+    "environment_step": "984204",
+    "value": "4.882889270782471",
+    "wall_time": "1791902827.2841794"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/critic_loss",
+    "environment_step": "991929",
+    "value": "9233.912109375",
+    "wall_time": "1791903151.0625234"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/ent_coef_loss",
+    "environment_step": "958789",
+    "value": "0.22201374173164368",
+    "wall_time": "1791901682.7206738"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/ent_coef_loss",
+    "environment_step": "966692",
+    "value": "0.043499208986759186",
+    "wall_time": "1791902013.0321856"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/ent_coef_loss",
+    "environment_step": "972961",
+    "value": "-0.23347944021224976",
+    "wall_time": "1791902273.6391532"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/ent_coef_loss",
+    "environment_step": "984204",
+    "value": "-0.48892444372177124",
+    "wall_time": "1791902827.2842026"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/ent_coef_loss",
+    "environment_step": "991929",
+    "value": "0.43978986144065857",
+    "wall_time": "1791903151.062531"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/ent_coef",
+    "environment_step": "958789",
+    "value": "0.02729402296245098",
+    "wall_time": "1791901682.7206702"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/ent_coef",
+    "environment_step": "966692",
+    "value": "0.029777780175209045",
+    "wall_time": "1791902013.0321748"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/ent_coef",
+    "environment_step": "972961",
+    "value": "0.029544273391366005",
+    "wall_time": "1791902273.639142"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/ent_coef",
+    "environment_step": "984204",
+    "value": "0.027678700163960457",
+    "wall_time": "1791902827.2841911"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/ent_coef",
+    "environment_step": "991929",
+    "value": "0.027691107243299484",
+    "wall_time": "1791903151.0625272"
+  },
+  {
+    "scenario": "hard",
+    "tag": "rollout/success_rate",
+    "environment_step": "958789",
+    "value": "0.41999998688697815",
+    "wall_time": "1791901682.720633"
+  },
+  {
+    "scenario": "hard",
+    "tag": "rollout/success_rate",
+    "environment_step": "966692",
+    "value": "0.41999998688697815",
+    "wall_time": "1791902013.0321026"
+  },
+  {
+    "scenario": "hard",
+    "tag": "rollout/success_rate",
+    "environment_step": "972961",
+    "value": "0.41999998688697815",
+    "wall_time": "1791902273.6390665"
+  },
+  {
+    "scenario": "hard",
+    "tag": "rollout/success_rate",
+    "environment_step": "984204",
+    "value": "0.41999998688697815",
+    "wall_time": "1791902827.2841177"
+  },
+  {
+    "scenario": "hard",
+    "tag": "rollout/success_rate",
+    "environment_step": "991929",
+    "value": "0.4300000071525574",
+    "wall_time": "1791903151.0624864"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/learning_rate",
+    "environment_step": "958789",
+    "value": "2.9999999242136255e-05",
+    "wall_time": "1791901682.7206776"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/learning_rate",
+    "environment_step": "966692",
+    "value": "2.9999999242136255e-05",
+    "wall_time": "1791902013.0321963"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/learning_rate",
+    "environment_step": "972961",
+    "value": "2.9999999242136255e-05",
+    "wall_time": "1791902273.6391642"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/learning_rate",
+    "environment_step": "984204",
+    "value": "2.9999999242136255e-05",
+    "wall_time": "1791902827.2842143"
+  },
+  {
+    "scenario": "hard",
+    "tag": "train/learning_rate",
+    "environment_step": "991929",
+    "value": "2.9999999242136255e-05",
+    "wall_time": "1791903151.0625348"
+  }
+]

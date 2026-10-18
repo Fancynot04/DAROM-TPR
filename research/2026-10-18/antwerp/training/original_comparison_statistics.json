@@ -1,0 +1,210 @@
+{
+  "original_run": "${WORKSPACE}/DAROM-original/wandb/offline-run-20260919_193523-oh9urrvb/run-oh9urrvb.wandb",
+  "original_config": {
+    "algo": "SAC",
+    "radius": 50,
+    "seed": 42,
+    "total_timesteps": 10000000,
+    "policy": "MlpPolicy",
+    "encoder_mode": "GRU",
+    "delay_mode": "uniform"
+  },
+  "original_git_commit_at_run": "eabd572fc0aece579e5b553bdc7af27a8b81d03a",
+  "completed_episodes": 20454,
+  "last_episode_step": 9999987,
+  "episode_step_derivation": "Cumulative logged episode lengths; no training steps available in episode records",
+  "wandb_fragment_checksums": "all verified",
+  "record_counts": {
+    "header": 1,
+    "run": 1,
+    "files": 2005,
+    "stats": 16160,
+    "environment": 2,
+    "telemetry": 4,
+    "artifact": 1,
+    "config": 2,
+    "output_raw": 400104,
+    "tbrecord": 1,
+    "summary": 51353,
+    "history": 25676,
+    "exit": 1
+  },
+  "wandb_sha256": "e83c02b3948bf8f15f630fa0bc4ed35daba3c1591cb28b0d7fe04f7344b412e7",
+  "event_source": "${WORKSPACE}/DAROM-original/runs/GRU-uniform-delay-full/SAC_1/events.out.tfevents.1789817725.server-0-Z790-EAGLE-AX.216395.0",
+  "event_sha256": "61283f841dc32f06aa738f2250ffacdc1943b46f8293ab1494c05fee7db1803e",
+  "episode_step_validation": "All 5113 TensorBoard points match every fourth completed episode exactly",
+  "cumulative_episode_mean_validation": "passed for every episode",
+  "windows": {
+    "0-100000": {
+      "episode_return": {
+        "n": 747,
+        "mean": -153.01554817495895,
+        "median": -126.68609619140625,
+        "min": -1336.71142578125,
+        "max": -60.90955352783203
+      },
+      "train/critic_loss": {
+        "n": 186,
+        "mean": 18.557417726003994,
+        "median": 11.32603931427002,
+        "min": 3.750211715698242,
+        "max": 132.80764770507812
+      },
+      "train/actor_loss": {
+        "n": 186,
+        "mean": 49.05460884958826,
+        "median": 56.69571876525879,
+        "min": -1.8227019309997559,
+        "max": 69.39783477783203
+      }
+    },
+    "800000-1000000": {
+      "episode_return": {
+        "n": 176,
+        "mean": -261.7699963179502,
+        "median": -368.9345703125,
+        "min": -562.9217529296875,
+        "max": -57.614967346191406
+      },
+      "train/critic_loss": {
+        "n": 44,
+        "mean": 4.798112815076655,
+        "median": 2.164065361022949,
+        "min": 1.01954185962677,
+        "max": 26.27376365661621
+      },
+      "train/actor_loss": {
+        "n": 44,
+        "mean": 44.73745718869296,
+        "median": 44.73666572570801,
+        "min": 43.277252197265625,
+        "max": 45.93415832519531
+      }
+    },
+    "6000000-7000000": {
+      "episode_return": {
+        "n": 879,
+        "mean": -247.88527020225482,
+        "median": -329.3708190917969,
+        "min": -694.8413696289062,
+        "max": -48.56357955932617
+      },
+      "train/critic_loss": {
+        "n": 220,
+        "mean": 14.991788283261386,
+        "median": 2.0991183519363403,
+        "min": 0.3382147550582886,
+        "max": 399.2319641113281
+      },
+      "train/actor_loss": {
+        "n": 220,
+        "mean": 38.6504930973053,
+        "median": 39.39105415344238,
+        "min": 12.6514310836792,
+        "max": 42.57303237915039
+      }
+    },
+    "7000000-8000000": {
+      "episode_return": {
+        "n": 2626,
+        "mean": -41.26197332220956,
+        "median": -60.108877182006836,
+        "min": -705.2890014648438,
+        "max": 169.3442840576172
+      },
+      "train/critic_loss": {
+        "n": 657,
+        "mean": 60.72803488033547,
+        "median": 8.695974349975586,
+        "min": 0.4081491231918335,
+        "max": 25048.439453125
+      },
+      "train/actor_loss": {
+        "n": 657,
+        "mean": 35.26282997653909,
+        "median": 35.52301025390625,
+        "min": 20.382362365722656,
+        "max": 46.723793029785156
+      }
+    },
+    "8000000-9000000": {
+      "episode_return": {
+        "n": 5176,
+        "mean": 100.05028299275654,
+        "median": 146.75846099853516,
+        "min": -1324.3067626953125,
+        "max": 168.14614868164062
+      },
+      "train/critic_loss": {
+        "n": 1294,
+        "mean": 4123.420553652175,
+        "median": 14.367342472076416,
+        "min": 1.9822943210601807,
+        "max": 3756378.5
+      },
+      "train/actor_loss": {
+        "n": 1294,
+        "mean": -37.397217195912894,
+        "median": -17.31865119934082,
+        "min": -1880.58544921875,
+        "max": 28.266746520996094
+      }
+    },
+    "9000000-10000000": {
+      "episode_return": {
+        "n": 5202,
+        "mean": 143.94461158127658,
+        "median": 158.6295928955078,
+        "min": -103.00206756591797,
+        "max": 170.66314697265625
+      },
+      "train/critic_loss": {
+        "n": 1300,
+        "mean": 4.168739487230778,
+        "median": 1.8107316493988037,
+        "min": 0.2713700532913208,
+        "max": 93.3100357055664
+      },
+      "train/actor_loss": {
+        "n": 1300,
+        "mean": -37.26327891863309,
+        "median": -38.29288864135742,
+        "min": -43.926231384277344,
+        "max": -28.17523956298828
+      }
+    }
+  },
+  "original_peaks": {
+    "train/critic_loss": {
+      "max": 3756378.5,
+      "max_step": 8278650,
+      "min": 0.2713700532913208,
+      "min_step": 9910379
+    },
+    "train/actor_loss": {
+      "max": 69.60943603515625,
+      "max_step": 138906,
+      "min": -1880.58544921875,
+      "min_step": 8153497
+    }
+  },
+  "plotting": "Trailing 50k environment-step arithmetic mean, identical for both runs; no clipping of raw values",
+  "provenance_limit": "Original archived code points to historical ${WORKSPACE}/DAROM/sumo_files/mergingP.sumocfg; that directory no longer exists. Present original default route matches its Hard route; run config does not record scenario or runtime scene hashes. Do not assume exact historical traffic parity.",
+  "evaluation_at_1m_7m_10m": [
+    {
+      "eval/step": 1000000,
+      "eval/arrival_rate": 0,
+      "eval/mean_reward": -152.09874466017033
+    },
+    {
+      "eval/step": 7000000,
+      "eval/arrival_rate": 0,
+      "eval/mean_reward": -177.7509313905132
+    },
+    {
+      "eval/step": 10000000,
+      "eval/arrival_rate": 0.9607843137254902,
+      "eval/mean_reward": 168.6482478388219
+    }
+  ]
+}

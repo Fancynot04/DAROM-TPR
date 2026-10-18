@@ -1,0 +1,36 @@
+"""Check whether large TD targets persist across actions and saved checkpoints."""
+from pathlib import Path
+import json
+import sys
+ROOT=Path(__file__).resolve().parent;PROJECT=ROOT.parents[2]
+sys.path.insert(0,str(PROJECT))
+import numpy as np
+import torch
+from stable_baselines3 import SAC
+torch.set_num_threads(1)
+r=json.loads((ROOT/'hard_full_scan.json').read_text())
+rows=r['top_transitions'][:10]
+run='AT-B0-H1M-S579071';base=PROJECT/'models_experiments/antwerp-density-1m'/run/run
+result=[]
+for step in (250000,750000,1000000):
+ model=SAC.load(base/f'{run}_{step}_steps.zip',device='cpu');model.policy.set_training_mode(False)
+ torch.manual_seed(20261015)
+ for row in rows:
+  obs=torch.tensor([row['next_observation']]*128)
+  with torch.no_grad():
+   actions,lp=model.actor.action_log_prob(obs)
+   q=torch.cat(model.critic_target(obs,actions),1).min(1).values
+   det=model.actor(obs,deterministic=True)
+   qdet=torch.cat(model.critic_target(obs,det),1).min(1).values
+  result.append(dict(checkpoint=step,replay_step=row['step'],sampled_target_q_mean=float(q.mean()),
+      sampled_target_q_min=float(q.min()),sampled_target_q_max=float(q.max()),
+      deterministic_target_q=float(qdet[0]),next_delay=row['next_observation'][-1]))
+npz=np.load(ROOT/'hard_transition_td.npz');mse=npz['mse'];rng=np.random.default_rng(20261015)
+batch_loss=np.array([mse[rng.integers(len(mse),size=512)].mean() for _ in range(10000)])
+summary={'scope':'Frozen-checkpoint probes; 128 action draws per selected next-state; worst 10 states selected by final scan, not representative',
+ 'rows':result,'fixed_scan_batch_resampling':{'batches':10000,'batch_size':512,
+  'note':'Uses one already-sampled TD error per stored transition; illustrative, not historical minibatch reconstruction',
+  'quantiles':{str(p):float(np.quantile(batch_loss,p)) for p in (.5,.9,.95,.99,.999,1)},
+  'batches_above_9233':int((batch_loss>9233.912109375).sum())}}
+(ROOT/'tail_checks.json').write_text(json.dumps(summary,indent=2)+'\n')
+print(json.dumps(summary,indent=2))
