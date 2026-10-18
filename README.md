@@ -1892,6 +1892,91 @@ Resource sampling found about 469 GiB free disk, 21 GiB available memory and
 export required no additional SUMO job, training, dependency or ignore-rule
 change. The files remain local temporary analysis artifacts; no upload occurred.
 
+### Why the original reproduction losses differ from Figure 4 (2026-10-14)
+
+The archived conversation handoff at
+`tmp/ai/table3-1m-1500/AGENT_HANDOFF.md` was reviewed before this audit.
+The difference is real, not just a plotting transform: restricting the original
+run to the paper's 0–7M budget still gives negative training returns and positive
+actor loss. During 6–7M, mean episode return is -247.89 and median actor loss is
++39.39. Its first historical evaluation with any arrival is at **7.8M** (27/51),
+after 77 zero-arrival evaluations; 7M itself has 0/51. These use the legacy
+arrival definition. The best checkpoint at 9.7M cannot supply a replacement
+training trajectory for the first 7M.
+
+The new `tmp/ai/original-best-report/figure4_linear7m.{png,pdf}` uses linear
+axes and the same 0–7M budget. Its left column uses the display bounds of the
+paper's Hard panels, with out-of-range raw values marked and counted; its right
+column retains the entire range of exactly the same samples. There are 7,450
+episode returns and 1,862 points per loss metric in this interval. The critic
+has 23 raw points above 80, including a maximum of 14,817.92. The full 10M
+diagnostic remains available, including the later 3,756,378.5 spike. Both
+figures use the previously verified trailing 50k-step arithmetic mean. The
+paper does not specify its exact smoothing procedure; no paper curve was
+digitized or fitted, and matching display bounds does not establish a matched
+training protocol. SB3 records the latest training call's loss at each dump,
+not all intervening gradient updates.
+
+Two concrete training defects were verified in the **original run's code**:
+
+- **Malformed GRU split and different feature width.** The wrapper emits
+  93 observation values, 40 action-history values and one delay. Training sets
+  `hist_len=21`, so the encoder instead consumes 91/42/1. A sentinel forward
+  pass using the real best checkpoint's encoder weights confirms that the
+  final neighbor's lateral position and relative velocity become the first
+  GRU action token. Those values are zero when that neighbor slot is padding,
+  so the effect depends on traffic and cannot be assumed to dominate learning.
+  The checkpoint also confirms 128 output features, whereas
+  [paper Section V-B](https://arxiv.org/html/2403.11852v5#S5.SS2) describes a
+  128→256 fusion network. This is not a different learning-rate setting:
+  both use 3e-5 and batch size 512.
+- **Evaluation destroys the live training simulation.** Every 100k steps,
+  `EvalAndBestSaveCallback` executes 51 episodes in the same process. Both
+  environments use the global default TraCI connection. `Merging.reset()`
+  closes that connection and starts a new simulation; the callback ends with
+  another `eval_env.reset()`. Training resumes with its previous observation,
+  merge flags and delay/action history, but the backend is the new evaluation
+  simulation. The next transition can therefore combine unrelated states and
+  compute a false progress reward. Merely constructing a different Python
+  environment or choosing another seed does not isolate the connection.
+
+`tmp/ai/original-best-report/audit_loss.py` executes archived classes in an
+offline contract probe. The archived training AST matches the W&B code
+snapshot, and the encoder accepts the real checkpoint weights with a strict
+state-dict load. A fake TraCI backend reproduces the callback problem: cached
+training x=500, backend x=101 after evaluation, next training x=102, reward
+**-59.73 instead of +0.12** for ordinary one-meter progress, with `done=False`
+and stale merge flags. This is a synthetic demonstration of the defect,
+**not a replay of a historical transition or proof of a particular loss spike's
+cause**. Results and source hashes are in `loss_audit.json`; rerun with:
+
+```bash
+/home/cyl/project/DAROM-original/.venv/bin/python -B tmp/ai/original-best-report/audit_loss.py
+/home/cyl/project/DAROM-original/.venv/bin/python -B tmp/ai/original-best-report/build_report.py
+```
+
+The current Antwerp entry already uses 20 history slots / 256 features,
+rejects the malformed split, and saves checkpoints without the destructive
+evaluation callback. Its evaluations run separately. No production change is
+needed to fix these two defects again, and these findings do not explain away
+Antwerp's separate performance problems. Original SUMO also uses `--random`,
+while delay/traffic draws share global NumPy state, so seed 42 does not fix the
+complete simulation or isolate evaluation's random draws.
+
+These defects also exist in the pinned public reference. Without the authors'
+actual Figure 4 execution configuration, raw logs and plotting script, it is
+unknown whether their run used them. The evidence does **not** identify each
+defect's contribution to the convergence delay. A causal resolution would
+require fresh original-scene controlled training with corrected input layout,
+paper-described feature width, isolated evaluation and explicit simulation
+seeds, holding other settings fixed and preserving scene/software hashes.
+Neither longer training nor a change of smoothing can establish that result.
+The old weights are incompatible with the corrected architecture and cannot
+be repaired retrospectively. This audit changes the report builder and README
+only, retains raw data, and starts no training or evaluation; the existing
+four-process Antwerp evaluation continues unchanged. No dependencies or
+ignore rules changed.
+
 ### Antwerp actor-loss decomposition and Hard critic spike audit (2026-10-15)
 
 The user requested a concrete explanation of the current 1M loss curves.
