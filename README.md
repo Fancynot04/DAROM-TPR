@@ -36,6 +36,7 @@ DAROM-TPR/
 │   ├── train_dual_sac.py    # Equal per-ego experience-budget training
 │   ├── evaluate_dual_sac.py # Paired-seed dual-model evaluation
 │   ├── compare_dual.py      # Evaluation table and training curves
+│   ├── sync_dual_wandb.py    # Formal dual-run metric mirror to W&B
 │   └── utils.py             # Shared utilities
 ├── sumo_files/              # SUMO network and route files (Easy/Medium/Hard)
 ├── sumo_new/                # Antwerp network and single-/dual-ego routes
@@ -381,6 +382,20 @@ comparison tool rejects differing training budgets or evaluation seed lists
 and writes JSON, a Markdown table, and per-ego episode-return curves. With
 one training seed per method, score differences remain descriptive; they do
 not establish a reliable algorithm advantage across training seeds.
+
+The optional `src.sync_dual_wandb` mirrors **only** the two 1M-per-ego formal
+training runs and their 200-episode Easy/Medium/Hard evaluations to the
+[`DAROM-TRP` W&B project](https://forge.coreweave.com/wandb/arlikache-anhui-university/DAROM-TRP).
+Start one follower per method with `--method independent` or `--method ctde`.
+It can attach after training has started because it reads `training.jsonl`
+from the beginning, then waits for each completed `eval-<method>-<scenario>.json`.
+It logs per-ego experiences, update counts, losses, temperature, episode
+returns and rolling 10-episode success; evaluation records add per-seed
+outcomes, returns and aggregate rates. Pilot runs, checkpoints, raw traffic
+traces and full report files are not uploaded. The API key can be provided
+through `--api-key-stdin` to avoid writing it to disk or a command argument;
+the follower retains only a run ID and log cursor under ignored
+`tmp/ai/dual-wandb-sync/`. It does not change or restart the trainer.
 
 Train DAROM-GRU from scratch:
 
