@@ -30,9 +30,15 @@ DAROM-TPR/
 │   ├── safety_controller.py # Physics-based safety controller
 │   ├── geometry.py          # Captured traffic geometry and frame/time alignment
 │   ├── diagnostics.py       # Full-episode rule diagnostics and per-step traces
+│   ├── dual_merging.py      # Shared-clock entry/exit environment for phase 0
+│   ├── validate_dual.py     # Fixed-action dual-scene diagnostics
+│   ├── multi_agent_sac.py   # Independent SAC and CTDE-MASAC learners
+│   ├── train_dual_sac.py    # Equal per-ego experience-budget training
+│   ├── evaluate_dual_sac.py # Paired-seed dual-model evaluation
+│   ├── compare_dual.py      # Evaluation table and training curves
 │   └── utils.py             # Shared utilities
 ├── sumo_files/              # SUMO network and route files (Easy/Medium/Hard)
-├── sumo_new/                # Antwerp network and three demand scenarios
+├── sumo_new/                # Antwerp network and single-/dual-ego routes
 ├── tests/                   # Persistent regression and opt-in SUMO checks
 ├── models/
 │   └── GRU-uniform-delay/   # Pretrained DAROM-GRU checkpoint
@@ -175,6 +181,206 @@ demand or network throughput. The existing network speed limit is 13.89 m/s
 and remains unchanged for this stage.
 
 ## Training
+
+### Phase 0: shared-clock entry/exit environment
+
+`src.dual_merging.DualMerging` is an environment-validation implementation,
+not a multi-agent SAC learner. One explicitly named TraCI connection owns the
+scene; `ego_entry` follows O3 → E76 and `ego_exit` follows O1 → D3. The three
+`Antwerp_{easy,medium,hard}_dual.rou.xml` files retain the single-ego background
+flows and replace its one ego trip with these two trips at scheduled time 120 s.
+Thus total demand increases by one vehicle relative to the single-ego files.
+Actual insertion times can differ because of traffic.
+
+The dictionary API is separate from the SB3 single-agent entry points:
+
+```python
+from src.dual_merging import DualMerging
+
+env = DualMerging(seed=579071, scenario="easy", fixed_delay=0)
+try:
+    observations, reset_info = env.reset(seed=579071)
+    while not env.finished:
+        actions = {agent: [0.0, 0.0] for agent in env.active_agents}
+        observations, rewards, terminated, truncated, infos = env.step(actions)
+finally:
+    env.close()
+```
+
+Both commands (and optional delayed-safety checks) use the same pre-step
+state. The scene then advances exactly once by 0.1 s, before collecting either
+agent's transition. `Merging.prepare_step()` and `collect_step()` reuse the
+single-agent action, observation and reward definitions; only scene ownership
+is separated. Each agent retains a `(31, 3)` raw observation and a 134-value
+delayed observation (93 state + 40 action history + 1 delay). The other ego is
+an ordinary neighbor if selected within the existing 50 m / nearest-30 rule.
+No privileged partner state is added to policy inputs.
+
+Lifecycle and accounting rules:
+
+- Reset returns as soon as the first ego enters. Pending agents accept no
+  actions. A later departure returns an initial observation with zero reward
+  and `transition_valid=False`; this is not a replay transition.
+- Only agents active before a step produce valid transitions. A terminal
+  transition is emitted once. Each vehicle has its own 6,000-control-step
+  limit starting at takeover. The scene finishes when neither agent is active
+  or pending; reset is explicit and never triggered by one agent's completion.
+- An ego missing its 1,200 s insertion deadline receives `not_departed` scene
+  status, not a fabricated observation or learning transition.
+- Collided/arrived vehicles follow SUMO removal behavior. Surviving terminated
+  vehicles have acceleration/speed commands released and lane mode restored to
+  SUMO's default 1621; they remain background traffic. Release is also checked
+  after a terminal vehicle returns from a teleport buffer.
+- Teleport retains legacy behavior: it does not itself end the agent, but
+  permanently disqualifies success and stage/arrival bonuses for that episode.
+- Each agent has independent delay queues and RNG streams derived from the
+  scene seed plus agent index. Reset clears both agents' histories. Repeating
+  an explicit reset seed repeats the scene seed and both delay streams.
+- Reward coefficients and existing event precedence are preserved. In
+  particular, arrival takes precedence over the stage bonus on the same step.
+  `reward_components` exposes the scaled contributions for verification.
+  No team reward or reward sharing is introduced.
+
+Run persistent tests and the fixed-action diagnostic matrix using an existing
+Python environment with project dependencies and `SUMO_HOME` configured:
+
+```bash
+python -B -m unittest discover -s tests -p 'test_antwerp_contract.py' -v
+python -B -m tests.test_sumo_integration -v
+python -B -m tests.test_dual_merging -v
+python -B -m src.validate_dual \
+    --output tmp/ai/phase0-dual-ego/zero-delay \
+    --fixed-delay 0
+python -B -m src.validate_dual \
+    --output tmp/ai/phase0-dual-ego/uniform-delay
+```
+
+The diagnostic defaults to all three traffic scenarios and seeds
+579071/579072/579073, with safety off. `--safety` enables the controller;
+`--fixed-delay 0..20` is a diagnostic override with the same 134-value layout.
+Output directories must be new. Per-case files preserve scene hashes, source
+hashes, per-step timestamps, requested/applied actions, physical motion,
+reward components, outcomes and two-ego proximity; W&B is not initialized.
+The policy is fixed `[0, 0]`, so its completion rates are not learning results.
+Use proximity and joint-active time to establish whether the current routes
+and departure schedule actually create interactions before claiming a
+cooperative-learning problem. These diagnostics do not establish convergence
+or justify proceeding directly to CTDE.
+
+Local validation on SUMO 1.20.0 passed 32 existing contract tests, 3 existing
+SUMO integration tests and 15 dual-environment tests. A complete Easy
+seed-579071 fixed-action, zero-delay pilot ran 5,134 scene steps: entry ended
+at step 4,134 and exit continued for another 1,000 steps. Both raw arrivals
+followed teleports and were correctly classified as failures, with no stage
+bonus. The two active egos were within 50 m for 87 pre-step samples (8.7 s);
+minimum sampled distance was 9.61 m. This one case is wiring/interaction
+evidence, not a learned-policy result. Its artifacts are under
+`tmp/ai/phase0-dual-ego/local-easy-zero-v2/`. Remote SUMO 1.18.0 has passed
+32 existing contract tests, 3 existing SUMO integration tests and 15 new
+dual-environment tests after deployment. The 18 remote full-scene diagnostics
+(3 scenarios × 3 seeds × fixed zero versus uniform 0–20 step delay) completed
+with the same `[0, 0]` action and safety off. An independent pass over every
+step checked the 0.1 s clock, valid transition counts, one terminal per ego,
+reward sums, at-most-once stage payments, teleport disqualification, packet
+timestamps and unchanged source hashes. All 9 delay pairs had identical
+physical traces, as expected when a fixed action does not consume observations.
+This is a wiring/control check, not a delay-robustness claim.
+
+In each delay profile, 2/9 entry egos achieved uninterrupted arrival; all 9
+exit egos reached the destination only after teleport and therefore had 0/9
+task success. Seven entry egos and all nine exit egos teleported. The exit
+stage bonus was never paid in these fixed-action runs; the entry stage bonus
+was paid once in each of the two successful entry cases. These are not policy
+scores. Both egos were simultaneously within 50 m for 6.8–20.0 s per case,
+with minimum sampled separation 6.40–16.00 m. Proximity alone does not prove
+that either policy input selected the other ego among its nearest 30 neighbors,
+or that coordination would help. Remote traces, summary and source hashes are
+under `tmp/ai/phase0-dual-ego/remote-{zero,uniform}-v1/`; the read-only audit
+result is retained locally under
+`tmp/ai/phase0-dual-ego/remote-audit-v1.json`.
+After the matrix, a completed-scene reset test found that the cached `reward`
+field should be cleared during reset. The one-line initialization change
+passed all 50 remote tests. Repeating Easy seed 579071 at zero delay with
+the final code produced byte-identical per-step trace and case summary to
+the earlier run (4,863 scene steps); its artifacts are in
+`tmp/ai/phase0-dual-ego/remote-zero-reset-v2/`. The 18-case matrix preserves
+the pre-change source hashes, while this replay checks the final reset code's
+observable behavior for one full case.
+
+### Dual-ego Independent SAC and CTDE-MASAC comparison
+
+Both methods use the phase-0 shared-clock environment, uniform 0–20-step
+delay, safety off, the same individual task rewards, two decentralized
+`paper_raw` GRU actors, and one valid-experience budget per ego. Each actor
+receives only its own 134-value delayed observation and emits its own two-value
+action. The normalized SAC action in `[-1, 1]` is multiplied by 5 before
+SUMO, matching the existing `[-5, 5]` environment action space. Both methods
+use 256-feature GRU fusion, 256×256 actor/Q MLPs, batch size 512,
+learning rate 3e-5, discount 0.99, target mixing 0.005, automatic entropy
+temperature with target entropy -2, and 100 random initial actions per ego.
+One eligible gradient update is performed per new valid experience for that
+ego. The same traffic seed schedule (`run seed + scene index`) is used in both
+runs. Training stops when **each** ego reaches its specified experience count;
+an ego that reaches its quota continues to act but its learner stops updating.
+
+`independent` has two replay buffers and separate twin Q networks. The
+two learners update after their own valid transitions, with no shared gradient
+barrier; both cars still advance in one SUMO step. `ctde` records aligned
+joint transitions. Its single twin-Q module has one reward/Q head per ego and
+reads the two 134-value observations, two two-value actions, and activity
+masks. It updates the two reward heads in one coordinated critic step. Each
+actor update samples its own valid joint transitions and differentiates only
+through its own action; the partner actor's action is detached. Bootstrap is
+disabled at either termination or the 6,000-step task timeout. Missing or
+completed egos are zero-padded and masked, so one ego can keep learning after
+the other finishes. No shared reward is introduced. Centralized information
+is used only for critic training; checkpoint evaluation loads the two actors.
+
+Run a 50k-per-ego Easy pilot in two new, separate output directories:
+
+```bash
+python -B -m src.train_dual_sac --mode independent \
+  --experience-target 50000 --seed 42 --scenario easy \
+  --run-name independent-easy-seed42-50k --device cpu
+python -B -m src.train_dual_sac --mode ctde \
+  --experience-target 50000 --seed 42 --scenario easy \
+  --run-name ctde-easy-seed42-50k --device cpu
+```
+
+Outputs default to the ignored `models_experiments/dual-marl/<run-name>/`.
+Each run records `config.json` with scene/code hashes, `training.jsonl` with
+per-ego episodes, returns, success and logged losses every 1,000 scene steps,
+milestone models, `final.pt`, and `summary.json` with exact experience and
+gradient-update counts. Output names cannot be reused. Checkpoints hold model
+and optimizer weights for evaluation, but not replay data or SUMO state; they
+are not an exact mid-episode training resume. A subsequent 1M-per-ego run
+therefore starts from scratch in a new directory under the same fixed setup.
+
+With trained final models, evaluate each under the same 200 seeds in each
+traffic scenario (the command below shows Easy), then compare paired reports:
+
+```bash
+python -B -m src.evaluate_dual_sac \
+  models_experiments/dual-marl/independent-easy-seed42-1m/final.pt \
+  --scenario easy --episodes 200 --seed-start 700001 \
+  --output models_experiments/dual-marl/eval-independent-easy.json
+python -B -m src.evaluate_dual_sac \
+  models_experiments/dual-marl/ctde-easy-seed42-1m/final.pt \
+  --scenario easy --episodes 200 --seed-start 700001 \
+  --output models_experiments/dual-marl/eval-ctde-easy.json
+python -B -m src.compare_dual \
+  models_experiments/dual-marl/eval-independent-easy.json \
+  models_experiments/dual-marl/eval-ctde-easy.json \
+  --output models_experiments/dual-marl/comparison-easy.json
+```
+
+Evaluation uses deterministic actions, uniform 0–20-step delay, safety off,
+and strict no-teleport success. Reports include entry/exit and joint success,
+per-ego and scene collision, returns, and Wilson intervals for success. The
+comparison tool rejects differing training budgets or evaluation seed lists
+and writes JSON, a Markdown table, and per-ego episode-return curves. With
+one training seed per method, score differences remain descriptive; they do
+not establish a reliable algorithm advantage across training seeds.
 
 Train DAROM-GRU from scratch:
 

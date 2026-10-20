@@ -82,9 +82,14 @@ class DelayWrapper(ObservationWrapper):
         self.obs = None
 
     def reset(self, **kwargs):
-        self.obs, info = self.env.reset(**kwargs)
-        if kwargs.get('seed') is not None:
-            self._delay_seed = kwargs['seed']
+        obs, info = self.env.reset(**kwargs)
+        return self.reset_history(obs, info, seed=kwargs.get("seed"))
+
+    def reset_history(self, obs, info, seed=None):
+        """Initialize one vehicle's buffers without resetting a shared scene."""
+        self.obs = obs
+        if seed is not None:
+            self._delay_seed = seed
             self._delay_episode = 0
         else:
             self._delay_episode += 1

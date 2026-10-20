@@ -30,21 +30,22 @@ def lane_centerline(ego_pos, ego_angle, shape):
     return None if best is None else best[1:]
 
 
-def target_lane_line(ego_id, direction):
+def target_lane_line(ego_id, direction, connection=None):
     """Return the selected lane centerline in the ego's current local frame."""
+    connection = traci if connection is None else connection
     if direction:
-        edge = traci.vehicle.getRoadID(ego_id)
+        edge = connection.vehicle.getRoadID(ego_id)
         if edge not in LANE_CHANGE_EDGES:
             return None
-        target = traci.vehicle.getLaneIndex(ego_id) + direction
-        if not 0 <= target < traci.edge.getLaneNumber(edge):
+        target = connection.vehicle.getLaneIndex(ego_id) + direction
+        if not 0 <= target < connection.edge.getLaneNumber(edge):
             return None
         lane_id = f'{edge}_{target}'
     else:
-        lane_id = traci.vehicle.getLaneID(ego_id)
-    return lane_centerline(traci.vehicle.getPosition(ego_id),
-                           traci.vehicle.getAngle(ego_id),
-                           traci.lane.getShape(lane_id))
+        lane_id = connection.vehicle.getLaneID(ego_id)
+    return lane_centerline(connection.vehicle.getPosition(ego_id),
+                           connection.vehicle.getAngle(ego_id),
+                           connection.lane.getShape(lane_id))
 
 
 def safetyCheck(action, state, delayed, mode, target_line=None):
