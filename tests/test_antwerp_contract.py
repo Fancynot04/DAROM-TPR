@@ -3,18 +3,158 @@
 import unittest
 import io
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+import xml.etree.ElementTree as ET
 
 import gymnasium as gym
 import numpy as np
+import torch
 
 from evaluate_sac_delay import (evaluate, evaluate_runs, parse_args as parse_eval_args,
-                                summarize_runs, validate_checkpoint_setup, validate_seed_ranges)
+                                summarize_runs, validate_checkpoint_setup, validate_seed_ranges,
+                                checkpoint_gru_input_mode)
+from src.delay_encoder import DelayAwareGRUEncoder
 from src.geometry import TrafficSnapshot, align_delayed_neighbors
-from src.merging import ANTWERP_ENV_VERSION, Merging
+from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
 from src.safety_controller import safetyCheck
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
+
+
+class GRUInputContractTests(unittest.TestCase):
+    def test_raw_and_legacy_modes_preserve_their_distinct_input_contracts(self):
+        class CaptureGRU(torch.nn.Module):
+            def forward(self, actions):
+                self.actions = actions.detach().clone()
+                return None, torch.zeros(1, actions.shape[0], 64)
+
+        sample = torch.arange(134, dtype=torch.float32).unsqueeze(0)
+        space = gym.spaces.Box(-5000, 5000, shape=(134,), dtype=np.float32)
+        for mode in DelayAwareGRUEncoder.INPUT_MODES:
+            with self.subTest(mode=mode):
+                encoder = DelayAwareGRUEncoder(space, act_dim=2, hist_len=20,
+                                               delay_dim=1, input_mode=mode)
+                encoder.obs_encoder = torch.nn.Identity()
+                encoder.gru = CaptureGRU()
+                encoder.fusion = torch.nn.Identity()
+                output = encoder(sample)
+                expected_actions = sample[:, 93:133].reshape(1, 20, 2)
+                if mode == 'antwerp_scaled_reversed':
+                    torch.testing.assert_close(output[:, :93],
+                                               sample[:, :93] / encoder.observation_scale)
+                    torch.testing.assert_close(encoder.gru.actions,
+                                               expected_actions.flip(1) / 5.0)
+                    torch.testing.assert_close(output[:, -1:], sample[:, -1:] / 20)
+                else:
+                    torch.testing.assert_close(output[:, :93], sample[:, :93])
+                    torch.testing.assert_close(encoder.gru.actions, expected_actions)
+                    torch.testing.assert_close(output[:, -1:], sample[:, -1:])
+
+    def test_checkpoints_without_mode_keep_legacy_processing(self):
+        old = SimpleNamespace(policy_kwargs={
+            'features_extractor_class': DelayAwareGRUEncoder,
+            'features_extractor_kwargs': {'act_dim': 2, 'hist_len': 20},
+        })
+        self.assertEqual(checkpoint_gru_input_mode(old), 'antwerp_scaled_reversed')
+        old.policy_kwargs['features_extractor_kwargs']['input_mode'] = 'paper_raw'
+        self.assertEqual(checkpoint_gru_input_mode(old), 'paper_raw')
+
+
+class SeparateEgoTaskTests(unittest.TestCase):
+    def test_each_route_changes_only_the_ego_trip(self):
+        routes = Path(__file__).resolve().parents[1] / 'sumo_new'
+        for scenario in ('easy', 'medium', 'hard'):
+            original = ET.parse(routes / f'Antwerp_{scenario}.rou.xml').getroot()
+            background = [(node.tag, node.attrib) for node in original if node.get('id') != 'ego']
+            for task, (origin, destination, _) in ANTWERP_TASKS.items():
+                if task == 'legacy_o3_d1':
+                    continue
+                with self.subTest(scenario=scenario, task=task):
+                    variant = ET.parse(routes / f'Antwerp_{scenario}_{task}.rou.xml').getroot()
+                    self.assertEqual([(node.tag, node.attrib) for node in variant
+                                      if node.get('id') != 'ego'], background)
+                    ego = variant.find("trip[@id='ego']")
+                    self.assertEqual((ego.get('from'), ego.get('to')), (origin, destination))
+
+    def test_exit_stage_bonus_paid_once_and_arrival_remains_separate(self):
+        env = Merging(seed=1, task='exit')
+        env.ego_id = 'ego'
+        env.ego_on_road = True
+        env.parsed_action = [0, 0]
+        env.last_acc = 0
+        env.counter = 0
+        env.state = np.zeros((31, 3), dtype=np.float32)
+        env.observation = env.state.copy()
+        env.stage_reached = True
+        env.given_merge_reward = False
+        fake = Mock()
+        fake.simulation.getCollidingVehiclesIDList.return_value = ()
+        fake.simulation.getArrivedIDList.return_value = ()
+        fake.simulation.getEmergencyStoppingVehiclesIDList.return_value = ()
+        with patch('src.merging.traci', fake), patch('src.merging.safe_gap', return_value=(True, True)):
+            first = env.getReward()
+            self.assertAlmostEqual(env.last_stage_reward, 50)
+            second = env.getReward()
+            self.assertAlmostEqual(first - second, 50)
+            self.assertEqual(env.last_stage_reward, 0)
+            fake.simulation.getArrivedIDList.return_value = ('ego',)
+            arrived = env.getReward()
+            self.assertAlmostEqual(arrived - second, 50)
+
+    def test_exit_stage_requires_entering_d3_during_step(self):
+        env = Merging(seed=1, task='exit')
+        env.ego_id = 'ego'
+        env.ego_on_road = True
+        env.counter = 0
+        env.last_acc = 0
+        env.given_merge_reward = False
+        env.state = np.zeros((31, 3), dtype=np.float32)
+        env.observation = env.state.copy()
+        fake = Mock()
+        fake.vehicle.getIDList.return_value = ('ego',)
+        fake.vehicle.getSpeed.return_value = 10
+        fake.vehicle.getRoadID.side_effect = ('E77', 'E77', 'E77', 'D3', 'D3', 'D3')
+        fake.vehicle.getLaneID.side_effect = ('E77_0', 'E77_0', 'E77_0', 'D3_0',
+                                              'D3_0', 'D3_0')
+        for name in ('getStartingTeleportIDList', 'getEndingTeleportIDList',
+                     'getCollidingVehiclesIDList', 'getArrivedIDList',
+                     'getEmergencyStoppingVehiclesIDList'):
+            getattr(fake.simulation, name).return_value = ()
+        with patch('src.merging.traci', fake), patch('src.merging.safe_gap', return_value=(True, True)), \
+                patch.object(env, '_get_obs', return_value=env.state.copy()):
+            before = env.step([0, 0])[4]
+            at_exit = env.step([0, 0])[4]
+            later = env.step([0, 0])[4]
+        self.assertFalse(before['stage_reached'])
+        self.assertEqual(before['stage_reward'], 0)
+        self.assertTrue(at_exit['stage_reached'])
+        self.assertFalse(at_exit['merged'])
+        self.assertEqual(at_exit['stage_reward'], 50)
+        self.assertEqual(later['stage_reward'], 0)
+
+    def test_exit_checkpoint_cannot_be_evaluated_as_entry(self):
+        model = SimpleNamespace(antwerp_env_version=ANTWERP_ENV_VERSION,
+                                antwerp_task='exit')
+        self.assertEqual(parse_eval_args(['model.zip', '--task', 'exit']).task, 'exit')
+        with self.assertRaisesRegex(ValueError, 'Checkpoint task'):
+            validate_checkpoint_setup(model, 'full', False, task='entry')
+        self.assertFalse(validate_checkpoint_setup(model, 'full', False, task='exit')
+                         ['evaluation_safety'])
+
+    def test_exit_timeout_is_reported_as_exit_not_merge(self):
+        model = Mock()
+        model.predict.return_value = (np.zeros(2), None)
+        env = Mock()
+        env.reset.return_value = (np.zeros(134), {'task_id': 'exit'})
+        env.step.return_value = (None, -10, False, True,
+                                 {'message': 'Max Steps', 'ego_teleported': False,
+                                  'stage_reached': True, 'merged': False})
+        result = evaluate(model, env, 1, 1, task='exit')
+        self.assertEqual(result['Exit Reached Timeout'], 1)
+        self.assertNotIn('Merged Timeout', result)
+        self.assertNotIn('no_merge_rate', result)
+        self.assertEqual(result['timeout_rate'], 100)
 
 
 def snapshot(time=0.0, ego=(0, 0), angle=90, positions=((5, 3.2),),
@@ -250,9 +390,14 @@ class EvaluationProtocolTests(unittest.TestCase):
         with patch('sys.argv', ['train_sac_delay.py']):
             args = parse_args()
         self.assertEqual(args.total_timesteps, 7_000_000)
+        self.assertEqual(args.gru_input_mode, 'paper_raw')
+        self.assertEqual(args.checkpoint_freq, 2_000_000)
         self.assertFalse(args.use_safety)
+        self.assertEqual(args.task, 'legacy_o3_d1')
         with patch('sys.argv', ['train_sac_delay.py', '--total_timesteps', '20000']):
             self.assertEqual(parse_args().total_timesteps, 20000)
+        with patch('sys.argv', ['train_sac_delay.py', '--task', 'exit']):
+            self.assertEqual(parse_args().task, 'exit')
 
     def test_unknown_outcome_is_not_silently_excluded_from_rates(self):
         env = Mock()

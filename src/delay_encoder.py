@@ -63,9 +63,16 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
     obs = [o_t, action_history (T * act_dim), delay]
     We reshape action_history -> (batch, T, act_dim) and process with GRU.
     """
+    INPUT_MODES = ('paper_raw', 'antwerp_scaled_reversed')
+
     def __init__(self, observation_space, act_dim, hist_len, delay_dim,
-                 features_dim=256, gru_hidden=64):
+                 features_dim=256, gru_hidden=64,
+                 input_mode='antwerp_scaled_reversed'):
         super().__init__(observation_space, features_dim)
+
+        if input_mode not in self.INPUT_MODES:
+            raise ValueError(f'Unknown GRU input mode: {input_mode}')
+        self.input_mode = input_mode
 
         flat_obs = observation_space.shape[0]
 
@@ -130,18 +137,22 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
 
         B = obs.size(0)
 
-        o_t = obs[:, :self.obs_dim] / self.observation_scale
+        o_t = obs[:, :self.obs_dim]
 
         a_hist_flat = obs[:, self.obs_dim : self.obs_dim + self.act_hist_dim]
-        delay = obs[:, -self.delay_dim:] / self.hist_len
-
-        # ---- Encode obs ----
-        o_emb = self.obs_encoder(o_t)
+        delay = obs[:, -self.delay_dim:]
 
         # ---- Prepare action history ----
         # reshape: (B, hist_len, act_dim)
-        # DelayWrapper stores newest first; GRU should finish with the latest action.
-        a_hist = a_hist_flat.reshape(B, self.hist_len, self.act_dim).flip(1) / 5.0
+        a_hist = a_hist_flat.reshape(B, self.hist_len, self.act_dim)
+        if self.input_mode == 'antwerp_scaled_reversed':
+            # Keep the input contract of Antwerp checkpoints made before this migration.
+            o_t = o_t / self.observation_scale
+            delay = delay / self.hist_len
+            a_hist = a_hist.flip(1) / 5.0
+
+        # ---- Encode obs ----
+        o_emb = self.obs_encoder(o_t)
 
         # ---- GRU ----
         _, h_last = self.gru(a_hist)   # h_last: (1, B, hidden)
@@ -460,4 +471,3 @@ class TinyTransformerEncoder(BaseFeaturesExtractor):
 
         fused = th.cat([entity_summary, action_emb, delay_emb], dim=-1)
         return self.out(fused)
-

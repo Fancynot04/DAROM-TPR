@@ -2,7 +2,6 @@
 import os
 import time
 import argparse
-import warnings
 import json
 import torch
 from typing import Optional
@@ -19,7 +18,7 @@ from src.delay_encoder import DelayAwareEncoder, DelayAwareGRUEncoder, TinyTrans
 import wandb
 from wandb.integration.sb3 import WandbCallback
 
-from src.merging import ANTWERP_ENV_VERSION, Merging
+from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
 from src.wrapper import ABLATION_MODES, DelayWrapper
 
 class EpisodeRewardCallback(BaseCallback):
@@ -56,6 +55,8 @@ class EpisodeRewardCallback(BaseCallback):
             info = self.locals['infos'][0]
             outcome = info.get('message')
             merged = bool(info.get('merged'))
+            stage_reached = bool(info.get('stage_reached', merged))
+            exit_task = info.get('stage_name') == 'exit'
             
             # Log to wandb
             metrics = {
@@ -69,9 +70,14 @@ class EpisodeRewardCallback(BaseCallback):
                 'train/teleported_arrival': int(outcome == 'Arrived' and info['ego_teleported']),
                 'train/collision': int(outcome == 'Collision'),
                 'train/emergency_stopping': int(outcome == 'Emergency Stopping'),
-                'train/no_merge_timeout': int(outcome == 'Max Steps' and not merged),
-                'train/merged_timeout': int(outcome == 'Max Steps' and merged),
+                'train/no_stage_timeout': int(outcome == 'Max Steps' and not stage_reached),
+                'train/stage_reached_timeout': int(outcome == 'Max Steps' and stage_reached),
+                'train/stage_reached': int(stage_reached),
+                'train/stage_reward_paid': int(info.get('stage_reward_paid', False)),
             }
+            if not exit_task:
+                metrics['train/no_merge_timeout'] = int(outcome == 'Max Steps' and not merged)
+                metrics['train/merged_timeout'] = int(outcome == 'Max Steps' and merged)
             wandb.log(metrics)
             self._write({'event': 'episode', 'steps': self.num_timesteps,
                          'outcome': outcome, **{k: float(v) for k, v in metrics.items()}})
@@ -127,9 +133,9 @@ def load_model(path: str, env: gym.Env) -> SAC:
     return SAC.load(path, env=env)
 
 def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
-             ablation='full'):
+             ablation='full', task='legacy_o3_d1'):
     env = DelayWrapper(
-        Merging(seed=seed, scenario=scenario, render_mode=render_mode),
+        Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation,
     )
@@ -145,7 +151,8 @@ def parse_args():
     parser.add_argument('--radius', type=int, default=50)
     parser.add_argument('--total_timesteps', type=int, default=7_000_000,
                         help='Training steps; defaults to the paper v5 budget')
-    parser.add_argument('--checkpoint_freq', type=int, default=100_000)
+    parser.add_argument('--checkpoint_freq', type=int, default=2_000_000,
+                        help='Model milestone interval; 2M follows the D long-run schedule')
     parser.add_argument('--save_replay_buffer', action='store_true',
                         help='Save replay buffers alongside periodic and final models')
     parser.add_argument('--torch_threads', type=int, default=None)
@@ -155,16 +162,23 @@ def parse_args():
     parser.add_argument('--render_mode', type=str, default=None)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--scenario', choices=['easy', 'medium', 'hard'], default='medium')
+    parser.add_argument('--task', choices=tuple(ANTWERP_TASKS), default='legacy_o3_d1',
+                        help='Single-ego task; legacy default preserves existing O3-to-D1 runs')
     parser.add_argument('--safety', dest='use_safety', action='store_true')
     parser.add_argument('--save_dir', type=str, default='models_experiments')
     parser.add_argument('--load_path', type=str, default=None)
     parser.add_argument('--wandb_mode', type=str, default='online', choices=['online', 'offline', 'disabled'])
     parser.add_argument('--encoder_mode', type=str, default='GRU', choices=['Transformer', 'GRU', 'MLP', 'None'])
+    parser.add_argument('--gru_input_mode', choices=DelayAwareGRUEncoder.INPUT_MODES,
+                        default='paper_raw',
+                        help='New GRU runs use unscaled wrapper inputs; the Antwerp legacy mode is for old checkpoints')
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
     if args.ablation != 'full' and args.encoder_mode != 'GRU':
         parser.error('Table IV ablations require --encoder_mode GRU')
+    if args.encoder_mode != 'GRU' and args.gru_input_mode != 'paper_raw':
+        parser.error('--gru_input_mode only applies to --encoder_mode GRU')
     if args.checkpoint_freq < 1 or (args.torch_threads is not None and args.torch_threads < 1):
         parser.error('checkpoint_freq and torch_threads must be positive')
     return args
@@ -178,10 +192,24 @@ def main():
     if args.run_name is None:
         args.run_name = f"SAC-merging-delay-wrapper-{time.strftime('%Y%m%d-%H%M%S')}"
 
+    model_path = os.path.join(args.save_dir, f"{args.run_name}.zip")
+    checkpoint_dir = os.path.join(args.save_dir, args.run_name)
+    tensorboard_dir = os.path.join(args.log_dir, args.run_name)
+    for path in (model_path, checkpoint_dir, tensorboard_dir):
+        if os.path.exists(path):
+            raise FileExistsError(f'Run output already exists: {path}; choose a new --run_name')
+
     if args.torch_threads is not None:
         torch.set_num_threads(args.torch_threads)
     ensure_dirs(args.log_dir)
 
+    max_delay = 20
+    sac_parameters = dict(
+        learning_rate=3e-5, batch_size=512, buffer_size=1_000_000,
+        learning_starts=100, gamma=0.99, tau=0.005, train_freq=1,
+        gradient_steps=1, target_update_interval=1, ent_coef='auto',
+        target_entropy='auto', use_sde=False,
+    )
     config = dict(
         algo='SAC',
         radius=args.radius,
@@ -189,9 +217,16 @@ def main():
         total_timesteps=args.total_timesteps,
         policy='MlpPolicy',
         encoder_mode=args.encoder_mode,
+        gru_input_mode=args.gru_input_mode if args.encoder_mode == 'GRU' else None,
+        max_delay=max_delay,
+        gru_hidden=64 if args.encoder_mode == 'GRU' else None,
+        features_dim=256 if args.encoder_mode == 'GRU' else None,
+        net_arch=[256, 256],
+        sac=sac_parameters,
         ablation=args.ablation,
         delay_mode=args.delay_mode,
         scenario=args.scenario,
+        task=args.task,
         use_safety=args.use_safety,
         training_safety=args.use_safety,
         antwerp_env_version=ANTWERP_ENV_VERSION,
@@ -200,15 +235,10 @@ def main():
         checkpoint_freq=args.checkpoint_freq,
         save_replay_buffer=args.save_replay_buffer,
     )
-    run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
-                     mode=args.wandb_mode, dir=args.log_dir, sync_tensorboard=True,
-                     save_code=True, resume=args.resume, id=args.run_id)
-    run.log_code('src')
     # Create env
-    max_delay = 20
     def _fn():
         return make_env(args.seed, args.scenario, args.delay_mode, max_delay,
-                        args.use_safety, args.render_mode, args.ablation)
+                        args.use_safety, args.render_mode, args.ablation, args.task)
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -236,7 +266,7 @@ def main():
         net_arch=[256, 256],      # actor/critic MLP after transformer
     )
     elif encoder_mode == 'GRU':
-        policy_kwargs = dict(features_extractor_class=DelayAwareGRUEncoder, features_extractor_kwargs=dict(act_dim=act_dim, hist_len=delay_env.max_delay, delay_dim=1, features_dim=256, gru_hidden=64))
+        policy_kwargs = dict(features_extractor_class=DelayAwareGRUEncoder, features_extractor_kwargs=dict(act_dim=act_dim, hist_len=delay_env.max_delay, delay_dim=1, features_dim=256, gru_hidden=64, input_mode=args.gru_input_mode), net_arch=[256, 256])
     elif encoder_mode == 'MLP':
         policy_kwargs = dict(
         features_extractor_class=DelayAwareEncoder,
@@ -245,17 +275,19 @@ def main():
     else:
         policy_kwargs = dict()
 
-    model = SAC('MlpPolicy', vec_env, seed=args.seed, verbose=1, tensorboard_log=os.path.join(args.log_dir, args.run_name), device=args.device, learning_rate=3e-5, policy_kwargs=policy_kwargs, batch_size=512)
+    model = SAC('MlpPolicy', vec_env, seed=args.seed, verbose=1, tensorboard_log=os.path.join(args.log_dir, args.run_name), device=args.device, policy_kwargs=policy_kwargs, **sac_parameters)
     
     
     
 
     # Optionally load existing weights
-    if args.load_path and os.path.exists(args.load_path):
+    if args.load_path:
+        if not os.path.exists(args.load_path):
+            raise FileNotFoundError(f'Checkpoint does not exist: {args.load_path}')
         try:
             loaded_model = SAC.load(args.load_path, env=vec_env)
         except Exception as e:
-            warnings.warn(f"Failed to load model at {args.load_path}: {e}")
+            raise RuntimeError(f'Failed to load checkpoint at {args.load_path}') from e
         else:
             if getattr(loaded_model, 'antwerp_env_version', None) != ANTWERP_ENV_VERSION:
                 raise ValueError('Loaded model uses an older Antwerp observation/reward contract; retrain it')
@@ -265,17 +297,33 @@ def main():
             if (hasattr(loaded_model, 'training_safety') and
                     loaded_model.training_safety != args.use_safety):
                 raise ValueError('Loaded model safety does not match --safety')
+            loaded_task = getattr(loaded_model, 'antwerp_task', 'legacy_o3_d1')
+            if loaded_task != args.task:
+                raise ValueError(f'Loaded model task is {loaded_task!r}; requested {args.task!r}')
+            if args.encoder_mode == 'GRU':
+                if loaded_model.policy_kwargs.get('features_extractor_class') is not DelayAwareGRUEncoder:
+                    raise ValueError('Loaded model does not use the DAROM-GRU encoder')
+                loaded_mode = loaded_model.policy_kwargs.get('features_extractor_kwargs', {}).get(
+                    'input_mode', 'antwerp_scaled_reversed')
+                if loaded_mode != args.gru_input_mode:
+                    raise ValueError(f'Loaded model GRU input mode is {loaded_mode!r}; '
+                                     f'requested {args.gru_input_mode!r}')
             model = loaded_model
             print(f"Loaded model from {args.load_path}")
 
     model.ablation = args.ablation
     model.antwerp_env_version = ANTWERP_ENV_VERSION
+    model.antwerp_task = args.task
     model.training_safety = args.use_safety
+    model.gru_input_mode = args.gru_input_mode if args.encoder_mode == 'GRU' else None
     model.experiment_id = args.run_name
 
+    run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
+                     mode=args.wandb_mode, dir=args.log_dir, sync_tensorboard=True,
+                     save_code=True, resume=args.resume, id=args.run_id)
+    run.log_code('src')
+
     ensure_dirs(args.save_dir)
-    model_path = os.path.join(args.save_dir, f"{args.run_name}.zip")
-    checkpoint_dir = os.path.join(args.save_dir, args.run_name)
 
     # Create callbacks
     episode_callback = EpisodeRewardCallback(log_path=args.episode_log)
@@ -286,8 +334,6 @@ def main():
     )
     wandb_callback = WandbCallback(
         gradient_save_freq=1000,
-        model_save_path=checkpoint_dir,
-        model_save_freq=5000,
         verbose=2,
     )
 

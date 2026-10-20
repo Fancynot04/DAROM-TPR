@@ -183,8 +183,9 @@ python train_sac_delay.py \
     --scenario hard \
     --delay_mode uniform \
     --encoder_mode GRU \
+    --gru_input_mode paper_raw \
     --total_timesteps 7000000 \
-    --run_name GRU-hard-uniform-delay \
+    --run_name GRU-hard-paper-raw-new-run \
     --save_dir models_experiments/antwerp-hard \
     --wandb_mode disabled
 ```
@@ -193,9 +194,85 @@ Use the same scenario when evaluating a checkpoint in a separate process.
 The safety controller is disabled by default; pass `--safety` to enable it.
 DAROM-GRU is the default encoder for new training runs.
 The pretrained checkpoint under `models/` is kept unchanged.
-The Antwerp GRU scales route progress and local neighbor coordinates before
-encoding, reads masked actions from oldest to newest, and outputs 256 features.
-Models trained with the earlier GRU input convention should be retrained.
+
+Two additional, **separate single-ego tasks** are available with explicit
+`--task entry` (O3 → E76) and `--task exit` (O1 → D3). The default
+`--task legacy_o3_d1` keeps previous O3 → D1 behavior and old checkpoint
+interpretation. For each density, task routes copy the original background
+flows unchanged and replace only the scheduled ego trip; their route files
+are stored under `sumo_new/`. Use a distinct run name and output path per task:
+
+```bash
+python train_sac_delay.py --task entry --run_name entry-hard-new --scenario hard --wandb_mode disabled
+python train_sac_delay.py --task exit --run_name exit-hard-new --scenario hard --wandb_mode disabled
+python evaluate_sac_delay.py models_experiments/exit-hard-new.zip --task exit --scenario hard
+```
+
+Both use the same SAC/GRU configuration and reward formula. The one-time
+stage bonus remains +500 before the final ×0.1 scaling: entry pays on joining
+the mainline, exit pays on first entering D3 from E77. Completing the task
+route separately pays the existing +500 arrival bonus. Collision, teleport,
+time limit and other reward coefficients retain their existing behavior.
+The exit report labels timeouts by exit-stage completion; `timeout_rate` counts
+all Max Steps. The historical `no_merge_rate` alias is retained for the legacy
+and entry tasks but omitted from exit reports, where it has no merge meaning.
+Checkpoints
+store `antwerp_task`; training resume and independent evaluation reject a
+different task, and missing task metadata identifies legacy O3 → D1 models.
+These task routes passed static network-connectivity and unit checks. Twelve
+SUMO probes (both tasks × three densities × seeds 579071/579072) each started
+the scheduled ego and completed ten steps with 134-value wrapper observations.
+An Easy fixed-action entry episode (seed 579071) arrived after 1,913 steps,
+without teleport, and paid the merge stage bonus once. A fixed-action exit
+episode arrived only after a wrong-lane teleport, correctly earning no exit
+stage bonus or uninterrupted success. A **diagnostic rule** requesting the
+D3-connected lane reached D3 without teleport and paid the exit stage bonus
+once in Easy seed 579071 (2,949 steps) and Medium seed 579071 (2,463 steps);
+Easy seed 579072 collided during a lane change (869 steps). The rule uses live
+lane information and is not a trained policy or a performance baseline.
+
+Both tasks also completed separate 120-step CPU SAC/GRU smoke runs with W&B
+disabled; their saved checkpoints loaded with the correct task ID, 120 steps,
+and `paper_raw` input mode. A one-episode independent evaluation of the exit
+smoke checkpoint (Easy seed 680001) recorded a teleported raw arrival and 0%
+uninterrupted success. These small runs verify wiring, not learning or
+convergence. Full training and sufficiently repeated held-out evaluation
+remain pending. Do not compare cumulative returns directly across routes of
+different lengths.
+
+Running the two independent training processes at once lets each policy learn
+and finish at its own pace. For these separate models, a simultaneous start
+and joint final report are experiment scheduling, while independent starts
+and per-task reports are independent scheduling. Neither changes the SAC
+update rule. Do not stop the faster learner at step barriers: this would add
+idle time without sharing information. A genuinely shared synchronous/async
+learner would be a separate algorithm decision. Concurrent runs need separate
+output names and enough compute and memory for two SUMO/SAC processes; the
+smoke runs above were sequential and do not benchmark concurrent throughput.
+
+New Antwerp GRU runs default to `paper_raw`: the 93 state values, 20 two-value
+actions (newest first as emitted by `DelayWrapper`), and delay scalar reach the
+encoder without fixed scaling or action reversal. This matches the corrected
+original-scene D encoder's input processing, while retaining the paper's
+64-unit GRU and 256-feature fusion output. The paper does not specify fixed
+input scaling or a chronological GRU buffer order; `paper_raw` names the
+reproduced code convention, not a claim of exact paper implementation.
+Existing Antwerp checkpoints retain their scaled, reversed input contract:
+their saved encoder arguments omit `input_mode`, so loading still selects
+`antwerp_scaled_reversed`. Use that mode explicitly to continue one of those
+checkpoints. The training entry rejects a mismatched `--gru_input_mode` and
+existing run output paths; use a fresh run name for the new baseline. Evaluation
+infers and records the checkpoint's input mode. Neither checkpoint weights nor
+historical curves are changed by this selection.
+
+The paper gives a 7M training budget but no model-save cadence. New runs use
+the D long-run cadence instead: numbered models at 2M, 4M and 6M steps, plus
+the final model at 7M. W&B no longer saves another model every 5,000 steps;
+episode, TensorBoard and gradient logging remain configured as before.
+`--checkpoint_freq` can override the interval for a short pilot. Replay buffers
+remain opt-in through `--save_replay_buffer`; a previous Antwerp 1M buffer was
+about 1.1 GB, and these checkpoints alone do not implement the D group's
+deterministic mid-episode restore. Give each run a new output name.
 
 For a controlled Table IV input ablation, keep `--encoder_mode GRU` and choose
 `--ablation` from `full`, `delayed_state_only`, `delayed_state_delay`,
@@ -213,7 +290,8 @@ Choose one training-safety policy and one evaluation-safety policy across all
 five configurations; those two policies need not be equal. Pass the matching
 `--ablation` value to evaluation. Both entry points default to `full` with
 safety off; use explicit evaluation `--safety` or `--no-safety` in experiments.
-Checkpoints store `training_safety`, `ablation` and `antwerp_env_version=2`.
+New checkpoints also store `gru_input_mode`, alongside `training_safety`,
+`ablation` and `antwerp_env_version=2`.
 Evaluation rejects incompatible environment/ablation settings, but independently
 selects evaluation safety and records both flags without modifying the model.
 Training resume still requires matching training safety to avoid silently
@@ -268,8 +346,9 @@ These are reference results, not achieved Antwerp scores.
 
 **Still not an exact reproduction:** Antwerp changes the network, OD demand,
 vehicle profiles, ego speed mode, episode duration, coordinates and safety
-geometry. Its GRU scaling/action ordering also differs from the pinned upstream
-copy; the fixed-shape masking implementation of the five configurations is a
+geometry. Older Antwerp checkpoints retain their scaled/reversed GRU input;
+new `paper_raw` checkpoints follow the D reproduction's unscaled/newest-first
+input. The fixed-shape masking implementation of the five configurations is a
 documented project choice. Raw returns across different routes/rewards are not
 directly comparable. The original-scene smoke calibration below passes, but
 per-row experiment configurations and checkpoint selection remain unverified.
@@ -406,8 +485,9 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   safety controller by default; `--safety` enables it. New checkpoints go to
   `models_experiments/`.
 - [x] Separate evaluation from training: training saves numbered checkpoints
-  every 100,000 steps without starting a second SUMO environment in the same
-  process. Run `evaluate_sac_delay.py` separately for Antwerp outcome metrics;
+  at a configurable interval (now defaulting to 2M steps) without starting a
+  second SUMO environment in the same process. Run `evaluate_sac_delay.py`
+  separately for Antwerp outcome metrics;
   checkpoints are no longer labeled "best" before evaluation.
 - [x] Carry the ego's merge status in each environment step. Independent
   evaluation retains the total `Max Steps` count and splits it into `No Merge
@@ -489,10 +569,15 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   baseline. The original `f_1`/`f_2` overrides targeted particular lane flows;
   Antwerp flow IDs represent scenario/OD/type and do not match those checks.
   Do not assign the old overrides to Antwerp types or invent a driver-profile
-  ratio. The current `SetTrafficBehavior` checks therefore have no effect on
-  Antwerp background vehicles; a sampled `car_van` retained `tau=1.0`, type
+  ratio. The inactive `f_1`/`f_2` branches have been removed; the ego lane-mode
+  setting is retained. A sampled `car_van` retained `tau=1.0`, type
   maximum speed 45 m/s, and speed mode 31. Define any driver-profile groups
-  separately if a future experiment needs them.
+  separately if a future experiment needs them. Paper v5 includes aggressive
+  and cooperative driver profiles to simulate heterogeneous behavior, but does
+  not report an ablation establishing that these profiles improve learning.
+  The old `f_2` branch sampled headway from a normal distribution, whereas the
+  paper specifies a uniform 0.6–0.8 s range for cooperative drivers; restoring
+  that branch would not exactly reproduce the paper even with matching flow IDs.
 - Upstream also sets ego `speedMode=96`, but Antwerp keeps `speedMode=31` and
   the `car_van` acceleration/deceleration values. Changing lane mode does not
   change these physical parameters; the upstream speed-mode difference remains
@@ -503,18 +588,37 @@ and [upstream code](https://github.com/amin-tabrizian/DAROM).
   acceleration to the `car_van` type values in the measured probe, while the
   existing jerk reward uses the commanded action. Keep this reward convention
   for upstream comparison; review it before changing model behavior.
-- The current Antwerp GRU is a **documented deviation**, not an exact copy
+- The earlier Antwerp GRU is a **documented deviation**, not an exact copy
   of upstream: the upstream encoder reads its
   newest-first action buffer without reversal and uses 128 output features;
-  the current encoder reverses that buffer, scales its inputs, and outputs 256
-  features. The separate MLP encoder still receives unscaled inputs. These
-  differences are recorded without changing the current code. Follow upstream
-  model behavior as the reference for further migration; discuss any new
-  model-behavior change separately before implementing it.
+  the earlier Antwerp encoder reverses that buffer, scales its inputs, and
+  outputs 256 features. New `paper_raw` runs remove the reversal and scaling,
+  keeping 256 features as described by paper v5. The separate MLP encoder still
+  receives unscaled inputs. Old checkpoint inference remains compatible through
+  the legacy mode; old weights cannot be continued as a `paper_raw` run.
 - The distributed checkpoint under `models/` is not an Antwerp result; the
   observation meaning and GRU interface have changed.
 - Unlike upstream's global NumPy delay draws, Antwerp uses a separate seeded
-  delay stream for reproducibility; the five distribution rules are unchanged.
+  delay stream keyed by run seed and episode index for reproducibility; the five
+  distribution rules are unchanged. The sampled sequence differs from a global
+  NumPy RNG run, so identical numeric seeds do not imply paired traffic and
+  delay trajectories across implementations. Retain the independent stream
+  for controlled Antwerp comparisons.
+- The nearest-30 selection replaces upstream's first-30 encounter order when
+  more than 30 neighbors lie within the radius. It can change a policy input
+  and therefore training under dense traffic; the paper calls for the closest
+  and most critical neighbors. Removing it would discard nearby vehicles based
+  on SUMO ID order, so keep it unless a controlled observation ablation is
+  explicitly requested.
+- The safety path stores world positions and velocity vectors for each captured
+  neighbor, advances them at constant velocity across packet age and rotates
+  them into the current ego frame before checking up to 30 neighbors. It uses
+  captured traffic and current ego pose, not live neighbor positions. Its
+  prediction can be wrong if a neighbor accelerates or turns. This can change
+  interventions and outcomes when `--safety` is enabled; training with the
+  default safety off does not use these snapshots for policy actions. Keep the
+  alignment for consistent Antwerp safety geometry, and report safety-on
+  results separately from safety-off results.
 
 **Pending work**
 
@@ -732,11 +836,12 @@ and distinguishes failed lane-change commands from unavailable gaps.
 | `--scenario` | `easy`, `medium`, `hard` | Antwerp traffic scenario; defaults to `medium` |
 | `--safety` | flag | Enable the safety controller (disabled by default) |
 | `--encoder_mode` | `GRU`, `MLP`, `Transformer` | Delay-Aware Encoder architecture |
+| `--gru_input_mode` | `paper_raw`, `antwerp_scaled_reversed` | GRU input processing; defaults to `paper_raw` for new runs |
 | `--ablation` | `full`, `delayed_state_only`, `delayed_state_delay`, `delayed_state_action`, `linear_predictor` | Table IV input variant; non-full variants require GRU |
 | `--run_name` | string | WandB run name |
 | `--save_dir` | path | Directory to save model checkpoints |
 | `--total_timesteps` | integer | Training budget; defaults to the paper's 7,000,000 steps |
-| `--checkpoint_freq` | positive integer | Numbered checkpoint interval; defaults to 100,000 steps |
+| `--checkpoint_freq` | positive integer | Numbered checkpoint interval; defaults to 2,000,000 steps |
 | `--torch_threads` | positive integer | Optional PyTorch CPU thread limit for this process |
 | `--device` | `auto`, `cpu`, `cuda`, etc. | SB3 model device |
 | `--log_dir` | path | TensorBoard/WandB output directory; defaults to `runs` |
@@ -859,7 +964,7 @@ uncertainty correction; `paired-current.json` recomputes only their aggregates
 using the final sample-std/CI implementation and links the unmodified source
 reports. All recorded episode data are preserved.
 
-Numbered checkpoints are saved every 100,000 training steps by default (set
+Numbered checkpoints are saved every 2,000,000 training steps by default (set
 `--checkpoint_freq` for a short pilot) under
 `models_experiments/<run_name>/`. The latest model is also saved as
 `models_experiments/<run_name>.zip` at training completion. Neither is marked

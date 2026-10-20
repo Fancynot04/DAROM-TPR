@@ -16,6 +16,11 @@ EGO_DEPARTURE_DEADLINE = 1200.0
 SUMO_STEP_LENGTH = 0.1
 LANE_CHANGE_EDGES = frozenset(('E75', 'E76', 'E77', 'E78', 'E82'))
 ANTWERP_ENV_VERSION = 2
+ANTWERP_TASKS = {
+    'legacy_o3_d1': ('O3', 'D1', 'merge'),
+    'entry': ('O3', 'E76', 'merge'),
+    'exit': ('O1', 'D3', 'exit'),
+}
 
 if 'SUMO_HOME' in os.environ:
     tools = os.path.join(os.environ['SUMO_HOME'], 'tools')
@@ -43,25 +48,22 @@ def parseAction(action):
         lc = 1
     return [acc, lc]
 
-def SetTrafficBehavior(vehicle_name):
-    if 'f_1' in vehicle_name:
-            traci.vehicle.setTau(vehicle_name, np.random.uniform(0.1, 0.7))
-            traci.vehicle.setMaxSpeed(vehicle_name, np.random.uniform(10, 13))
-            traci.vehicle.setSpeedMode(vehicle_name, 32)
-    elif 'f_2' in vehicle_name:
-        traci.vehicle.setTau(vehicle_name, np.random.normal(0.7, 0.1))
-        traci.vehicle.setMaxSpeed(vehicle_name, np.random.uniform(8, 11))
-    elif vehicle_name == 'ego':
-        traci.vehicle.setLaneChangeMode(vehicle_name, 0)
+def set_ego_lane_mode(vehicle_name):
+    traci.vehicle.setLaneChangeMode(vehicle_name, 0)
 
 
 
 class Merging(gym.Env):
     metadata = {"render_modes": ["human", "none"], "render_fps": 10}
-    def __init__(self, seed, mode='all', radius = 50, render_mode= None, runSafetyCheck=False, scenario='medium'):
+    def __init__(self, seed, mode='all', radius = 50, render_mode= None, runSafetyCheck=False,
+                 scenario='medium', task='legacy_o3_d1'):
         if scenario not in ('easy', 'medium', 'hard'):
             raise ValueError(f'Unknown Antwerp scenario: {scenario}')
+        if task not in ANTWERP_TASKS:
+            raise ValueError(f'Unknown Antwerp task: {task}')
         self.scenario = scenario
+        self.task = task
+        self.origin, self.destination, self.stage_name = ANTWERP_TASKS[task]
         self.ego_id = None
         self.ego_depart_time = None
         self._seed_initialized = False
@@ -75,6 +77,8 @@ class Merging(gym.Env):
         self.radius = radius
         self.size = 31
         self.merged = False
+        self.stage_reached = False
+        self.last_stage_reward = 0.0
         self.ego_teleported = False
         self.ego_teleporting = False
         self.ego_on_road = False
@@ -121,6 +125,8 @@ class Merging(gym.Env):
         self._seed_initialized = True
         sumo_seed = int(self.np_random.integers(0, 2**31 - 1))
         self.merged = False
+        self.stage_reached = False
+        self.last_stage_reward = 0.0
         self.ego_teleported = False
         self.ego_teleporting = False
         self.ego_on_road = False
@@ -144,8 +150,9 @@ class Merging(gym.Env):
             pass
 
         # Load the Antwerp network and one scenario route without detector output files.
+        route_suffix = '' if self.task == 'legacy_o3_d1' else f'_{self.task}'
         scene_paths = {'network': ANTWERP_DIR / 'Antwerp.net.xml',
-                       'routes': ANTWERP_DIR / f'Antwerp_{self.scenario}.rou.xml'}
+                       'routes': ANTWERP_DIR / f'Antwerp_{self.scenario}{route_suffix}.rou.xml'}
         scene_files = {name: {'path': str(path.relative_to(ANTWERP_DIR.parent)),
                               'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
                        for name, path in scene_paths.items()}
@@ -166,11 +173,11 @@ class Merging(gym.Env):
         while not self.ego_inserted and traci.simulation.getTime() < EGO_DEPARTURE_DEADLINE:
             traci.simulationStep()
             for vehicle_name in traci.simulation.getDepartedIDList():
-                SetTrafficBehavior(vehicle_name)
                 if vehicle_name == 'ego':
-                    if traci.vehicle.getRoadID(vehicle_name) != 'O3':
+                    set_ego_lane_mode(vehicle_name)
+                    if traci.vehicle.getRoadID(vehicle_name) != self.origin:
                         traci.close()
-                        raise RuntimeError('The scheduled ego did not enter on O3')
+                        raise RuntimeError(f'The scheduled ego did not enter on {self.origin}')
                     self.ego_id = vehicle_name
                     self.ego_depart_time = traci.simulation.getTime()
                     self.ego_inserted = True
@@ -178,12 +185,16 @@ class Merging(gym.Env):
                     self.observation = np.asarray(self._get_obs(), dtype=np.float32)
         if not self.ego_inserted:
             traci.close()
-            raise RuntimeError(f'The scheduled ego did not enter O3 before {EGO_DEPARTURE_DEADLINE}s in {self.scenario}')
+            raise RuntimeError(f'The scheduled ego did not enter {self.origin} before '
+                               f'{EGO_DEPARTURE_DEADLINE}s in {self.scenario}')
         
         self.state = self.observation
         return self.state, {
             'ego_id': self.ego_id, 'ego_depart_time': self.ego_depart_time,
-            'task': 'antwerp-o3-d1', 'scenario': self.scenario,
+            'task': ('antwerp-o3-d1' if self.task == 'legacy_o3_d1'
+                     else f'antwerp-{self.origin.lower()}-{self.destination.lower()}'),
+            'task_id': self.task, 'origin': self.origin, 'destination': self.destination,
+            'stage_name': self.stage_name, 'scenario': self.scenario,
             'antwerp_env_version': ANTWERP_ENV_VERSION,
             'sumo_version': list(traci.getVersion()), 'sumo_seed': sumo_seed,
             'sumo_command': sumo_cmd, 'scene_files': scene_files,
@@ -254,8 +265,8 @@ class Merging(gym.Env):
             print("Emergency Stopping")
             emergency_stopping_penalty = 1000
             r -= emergency_stopping_penalty
-        elif self.merged and not self.given_merge_reward and not self.ego_teleported:
-            print("Merge reward given.")
+        elif self.stage_reached and not self.given_merge_reward and not self.ego_teleported:
+            print(f"{self.stage_name} reward given.")
             self.given_merge_reward = True
             merge_reward = 500
             r += merge_reward
@@ -283,6 +294,7 @@ class Merging(gym.Env):
         #       f"\n  TOTAL (BEFORE SCALING): {r}")
 
         # print("reward", r, "action", action, "lane", self.lane_id, "merged", self.merged)
+        self.last_stage_reward = merge_reward * 0.1
         return 0.1*r    
     
     def _get_obs(self):
@@ -386,8 +398,6 @@ class Merging(gym.Env):
             traci.vehicle.setAcceleration(self.ego_id, parsed_action[0], 1)
             if traci.vehicle.getSpeed(self.ego_id) > 32:
                 traci.vehicle.setSpeed(self.ego_id, 32)
-        for vehicle_name in traci.simulation.getDepartedIDList():
-            SetTrafficBehavior(vehicle_name)
         self.counter += 1
         traci.simulationStep()
 
@@ -407,9 +417,12 @@ class Merging(gym.Env):
             self.lane_name = traci.vehicle.getRoadID(self.ego_id)
             self.lane_idx = traci.vehicle.getLaneIndex(self.ego_id)
             if self.teleport_transition:
-                SetTrafficBehavior(self.ego_id)
-            if self._has_merged():
-                self.merged = True
+                set_ego_lane_mode(self.ego_id)
+            if self.task == 'exit':
+                if self.lane_name == 'D3':
+                    self.stage_reached = True
+            elif self._has_merged():
+                self.merged = self.stage_reached = True
         else:
             self._ahead_state = self._behind_state = [0.0, 0.0, 0.0]
 
@@ -442,6 +455,9 @@ class Merging(gym.Env):
                 pass
         
         info.update({'lane': self.lane_id, 'action': action, 'merged': bool(self.merged),
+                     'stage_reached': bool(self.stage_reached), 'stage_name': self.stage_name,
+                     'stage_reward': self.last_stage_reward,
+                     'stage_reward_paid': bool(self.given_merge_reward),
                      'ego_teleported': bool(self.ego_teleported),
                      'ego_teleporting': bool(self.ego_teleporting),
                      'ego_on_road': bool(self.ego_on_road),
