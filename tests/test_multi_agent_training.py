@@ -1,6 +1,7 @@
 """Meaningful SAC update and joint-replay checks; SUMO smoke is opt-in."""
 
 import unittest
+from unittest.mock import Mock, patch
 
 import numpy as np
 import torch
@@ -8,7 +9,7 @@ import torch
 from src.multi_agent_sac import (AGENTS, CentralTwinQ, JointReplay,
                                  SACConfig, TwoAgentSAC)
 from src.train_dual_sac import arguments, run
-from src.evaluate_dual_sac import summarize
+from src.evaluate_dual_sac import evaluate, parse_args as parse_dual_eval_args, summarize
 from src.compare_dual import check_pair
 
 
@@ -103,6 +104,26 @@ class MultiAgentContractTests(unittest.TestCase):
         self.assertEqual(result["both_success_rate"], .5)
         self.assertEqual(result["scene_collision_rate"], .5)
         self.assertEqual(result["agents"][AGENTS[0]]["mean_return"], 10)
+
+    def test_safety_evaluation_uses_controller_and_records_same_seed(self):
+        env = Mock()
+        env.finished = True
+        env.reset.return_value = ({}, {"sumo_seed": 700001})
+        with patch("src.evaluate_dual_sac.DualMerging", return_value=env) as constructor:
+            records = evaluate(Mock(), "easy", 1, 700001, safety=True)
+        constructor.assert_called_once_with(scenario="easy", safety=True,
+                                            delay_mode="uniform")
+        env.reset.assert_called_once_with(seed=700001)
+        env.close.assert_called_once()
+        self.assertEqual(records[0]["seed"], 700001)
+
+    def test_safety_cli_defaults_off_and_can_be_enabled(self):
+        with patch("pathlib.Path.is_file", return_value=True):
+            basic = parse_dual_eval_args(["checkpoint.pt", "--output", "off.json"])
+            enabled = parse_dual_eval_args(["checkpoint.pt", "--output", "on.json",
+                                            "--safety"])
+        self.assertFalse(basic.safety)
+        self.assertTrue(enabled.safety)
 
     def test_comparison_rejects_unequal_training_or_evaluation_budgets(self):
         template = {"method": "independent", "scenario": "easy",

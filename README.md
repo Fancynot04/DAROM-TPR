@@ -383,6 +383,19 @@ and writes JSON, a Markdown table, and per-ego episode-return curves. With
 one training seed per method, score differences remain descriptive; they do
 not establish a reliable algorithm advantage across training seeds.
 
+For the paper's safety-controller comparison, evaluate each **unchanged**
+checkpoint again with `--safety` and a distinct output name (for example,
+`eval-independent-safety-on-easy.json`). Keep the scenario, 200 seeds starting
+at 700001, deterministic actions, and uniform delay identical to the safety-off
+run. Repeat this for Independent SAC and CTDE-MASAC on Easy, Medium, and Hard;
+compare methods only within the same safety setting. The report records the
+actual evaluation `safety` flag, while `training_safety` remains false. A
+Figure 4-style plot from these experiments contains only Easy training for
+the two egos; it is not the paper's three-scenario, multi-method Figure 4.
+A Table III-style dual-ego table needs separate entry, exit, and joint
+outcomes. With one training seed and 200 evaluation episodes, it does not
+replicate the paper's evaluation sample size or establish transfer by itself.
+
 The optional `src.sync_dual_wandb` mirrors **only** the two 1M-per-ego formal
 training runs and their 200-episode Easy/Medium/Hard evaluations to the
 [`DAROM-TRP` W&B project](https://forge.coreweave.com/wandb/arlikache-anhui-university/DAROM-TRP).

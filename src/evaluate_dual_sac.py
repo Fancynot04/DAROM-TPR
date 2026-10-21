@@ -18,6 +18,8 @@ def parse_args(argv=None):
     parser.add_argument("--scenario", choices=("easy", "medium", "hard"), default="easy")
     parser.add_argument("--episodes", type=int, default=200)
     parser.add_argument("--seed-start", type=int, default=700_001)
+    parser.add_argument("--safety", action="store_true",
+                        help="Enable the environment safety controller during evaluation")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--torch-threads", type=int, default=1)
     args = parser.parse_args(argv)
@@ -28,8 +30,8 @@ def parse_args(argv=None):
     return args
 
 
-def evaluate(learner, scenario, episodes, seed_start):
-    env = DualMerging(scenario=scenario, safety=False, delay_mode="uniform")
+def evaluate(learner, scenario, episodes, seed_start, safety=False):
+    env = DualMerging(scenario=scenario, safety=safety, delay_mode="uniform")
     records = []
     try:
         for episode in range(episodes):
@@ -122,11 +124,12 @@ def main(argv=None):
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.output.exists():
         raise FileExistsError(args.output)
-    records = evaluate(learner, args.scenario, args.episodes, args.seed_start)
+    records = evaluate(learner, args.scenario, args.episodes, args.seed_start,
+                       safety=args.safety)
     report = {"checkpoint": str(args.checkpoint),
               "checkpoint_sha256": hashlib.sha256(args.checkpoint.read_bytes()).hexdigest(),
               "method": learner.config.mode, "training": metadata,
-              "scenario": args.scenario, "delay_mode": "uniform", "safety": False,
+              "scenario": args.scenario, "delay_mode": "uniform", "safety": args.safety,
               "policy_action": "deterministic_tanh_mean", "seed_start": args.seed_start,
               "summary": summarize(records), "episodes": records}
     with args.output.open("x") as stream:
