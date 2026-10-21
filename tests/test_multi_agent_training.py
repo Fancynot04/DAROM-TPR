@@ -125,6 +125,65 @@ class MultiAgentContractTests(unittest.TestCase):
         self.assertFalse(basic.safety)
         self.assertTrue(enabled.safety)
 
+    def test_evaluation_motion_uses_sumo_speed_and_acceleration(self):
+        class FakeVehicle:
+            def __init__(self):
+                self.tick = 0
+
+            def getIDList(self):
+                return AGENTS
+
+            def getSpeed(self, key):
+                return (20.0, 20.2)[self.tick]
+
+            def getAcceleration(self, key):
+                return (0.0, 2.0)[self.tick]
+
+        class FakeEnvironment:
+            def __init__(self):
+                self.connection = Mock(vehicle=FakeVehicle())
+                self.cars = {key: Mock(ego_on_road=True) for key in AGENTS}
+                self.active_agents = AGENTS
+                self.finished = False
+
+            def reset(self, seed):
+                return ({key: np.zeros(134, np.float32) for key in AGENTS},
+                        {"sumo_seed": seed})
+
+            def step(self, actions):
+                final = self.connection.vehicle.tick == 1
+                infos = {key: {"safety_intervened": key == AGENTS[0],
+                               "message": "Arrived", "is_success": True,
+                               "ego_teleported": False, "stage_reached": True,
+                               "stage_reward_paid": True, "control_steps": 2,
+                               "merged": True} for key in AGENTS}
+                self.finished = final
+                if not final:
+                    self.connection.vehicle.tick += 1
+                return ({key: np.zeros(134, np.float32) for key in AGENTS},
+                        dict.fromkeys(AGENTS, 1.0), dict.fromkeys(AGENTS, final),
+                        dict.fromkeys(AGENTS, False), infos)
+
+            def close(self):
+                pass
+
+        learner = Mock(device=torch.device("cpu"))
+        learner.actors = [Mock() for _ in AGENTS]
+        for actor in learner.actors:
+            actor.sample.return_value = (torch.zeros(1, 2),)
+        with patch("src.evaluate_dual_sac.DualMerging", return_value=FakeEnvironment()):
+            record = evaluate(learner, "easy", 1, 700001, safety=True)[0]
+        entry = record["motion"][AGENTS[0]]
+        self.assertAlmostEqual(entry["mean_speed_mps"], 20.1)
+        self.assertAlmostEqual(entry["mean_jerk_mps3"], 20.0)
+        self.assertEqual(entry["speed_samples"], 2)
+        self.assertEqual(entry["jerk_samples"], 1)
+        self.assertEqual(record["safety_interventions"][AGENTS[0]], 2)
+        summary = summarize([record])
+        self.assertEqual(summary["agents"][AGENTS[0]]["no_merge_rate"], 0)
+        self.assertEqual(summary["agents"][AGENTS[1]]["no_exit_rate"], 0)
+        self.assertAlmostEqual(summary["agents"][AGENTS[0]]["mean_speed_mps"], 20.1)
+
     def test_comparison_rejects_unequal_training_or_evaluation_budgets(self):
         template = {"method": "independent", "scenario": "easy",
                     "delay_mode": "uniform", "safety": False, "seed_start": 700001,

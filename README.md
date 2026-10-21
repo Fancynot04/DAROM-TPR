@@ -395,6 +395,23 @@ the two egos; it is not the paper's three-scenario, multi-method Figure 4.
 A Table III-style dual-ego table needs separate entry, exit, and joint
 outcomes. With one training seed and 200 evaluation episodes, it does not
 replicate the paper's evaluation sample size or establish transfer by itself.
+The original Table III columns are success rate, collision rate, no-merge
+rate, average return, average ego velocity, and average jerk. Dual evaluation
+reports now include those task-specific measures for both egos: entry
+`no_merge_rate` is the historical `Max Steps` timeout proxy, while exit
+`no_exit_rate` is its exit-task analogue. Teleported arrivals remain failures
+and are reported separately; neither metric silently treats them as timeout.
+For each active ego control step, evaluation samples SUMO speed and actual
+acceleration before applying the next action. It computes signed physical
+jerk as the difference between consecutive acceleration samples divided by
+the 0.1-second SUMO step, excluding teleport gaps. Speed and jerk are first
+averaged within an episode, then across episodes with valid samples; absolute
+jerk and sample counts are also retained. The paper's comfort reward defines
+`|a_t-a_{t-1}|` without time normalization, while its Table III reports
+signed jerk values, so this report states its physical-jerk convention
+explicitly rather than claiming identical unpublished aggregation. Earlier
+dual reports without motion samples cannot supply velocity or jerk; the same
+frozen checkpoint and traffic seeds must be evaluated again to fill them.
 
 The optional `src.sync_dual_wandb` mirrors **only** the two 1M-per-ego formal
 training runs and their 200-episode Easy/Medium/Hard evaluations to the
