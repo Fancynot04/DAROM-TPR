@@ -7,16 +7,38 @@ import time
 
 import numpy as np
 
-from .compare_dual import check_pair
-from .evaluate_dual_sac import wilson_interval
-from .multi_agent_sac import AGENTS
-
-
+AGENTS = ("ego_entry", "ego_exit")
 SCENARIOS = ("easy", "medium", "hard")
 METHODS = ("independent", "ctde")
 SAFETY = (False, True)
 EXPECTED_SEEDS = list(range(700001, 700201))
 BOOTSTRAP_SAMPLES = 5000
+
+
+def check_pair(left, right):
+    """Reject mismatched method, evaluation seeds, or learning budgets."""
+    if (left["method"], right["method"]) != METHODS:
+        raise ValueError("Expected Independent SAC then CTDE")
+    for field in ("scenario", "delay_mode", "safety", "seed_start"):
+        if left[field] != right[field]:
+            raise ValueError(f"Mismatched evaluation {field}")
+    if left["summary"]["episodes"] != right["summary"]["episodes"]:
+        raise ValueError("Mismatched evaluation episode count")
+    if [r["seed"] for r in left["episodes"]] != [r["seed"] for r in right["episodes"]]:
+        raise ValueError("Evaluation seeds differ")
+    for field in ("scenario", "delay_mode", "training_safety", "experience_target_per_ego",
+                  "seed", "actor_gru_input_mode", "experiences", "actor_updates",
+                  "critic_updates"):
+        if left["training"][field] != right["training"][field]:
+            raise ValueError(f"Mismatched training {field}")
+
+
+def wilson_interval(successes, total):
+    z = 1.959963984540054
+    p = successes / total
+    center = (p + z * z / (2 * total)) / (1 + z * z / total)
+    radius = z * np.sqrt(p * (1 - p) / total + z * z / (4 * total * total)) / (1 + z * z / total)
+    return [float(center - radius), float(center + radius)]
 
 
 def report_path(directory, method, scenario, safety):
