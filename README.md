@@ -413,6 +413,34 @@ explicitly rather than claiming identical unpublished aggregation. Earlier
 dual reports without motion samples cannot supply velocity or jerk; the same
 frozen checkpoint and traffic seeds must be evaluated again to fill them.
 
+Once the two methods' safety-off and safety-on reports for all three scenarios
+have finished, build the complete dual-Ego transfer table without retraining or
+rerunning evaluation:
+
+```bash
+python -B -m src.report_dual_transfer \
+  --reports-dir models_experiments/dual-marl \
+  --output models_experiments/dual-marl/transfer-table3-200.json
+```
+
+This writes a same-stem Markdown table. It requires exactly the 200 paired
+evaluation seeds 700001–700200 in each of twelve reports, the same frozen
+checkpoint per method across scenarios and safety settings, motion samples,
+equal learning budgets, and matching SUMO seeds. The entry and exit have
+separate No Merge and No Exit columns, both explicitly defined as `Max Steps`
+timeout proxies; the JSON also keeps the narrower unmerged-timeout count.
+Each rate has a Wilson 95% interval. Episode-mean return, speed, signed jerk,
+absolute jerk, and paired Independent-minus-CTDE differences have deterministic
+5,000-resample bootstrap 95% intervals. Paired motion differences use only
+seeds with valid measurements for both methods and report that sample count.
+These intervals describe evaluation-scene variability for the frozen models,
+not training-seed variability or the paper's three-seed `±` statistic. The
+existing remote queue's per-scenario `compare_dual` output remains a smaller
+safety-off comparison; the complete table command above also needs the queued
+safety-on reports to finish. To attach a separate automatic follower before
+they finish, add `--wait-seconds 172800`; it polls for completed reports for up
+to 48 hours and does not launch any evaluation.
+
 The optional `src.sync_dual_wandb` mirrors **only** the two 1M-per-ego formal
 training runs and their 200-episode Easy/Medium/Hard evaluations to the
 [`DAROM-TRP` W&B project](https://forge.coreweave.com/wandb/arlikache-anhui-university/DAROM-TRP).
