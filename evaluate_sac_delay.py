@@ -49,6 +49,8 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
         raise ValueError(f'Checkpoint task={checkpoint_task!r}, requested {task!r}')
     if task == exit_config.TASK_ID and getattr(model, 'exit_potential_beta', None) != exit_config.POTENTIAL_BETA:
         raise ValueError('Checkpoint E76-to-D3 potential configuration does not match')
+    if task == exit_config.TASK_ID and getattr(model, 'exit_reward_profile', None) != exit_config.REWARD_PROFILE:
+        raise ValueError('Checkpoint E76-to-D3 reward profile does not match')
     return {'training_safety': getattr(model, 'training_safety', None),
             'evaluation_safety': bool(safety)}
 

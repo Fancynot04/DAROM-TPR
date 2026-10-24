@@ -302,6 +302,7 @@ def main():
         ego_depart_lane=(exit_config.DEPART_LANE if args.exit_phase else None),
         potential_beta=(exit_config.POTENTIAL_BETA if args.exit_phase else None),
         potential_gamma=(exit_config.POTENTIAL_GAMMA if args.exit_phase else None),
+        reward_profile=(exit_config.REWARD_PROFILE if args.exit_phase else None),
         metric_schema=('env_steps_v2' if args.exit_phase else None),
         wandb_project=args.project,
         wandb_entity=args.entity,
@@ -391,6 +392,9 @@ def main():
                 if (getattr(loaded_model, 'exit_potential_beta', None)
                         != exit_config.POTENTIAL_BETA):
                     raise ValueError('Loaded model has a different E76-to-D3 potential profile')
+                if (getattr(loaded_model, 'exit_reward_profile', None)
+                        != exit_config.REWARD_PROFILE):
+                    raise ValueError('Loaded model has a different E76-to-D3 reward profile')
                 loaded_model.load_replay_buffer(args.replay_buffer_path)
                 if loaded_model.num_timesteps >= args.total_timesteps:
                     raise ValueError('Checkpoint already reached the configured total step budget')
@@ -406,14 +410,17 @@ def main():
     model.experiment_id = args.run_name
     if args.exit_phase:
         model.exit_potential_beta = exit_config.POTENTIAL_BETA
+        model.exit_reward_profile = exit_config.REWARD_PROFILE
 
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
                      mode=args.wandb_mode, dir=args.log_dir,
                      sync_tensorboard=not args.exit_phase,
                      save_code=not args.exit_phase, resume=args.resume, id=args.run_id,
-                     group=f'e76-d3-{args.exit_phase}' if args.exit_phase else None,
+                     group=f'e76-d3-{args.exit_phase}-{exit_config.REWARD_PROFILE}'
+                     if args.exit_phase else None,
                      job_type=args.exit_phase,
-                     tags=['E76-D3', 'single-ego', 'potential-beta10', 'metric-schema-v2']
+                     tags=['E76-D3', 'single-ego', 'potential-beta10', 'metric-schema-v2',
+                           exit_config.REWARD_PROFILE]
                      if args.exit_phase else None)
     if not args.exit_phase:
         run.log_code('src')

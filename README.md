@@ -539,6 +539,14 @@ in the current network). Including D3 in `D` gives different starting lanes
 distinct initial potential values. Terminal potential is zero, and teleport
 permanently disables subsequent positive shaping. `reward_components.potential`
 and Forge `train/episode_potential_reward` expose its contribution.
+For the next E76→D3 run, the per-command lane-change deduction is disabled:
+nonzero `action[1]` no longer incurs the former −0.5 scaled reward. The
+`reward_components.lane_command` field remains present and is always zero for
+this task. Other Antwerp tasks keep their existing reward. New checkpoints
+record `exit_reward_profile=no_lane_command_penalty_v1`; evaluation and resume
+reject earlier E76→D3 checkpoints with the former reward profile. Train the
+new run from scratch and compare success and outcomes on common evaluation
+seeds; raw returns from the two reward profiles are not directly comparable.
 Forge receives actor and critic loss, entropy coefficient and entropy loss
 every 100 environment steps, plus episode return, outcome and cumulative
 success rate for each observed starting lane. All `train/*` curves use

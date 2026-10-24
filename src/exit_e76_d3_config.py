@@ -6,6 +6,7 @@ DESTINATION = 'D3'
 DEPART_LANE = 'random'
 POTENTIAL_BETA = 10.0
 POTENTIAL_GAMMA = 0.99
+REWARD_PROFILE = 'no_lane_command_penalty_v1'
 DISTANCE_SCALE_EDGES = ('E76', 'E77', 'D3')
 
 WANDB_ENTITY = 'arlikache-anhui-university'

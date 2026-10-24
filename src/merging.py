@@ -305,7 +305,7 @@ class Merging(gym.Env):
         arrived_reward = 0.0
         emergency_stopping_penalty = 0.0
         merge_reward = 0.0
-        wrong_lane_change_penalty = 0.0
+        lane_command_penalty = 0.0
         max_steps_penalty = 0.0
 
         if self.ego_id in self.traci.simulation.getCollidingVehiclesIDList():
@@ -329,10 +329,9 @@ class Merging(gym.Env):
             print("Max Steps")
             max_steps_penalty = 1000
             r -= max_steps_penalty
-        elif self.parsed_action[1] != 0:
-            # print("Wrong lane change")
-            wrong_lane_change_penalty = 5
-            r -= wrong_lane_change_penalty
+        elif self.task != exit_config.TASK_ID and self.parsed_action[1] != 0:
+            lane_command_penalty = 5
+            r -= lane_command_penalty
 
         # print(f"Reward components:"
         #       f"\n  base_penalty: {base_penalty}"
@@ -344,7 +343,7 @@ class Merging(gym.Env):
         #       f"\n  arrived_reward: {arrived_reward}"
         #       f"\n  emergency_stopping_penalty: {-emergency_stopping_penalty}"
         #       f"\n  merge_reward: {merge_reward}"
-        #       f"\n  wrong_lane_change_penalty: {-wrong_lane_change_penalty}"
+        #       f"\n  lane_command_penalty: {-lane_command_penalty}"
         #       f"\n  max_steps_penalty: {-max_steps_penalty}"
         #       f"\n  TOTAL (BEFORE SCALING): {r}")
 
@@ -356,7 +355,7 @@ class Merging(gym.Env):
             'behind_gap': -penalty_behind * 0.1, 'ahead_gap': -penalty_ahead * 0.1,
             'collision': -collision_penalty * 0.1, 'arrival': arrived_reward * 0.1,
             'emergency': -emergency_stopping_penalty * 0.1, 'stage': merge_reward * 0.1,
-            'timeout': -max_steps_penalty * 0.1, 'lane_command': -wrong_lane_change_penalty * 0.1,
+            'timeout': -max_steps_penalty * 0.1, 'lane_command': -lane_command_penalty * 0.1,
         }
         self.reward_components = {key: float(value) for key, value in self.reward_components.items()}
         return 0.1*r    

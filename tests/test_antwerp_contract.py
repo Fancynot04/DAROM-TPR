@@ -130,11 +130,38 @@ class SeparateEgoTaskTests(unittest.TestCase):
     def test_e76_exit_checkpoint_requires_potential_profile(self):
         model = SimpleNamespace(antwerp_env_version=ANTWERP_ENV_VERSION,
                                 antwerp_task=exit_config.TASK_ID,
-                                exit_potential_beta=exit_config.POTENTIAL_BETA)
+                                exit_potential_beta=exit_config.POTENTIAL_BETA,
+                                exit_reward_profile=exit_config.REWARD_PROFILE)
         validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
         model.exit_potential_beta = 5
         with self.assertRaisesRegex(ValueError, 'potential configuration'):
             validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
+        model.exit_potential_beta = exit_config.POTENTIAL_BETA
+        model.exit_reward_profile = None
+        with self.assertRaisesRegex(ValueError, 'reward profile'):
+            validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
+
+    def test_e76_exit_does_not_penalize_lane_command(self):
+        fake = Mock()
+        fake.simulation.getCollidingVehiclesIDList.return_value = ()
+        fake.simulation.getArrivedIDList.return_value = ()
+        fake.simulation.getEmergencyStoppingVehiclesIDList.return_value = ()
+        with patch('src.merging.traci', fake), patch('src.merging.safe_gap', return_value=(True, True)):
+            for task, expected in ((exit_config.TASK_ID, 0.0), ('entry', -0.5)):
+                with self.subTest(task=task):
+                    env = Merging(seed=1, task=task)
+                    env.ego_id = 'ego'
+                    env.ego_on_road = True
+                    env.counter = 0
+                    env.last_acc = 0
+                    env.state = np.zeros((31, 3), dtype=np.float32)
+                    env.observation = env.state.copy()
+                    env.parsed_action = [0, 0]
+                    neutral = env.getReward()
+                    env.parsed_action = [0, -1]
+                    changing = env.getReward()
+                    self.assertAlmostEqual(changing - neutral, expected)
+                    self.assertAlmostEqual(env.reward_components['lane_command'], expected)
 
     def test_exit_stage_bonus_paid_once_and_arrival_remains_separate(self):
         env = Merging(seed=1, task='exit')
