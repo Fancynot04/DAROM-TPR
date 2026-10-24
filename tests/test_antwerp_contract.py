@@ -15,7 +15,9 @@ import torch
 from evaluate_sac_delay import (evaluate, evaluate_runs, parse_args as parse_eval_args,
                                 summarize_runs, validate_checkpoint_setup, validate_seed_ranges,
                                 checkpoint_gru_input_mode)
+from train_sac_delay import parse_args as parse_train_args
 from src.delay_encoder import DelayAwareGRUEncoder
+from src import exit_e76_d3_config as exit_config
 from src.geometry import TrafficSnapshot, align_delayed_neighbors
 from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
 from src.safety_controller import safetyCheck
@@ -62,6 +64,17 @@ class GRUInputContractTests(unittest.TestCase):
 
 
 class SeparateEgoTaskTests(unittest.TestCase):
+    def test_e76_phase_selects_designated_forge_and_d_group_profile(self):
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'hard_1m']):
+            args = parse_train_args()
+        self.assertEqual((args.task, args.scenario, args.total_timesteps),
+                         (exit_config.TASK_ID, 'hard', 1_000_000))
+        self.assertEqual((args.project, args.entity),
+                         (exit_config.WANDB_PROJECT, exit_config.WANDB_ENTITY))
+        self.assertEqual((args.checkpoint_freq, args.device, args.encoder_mode),
+                         (250_000, 'cuda', 'GRU'))
+        self.assertTrue(args.save_replay_buffer)
+
     def test_each_route_changes_only_the_ego_trip(self):
         routes = Path(__file__).resolve().parents[1] / 'sumo_new'
         for scenario in ('easy', 'medium', 'hard'):
@@ -76,6 +89,26 @@ class SeparateEgoTaskTests(unittest.TestCase):
                                       if node.get('id') != 'ego'], background)
                     ego = variant.find("trip[@id='ego']")
                     self.assertEqual((ego.get('from'), ego.get('to')), (origin, destination))
+                    if task == exit_config.TASK_ID:
+                        self.assertEqual(ego.get('departLane'), 'random')
+
+    def test_e76_exit_potential_distinguishes_start_lanes(self):
+        scale = 1260.74
+        distance = 1062.95
+        values = [exit_config.potential(distance, scale, lane) for lane in range(5)]
+        self.assertTrue(all(left > right for left, right in zip(values, values[1:])))
+        self.assertAlmostEqual(values[0], 10 * (1 - distance / scale))
+        self.assertAlmostEqual(values[4], values[0] / 5)
+        self.assertEqual(exit_config.potential(-1, scale, 0), 0)
+
+    def test_e76_exit_checkpoint_requires_potential_profile(self):
+        model = SimpleNamespace(antwerp_env_version=ANTWERP_ENV_VERSION,
+                                antwerp_task=exit_config.TASK_ID,
+                                exit_potential_beta=exit_config.POTENTIAL_BETA)
+        validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
+        model.exit_potential_beta = 5
+        with self.assertRaisesRegex(ValueError, 'potential configuration'):
+            validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
 
     def test_exit_stage_bonus_paid_once_and_arrival_remains_separate(self):
         env = Merging(seed=1, task='exit')
@@ -155,6 +188,18 @@ class SeparateEgoTaskTests(unittest.TestCase):
         self.assertNotIn('Merged Timeout', result)
         self.assertNotIn('no_merge_rate', result)
         self.assertEqual(result['timeout_rate'], 100)
+
+    def test_e76_exit_timeout_uses_exit_labels(self):
+        model = Mock()
+        model.predict.return_value = (np.zeros(2), None)
+        env = Mock()
+        env.reset.return_value = (np.zeros(134), {'task_id': exit_config.TASK_ID})
+        env.step.return_value = (None, -1, False, True,
+                                 {'message': 'Max Steps', 'ego_teleported': False,
+                                  'stage_reached': False, 'merged': False})
+        result = evaluate(model, env, 1, 1, task=exit_config.TASK_ID)
+        self.assertEqual(result['No Exit Timeout'], 1)
+        self.assertNotIn('no_merge_rate', result)
 
 
 def snapshot(time=0.0, ego=(0, 0), angle=90, positions=((5, 3.2),),

@@ -519,6 +519,57 @@ convergence. Full training and sufficiently repeated held-out evaluation
 remain pending. Do not compare cumulative returns directly across routes of
 different lengths.
 
+### E76 → D3 single-ego exit experiment
+
+`--exit_phase easy_pilot` and `--exit_phase hard_1m` select a separate
+`exit_e76_d3` task on the single-ego DAROM GRU/SAC training entry. Its route
+files preserve each scenario's background traffic. The ego trip is `E76 → D3`
+with SUMO `departLane="random"`; SUMO chooses an available E76 lane from
+indices 0–4. The realized lane is recorded in reset info, episode logs and
+the Forge `train/ego_start_lane` metric. No uniform departure distribution is
+assumed. Only E77_0 connects to D3, so other starting lanes require a lane
+change before the E77→D3 junction.
+
+Only this task adds potential shaping to the existing scaled reward:
+`F(s,s') = 0.99 Φ(s') − Φ(s)`, where
+`Φ(s) = 10 · clip(1 − d/D, 0, 1) · (1 − min(n,5)/5)`.
+Here `d` is SUMO driving distance to the **D3 entrance**, `n` is the current
+lane index, and `D` is the fixed total length of E76, E77 and D3 (1260.74 m
+in the current network). Including D3 in `D` gives different starting lanes
+distinct initial potential values. Terminal potential is zero, and teleport
+permanently disables subsequent positive shaping. `reward_components.potential`
+and Forge `train/episode_potential_reward` expose its contribution.
+Forge also receives actor and critic loss, entropy coefficient and entropy
+loss every 100 environment steps, plus episode return, outcome and cumulative
+success rate for each observed starting lane. `monitor/env_steps` is their
+configured horizontal axis.
+
+The Easy pilot is 20,000 steps; the Hard run is 1,000,000 steps with model and
+replay checkpoints every 250,000 steps. Both use seed 42, the D-group
+`paper_raw` GRU/SAC settings, uniform 0–20-step delays, training safety off,
+CUDA by default and two Torch threads. The dedicated profile targets the
+[`DAROM-TRP` Forge project](https://forge.coreweave.com/wandb/arlikache-anhui-university/DAROM-TRP)
+under entity `arlikache-anhui-university`. Online metrics omit source and
+model file uploads. Outputs remain under ignored `tmp/ai/e76-d3/` and
+`models_experiments/e76-d3/`.
+
+```bash
+python -B train_sac_delay.py --exit_phase easy_pilot --seed 42 --wandb_mode online
+python -B train_sac_delay.py --exit_phase hard_1m --seed 42 --wandb_mode online
+python -B evaluate_sac_delay.py models_experiments/e76-d3/RUN_NAME.zip \
+    --task exit_e76_d3 --scenario hard --episodes 32 --seed 100001 \
+    --no-safety --output tmp/ai/e76-d3/eval-hard-no-safety.json
+```
+
+Run safety-on evaluation separately with `--safety` and a distinct output
+path. A short pilot verifies training mechanics, not policy convergence.
+To continue the Hard run from a numbered checkpoint, pass its matching model
+and replay paths with `--load_path` and `--replay_buffer_path` to
+`--exit_phase hard_1m`; cumulative steps continue to 1,000,000 from a fresh
+SUMO episode. This resume is not bitwise identical to an uninterrupted run.
+Forge upload and remote code transfer require the repository's explicit
+dangerous-operation confirmation before execution.
+
 Running the two independent training processes at once lets each policy learn
 and finish at its own pace. For these separate models, a simultaneous start
 and joint final report are experiment scheduling, while independent starts

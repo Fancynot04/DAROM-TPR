@@ -12,6 +12,7 @@ from stable_baselines3 import SAC
 
 from src.delay_encoder import DelayAwareGRUEncoder
 from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
+from src import exit_e76_d3_config as exit_config
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
@@ -46,6 +47,8 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
     checkpoint_task = getattr(model, 'antwerp_task', 'legacy_o3_d1')
     if checkpoint_task != task:
         raise ValueError(f'Checkpoint task={checkpoint_task!r}, requested {task!r}')
+    if task == exit_config.TASK_ID and getattr(model, 'exit_potential_beta', None) != exit_config.POTENTIAL_BETA:
+        raise ValueError('Checkpoint E76-to-D3 potential configuration does not match')
     return {'training_safety': getattr(model, 'training_safety', None),
             'evaluation_safety': bool(safety)}
 
@@ -84,7 +87,7 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
                 if outcome == 'Arrived':
                     counts['Teleported Arrived' if teleported else 'Uninterrupted Arrived'] += 1
                 if outcome == 'Max Steps':
-                    if task == 'exit':
+                    if ANTWERP_TASKS[task][2] == 'exit':
                         counts['Exit Reached Timeout' if info.get('stage_reached')
                                else 'No Exit Timeout'] += 1
                     else:
@@ -98,7 +101,7 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
                                 'success': outcome == 'Arrived' and not teleported,
                                 'return': episode_return, 'reset_info': reset_info})
                 break
-    timeout_details = EXIT_TIMEOUT_DETAILS if task == 'exit' else TIMEOUT_DETAILS
+    timeout_details = EXIT_TIMEOUT_DETAILS if ANTWERP_TASKS[task][2] == 'exit' else TIMEOUT_DETAILS
     result = {**{outcome: counts[outcome] for outcome in OUTCOMES},
             **{outcome: counts[outcome] for outcome in timeout_details},
             **{outcome: counts[outcome] for outcome in ARRIVAL_DETAILS},
@@ -109,7 +112,7 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
             'timeout_rate': 100 * counts['Max Steps'] / episodes,
             'emergency_stopping_rate': 100 * counts['Emergency Stopping'] / episodes,
             'mean_return': float(np.mean(returns)), 'episode_results': records}
-    if task != 'exit':
+    if ANTWERP_TASKS[task][2] != 'exit':
         result['no_merge_rate'] = result['timeout_rate']  # historical report field
     return result
 
@@ -161,7 +164,7 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
             'aggregation_unit': 'evaluation_run_of_one_checkpoint',
             'runs': runs, 'aggregate': summarize_runs(
                 runs, tuple(key for key in REPORT_METRICS
-                            if task != 'exit' or key != 'no_merge_rate'))}
+                            if ANTWERP_TASKS[task][2] != 'exit' or key != 'no_merge_rate'))}
 
 
 def parse_args(argv=None):
@@ -213,7 +216,8 @@ def main():
           f"training_safety={report['training_safety']} | evaluation_safety={args.safety}")
     for run in report['runs']:
         print(f"Seed {run['seed']} | episodes={args.episodes}")
-        timeout_details = EXIT_TIMEOUT_DETAILS if args.task == 'exit' else TIMEOUT_DETAILS
+        timeout_details = (EXIT_TIMEOUT_DETAILS if ANTWERP_TASKS[args.task][2] == 'exit'
+                           else TIMEOUT_DETAILS)
         for outcome in (*OUTCOMES, *timeout_details, *ARRIVAL_DETAILS):
             print(f"  {outcome}: {run[outcome]}/{args.episodes}")
     print('Across evaluation runs of this checkpoint (std and upstream-style CI are separate):')

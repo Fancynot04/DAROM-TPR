@@ -1,5 +1,6 @@
 import os, sys
 import hashlib
+import math
 import numpy as np
 from pathlib import Path
 # from inference import model
@@ -7,6 +8,7 @@ import gymnasium as gym
 from gymnasium import spaces
 from .utils import *
 from .geometry import TrafficSnapshot, driving_axes, world_velocity
+from . import exit_e76_d3_config as exit_config
 
 
 maxSteps = 6000
@@ -20,6 +22,7 @@ ANTWERP_TASKS = {
     'legacy_o3_d1': ('O3', 'D1', 'merge'),
     'entry': ('O3', 'E76', 'merge'),
     'exit': ('O1', 'D3', 'exit'),
+    exit_config.TASK_ID: (exit_config.ORIGIN, exit_config.DESTINATION, 'exit'),
 }
 
 if 'SUMO_HOME' in os.environ:
@@ -88,6 +91,10 @@ class Merging(gym.Env):
         self.lane_name = ''
         self.lane_idx = 0
         self.parsed_action = None
+        self.ego_start_lane = None
+        self.potential_distance_scale = None
+        self.potential_previous = 0.0
+        self.initial_potential = 0.0
         self.action = None
         self.runSafetyCheck = runSafetyCheck
         self.last_acc = 0
@@ -150,6 +157,27 @@ class Merging(gym.Env):
         self.lane_idx = 0
         self.observation = np.zeros((31, 3), dtype=np.float32)
         self.state = self.observation.copy()
+        self.ego_start_lane = None
+        self.potential_distance_scale = None
+        self.potential_previous = 0.0
+        self.initial_potential = 0.0
+
+    def _exit_potential(self):
+        if self.task != exit_config.TASK_ID or not self.ego_on_road or self.ego_teleported:
+            return 0.0
+        road = self.traci.vehicle.getRoadID(self.ego_id)
+        if road == 'D3':
+            distance = 0.0
+            lane_index = 0
+        else:
+            distance = self.traci.vehicle.getDrivingDistance(self.ego_id, 'D3', 0.0)
+            if road in ('E76', 'E77'):
+                lane_index = self.traci.vehicle.getLaneIndex(self.ego_id)
+            else:
+                lane_index = self.lane_idx
+        if not math.isfinite(distance):
+            return 0.0
+        return exit_config.potential(distance, self.potential_distance_scale, lane_index)
 
     def reset(self, seed=None, options=None):
         # Seed the environment RNG per Gymnasium API
@@ -199,6 +227,13 @@ class Merging(gym.Env):
                     self.ego_depart_time = self.traci.simulation.getTime()
                     self.ego_inserted = True
                     self.ego_on_road = True
+                    if self.task == exit_config.TASK_ID:
+                        self.ego_start_lane = self.traci.vehicle.getLaneIndex(self.ego_id)
+                        self.potential_distance_scale = sum(
+                            self.traci.lane.getLength(f'{edge}_0')
+                            for edge in exit_config.DISTANCE_SCALE_EDGES)
+                        self.potential_previous = self._exit_potential()
+                        self.initial_potential = self.potential_previous
                     self.observation = np.asarray(self._get_obs(), dtype=np.float32)
         if not self.ego_inserted:
             self.traci.close()
@@ -220,6 +255,9 @@ class Merging(gym.Env):
             'ego_route': list(self.traci.vehicle.getRoute(self.ego_id)),
             'ego_speed_mode': self.traci.vehicle.getSpeedMode(self.ego_id),
             'ego_lane_change_mode': self.traci.vehicle.getLaneChangeMode(self.ego_id),
+            'ego_start_lane': self.ego_start_lane,
+            'initial_potential': self.initial_potential,
+            'potential_distance_scale': self.potential_distance_scale,
         }
 
     def getReward(self):
@@ -447,7 +485,7 @@ class Merging(gym.Env):
             self.lane_idx = self.traci.vehicle.getLaneIndex(self.ego_id)
             if self.teleport_transition:
                 self.traci.vehicle.setLaneChangeMode(self.ego_id, 0)
-            if self.task == 'exit':
+            if self.stage_name == 'exit':
                 if self.lane_name == 'D3':
                     self.stage_reached = True
             elif self._has_merged():
@@ -475,6 +513,14 @@ class Merging(gym.Env):
             self.observation = self.state.copy()
             self.observation_snapshot = None
         self.reward = self.getReward()
+        potential_reward = 0.0
+        if self.task == exit_config.TASK_ID:
+            next_potential = 0.0 if self.done else self._exit_potential()
+            potential_reward = (exit_config.POTENTIAL_GAMMA * next_potential
+                                - self.potential_previous)
+            self.potential_previous = next_potential
+            self.reward += potential_reward
+            self.reward_components['potential'] = float(potential_reward)
         self.state = self.observation.copy()
         self.last_acc = self.parsed_action[0]
         if self.done and close_on_done:
@@ -491,6 +537,10 @@ class Merging(gym.Env):
                      'ego_teleported': bool(self.ego_teleported),
                      'ego_teleporting': bool(self.ego_teleporting),
                      'ego_on_road': bool(self.ego_on_road),
+                     'ego_start_lane': self.ego_start_lane,
+                     'initial_potential': self.initial_potential,
+                     'potential': self.potential_previous,
+                     'potential_reward': potential_reward,
                      'teleport_started': started, 'teleport_ended': ended,
                      'is_success': info['message'] == 'Arrived' and not self.ego_teleported})
         return self.observation, float(self.reward), terminated, truncated, info
