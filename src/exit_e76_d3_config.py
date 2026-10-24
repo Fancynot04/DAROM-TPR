@@ -14,7 +14,7 @@ WANDB_PROJECT = 'DAROM-OUT'
 PHASES = {
     'easy_pilot': {'scenario': 'easy', 'total_timesteps': 20_000,
                    'checkpoint_freq': 10_000},
-    'hard_1m': {'scenario': 'hard', 'total_timesteps': 1_000_000,
+    'easy_1m': {'scenario': 'easy', 'total_timesteps': 1_000_000,
                 'checkpoint_freq': 250_000},
 }
 

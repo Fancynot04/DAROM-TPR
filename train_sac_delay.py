@@ -85,7 +85,7 @@ class EpisodeRewardCallback(BaseCallback):
                 metrics['train/merged_timeout'] = int(outcome == 'Max Steps' and merged)
             if info.get('ego_start_lane') is not None:
                 start_lane = int(info['ego_start_lane'])
-                metrics['monitor/env_steps'] = self.num_timesteps
+                metrics['env_steps'] = self.num_timesteps
                 metrics['train/ego_start_lane'] = start_lane
                 metrics['train/initial_potential'] = float(info['initial_potential'])
                 metrics['train/episode_potential_reward'] = float(self.current_potential_reward)
@@ -106,14 +106,12 @@ class EpisodeRewardCallback(BaseCallback):
 
         if self.num_timesteps % 100 == 0 and self.locals['infos'][0].get('ego_start_lane') is not None:
             latest = self.model.logger.name_to_value
-            scalar_names = {'train/actor_loss': 'monitor/actor_loss',
-                            'train/critic_loss': 'monitor/critic_loss',
-                            'train/ent_coef': 'monitor/entropy_coefficient',
-                            'train/ent_coef_loss': 'monitor/entropy_loss'}
-            scalars = {target: float(latest[source]) for source, target in scalar_names.items()
-                       if source in latest and np.isfinite(latest[source])}
+            scalar_names = ('train/actor_loss', 'train/critic_loss',
+                            'train/ent_coef', 'train/ent_coef_loss')
+            scalars = {name: float(latest[name]) for name in scalar_names
+                       if name in latest and np.isfinite(latest[name])}
             if scalars:
-                record = {'monitor/env_steps': self.num_timesteps, **scalars}
+                record = {'env_steps': self.num_timesteps, **scalars}
                 wandb.log(record)
                 self._write({'event': 'scalars', 'steps': self.num_timesteps, **record})
 
@@ -196,7 +194,7 @@ def parse_args():
     parser.add_argument('--task', choices=tuple(ANTWERP_TASKS), default='legacy_o3_d1',
                         help='Single-ego task; legacy default preserves existing O3-to-D1 runs')
     parser.add_argument('--exit_phase', choices=tuple(exit_config.PHASES), default=None,
-                        help='Dedicated E76-to-D3 Easy pilot or Hard 1M configuration')
+                        help='Dedicated E76-to-D3 Easy pilot or Easy 1M configuration')
     parser.add_argument('--safety', dest='use_safety', action='store_true')
     parser.add_argument('--save_dir', type=str, default='models_experiments')
     parser.add_argument('--load_path', type=str, default=None)
@@ -304,6 +302,7 @@ def main():
         ego_depart_lane=(exit_config.DEPART_LANE if args.exit_phase else None),
         potential_beta=(exit_config.POTENTIAL_BETA if args.exit_phase else None),
         potential_gamma=(exit_config.POTENTIAL_GAMMA if args.exit_phase else None),
+        metric_schema=('env_steps_v2' if args.exit_phase else None),
         wandb_project=args.project,
         wandb_entity=args.entity,
         use_safety=args.use_safety,
@@ -409,17 +408,18 @@ def main():
         model.exit_potential_beta = exit_config.POTENTIAL_BETA
 
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
-                     mode=args.wandb_mode, dir=args.log_dir, sync_tensorboard=True,
+                     mode=args.wandb_mode, dir=args.log_dir,
+                     sync_tensorboard=not args.exit_phase,
                      save_code=not args.exit_phase, resume=args.resume, id=args.run_id,
-                     group='e76-d3-single-exit' if args.exit_phase else None,
+                     group=f'e76-d3-{args.exit_phase}' if args.exit_phase else None,
                      job_type=args.exit_phase,
-                     tags=['E76-D3', 'single-ego', 'potential-beta10'] if args.exit_phase else None)
+                     tags=['E76-D3', 'single-ego', 'potential-beta10', 'metric-schema-v2']
+                     if args.exit_phase else None)
     if not args.exit_phase:
         run.log_code('src')
     else:
-        run.define_metric('monitor/env_steps')
-        run.define_metric('monitor/*', step_metric='monitor/env_steps')
-        run.define_metric('train/*', step_metric='monitor/env_steps')
+        run.define_metric('env_steps')
+        run.define_metric('train/*', step_metric='env_steps')
 
     ensure_dirs(args.save_dir)
 

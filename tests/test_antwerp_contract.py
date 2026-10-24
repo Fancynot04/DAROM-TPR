@@ -15,7 +15,7 @@ import torch
 from evaluate_sac_delay import (evaluate, evaluate_runs, parse_args as parse_eval_args,
                                 summarize_runs, validate_checkpoint_setup, validate_seed_ranges,
                                 checkpoint_gru_input_mode)
-from train_sac_delay import parse_args as parse_train_args
+from train_sac_delay import EpisodeRewardCallback, parse_args as parse_train_args
 from src.delay_encoder import DelayAwareGRUEncoder
 from src import exit_e76_d3_config as exit_config
 from src.geometry import TrafficSnapshot, align_delayed_neighbors
@@ -64,11 +64,36 @@ class GRUInputContractTests(unittest.TestCase):
 
 
 class SeparateEgoTaskTests(unittest.TestCase):
+    def test_exit_forge_metrics_share_one_environment_step_axis(self):
+        callback = EpisodeRewardCallback()
+        callback.num_timesteps = 100
+        callback.model = SimpleNamespace(logger=SimpleNamespace(name_to_value={
+            'train/actor_loss': -3.0, 'train/critic_loss': 1.0,
+            'train/ent_coef': 0.8, 'train/ent_coef_loss': -0.2,
+        }))
+        callback.locals = {
+            'rewards': np.array([1.0]), 'dones': np.array([True]),
+            'infos': [{'message': 'Arrived', 'stage_name': 'exit',
+                       'stage_reached': True, 'stage_reward_paid': True,
+                       'merged': False, 'ego_teleported': False,
+                       'is_success': True, 'ego_start_lane': 2,
+                       'initial_potential': 0.9, 'potential_reward': -0.1}],
+        }
+        with patch('train_sac_delay.wandb.log') as log:
+            self.assertTrue(callback._on_step())
+        records = [call.args[0] for call in log.call_args_list]
+        self.assertEqual(len(records), 2)
+        self.assertTrue(all(record['env_steps'] == 100 for record in records))
+        self.assertTrue(all(not any(key.startswith('monitor/') for key in record)
+                            for record in records))
+        self.assertEqual(records[0]['train/success'], 1)
+        self.assertEqual(records[1]['train/actor_loss'], -3.0)
+
     def test_e76_phase_selects_designated_forge_and_d_group_profile(self):
-        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'hard_1m']):
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'easy_1m']):
             args = parse_train_args()
         self.assertEqual((args.task, args.scenario, args.total_timesteps),
-                         (exit_config.TASK_ID, 'hard', 1_000_000))
+                         (exit_config.TASK_ID, 'easy', 1_000_000))
         self.assertEqual((args.project, args.entity),
                          (exit_config.WANDB_PROJECT, exit_config.WANDB_ENTITY))
         self.assertEqual(args.project, 'DAROM-OUT')

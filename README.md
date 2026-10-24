@@ -521,7 +521,7 @@ different lengths.
 
 ### E76 → D3 single-ego exit experiment
 
-`--exit_phase easy_pilot` and `--exit_phase hard_1m` select a separate
+`--exit_phase easy_pilot` and `--exit_phase easy_1m` select a separate
 `exit_e76_d3` task on the single-ego DAROM GRU/SAC training entry. Its route
 files preserve each scenario's background traffic. The ego trip is `E76 → D3`
 with SUMO `departLane="random"`; SUMO chooses an available E76 lane from
@@ -539,12 +539,13 @@ in the current network). Including D3 in `D` gives different starting lanes
 distinct initial potential values. Terminal potential is zero, and teleport
 permanently disables subsequent positive shaping. `reward_components.potential`
 and Forge `train/episode_potential_reward` expose its contribution.
-Forge also receives actor and critic loss, entropy coefficient and entropy
-loss every 100 environment steps, plus episode return, outcome and cumulative
-success rate for each observed starting lane. `monitor/env_steps` is their
-configured horizontal axis.
+Forge receives actor and critic loss, entropy coefficient and entropy loss
+every 100 environment steps, plus episode return, outcome and cumulative
+success rate for each observed starting lane. All `train/*` curves use
+`env_steps` as their horizontal axis. TensorBoard remains local; this task
+does not sync its sparse duplicate `train/*` metrics to Forge.
 
-The Easy pilot is 20,000 steps; the Hard run is 1,000,000 steps with model and
+The Easy pilot is 20,000 steps; the Easy run is 1,000,000 steps with model and
 replay checkpoints every 250,000 steps. Both use seed 42, the D-group
 `paper_raw` GRU/SAC settings, uniform 0–20-step delays, training safety off,
 CUDA by default and two Torch threads. The dedicated profile targets the
@@ -555,17 +556,17 @@ model file uploads. Outputs remain under ignored `tmp/ai/e76-d3/` and
 
 ```bash
 python -B train_sac_delay.py --exit_phase easy_pilot --seed 42 --wandb_mode online
-python -B train_sac_delay.py --exit_phase hard_1m --seed 42 --wandb_mode online
+python -B train_sac_delay.py --exit_phase easy_1m --seed 42 --wandb_mode online
 python -B evaluate_sac_delay.py models_experiments/e76-d3/RUN_NAME.zip \
-    --task exit_e76_d3 --scenario hard --episodes 32 --seed 100001 \
-    --no-safety --output tmp/ai/e76-d3/eval-hard-no-safety.json
+    --task exit_e76_d3 --scenario easy --episodes 32 --seed 100001 \
+    --no-safety --output tmp/ai/e76-d3/eval-easy-no-safety.json
 ```
 
 Run safety-on evaluation separately with `--safety` and a distinct output
 path. A short pilot verifies training mechanics, not policy convergence.
-To continue the Hard run from a numbered checkpoint, pass its matching model
+To continue the Easy run from a numbered checkpoint, pass its matching model
 and replay paths with `--load_path` and `--replay_buffer_path` to
-`--exit_phase hard_1m`; cumulative steps continue to 1,000,000 from a fresh
+`--exit_phase easy_1m`; cumulative steps continue to 1,000,000 from a fresh
 SUMO episode. This resume is not bitwise identical to an uninterrupted run.
 Forge upload and remote code transfer require the repository's explicit
 dangerous-operation confirmation before execution.
