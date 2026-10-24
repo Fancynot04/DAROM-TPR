@@ -225,7 +225,7 @@ def parse_args():
         args.checkpoint_freq = phase['checkpoint_freq']
         args.save_replay_buffer = True
         if args.project not in (None, exit_config.WANDB_PROJECT):
-            parser.error('E76-to-D3 profile uses the designated DAROM-TRP Forge project')
+            parser.error('E76-to-D3 profile uses the designated DAROM-OUT Forge project')
         if args.entity not in (None, exit_config.WANDB_ENTITY):
             parser.error('E76-to-D3 profile uses the designated Forge entity')
         args.project = exit_config.WANDB_PROJECT

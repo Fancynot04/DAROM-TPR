@@ -71,6 +71,7 @@ class SeparateEgoTaskTests(unittest.TestCase):
                          (exit_config.TASK_ID, 'hard', 1_000_000))
         self.assertEqual((args.project, args.entity),
                          (exit_config.WANDB_PROJECT, exit_config.WANDB_ENTITY))
+        self.assertEqual(args.project, 'DAROM-OUT')
         self.assertEqual((args.checkpoint_freq, args.device, args.encoder_mode),
                          (250_000, 'cuda', 'GRU'))
         self.assertTrue(args.save_replay_buffer)

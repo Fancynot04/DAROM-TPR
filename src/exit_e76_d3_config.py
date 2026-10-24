@@ -9,7 +9,7 @@ POTENTIAL_GAMMA = 0.99
 DISTANCE_SCALE_EDGES = ('E76', 'E77', 'D3')
 
 WANDB_ENTITY = 'arlikache-anhui-university'
-WANDB_PROJECT = 'DAROM-TRP'
+WANDB_PROJECT = 'DAROM-OUT'
 
 PHASES = {
     'easy_pilot': {'scenario': 'easy', 'total_timesteps': 20_000,

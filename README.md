@@ -548,7 +548,7 @@ The Easy pilot is 20,000 steps; the Hard run is 1,000,000 steps with model and
 replay checkpoints every 250,000 steps. Both use seed 42, the D-group
 `paper_raw` GRU/SAC settings, uniform 0–20-step delays, training safety off,
 CUDA by default and two Torch threads. The dedicated profile targets the
-[`DAROM-TRP` Forge project](https://forge.coreweave.com/wandb/arlikache-anhui-university/DAROM-TRP)
+[`DAROM-OUT` Forge project](https://forge.coreweave.com/wandb/arlikache-anhui-university/DAROM-OUT)
 under entity `arlikache-anhui-university`. Online metrics omit source and
 model file uploads. Outputs remain under ignored `tmp/ai/e76-d3/` and
 `models_experiments/e76-d3/`.
