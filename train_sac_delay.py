@@ -3,6 +3,7 @@ import os
 import time
 import argparse
 import json
+import subprocess
 import torch
 from typing import Optional
 from src.wrapper import SafetyWrapper
@@ -278,6 +279,11 @@ def main():
     ensure_dirs(args.log_dir)
 
     max_delay = 20
+    try:
+        git_commit = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        git_commit = None
     sac_parameters = dict(
         learning_rate=3e-5, batch_size=512, buffer_size=1_000_000,
         learning_starts=100, gamma=args.gamma, tau=0.005, train_freq=1,
@@ -286,6 +292,7 @@ def main():
     )
     config = dict(
         algo='SAC',
+        git_commit=git_commit,
         radius=args.radius,
         seed=args.seed,
         total_timesteps=args.total_timesteps,
