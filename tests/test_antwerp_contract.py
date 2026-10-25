@@ -141,6 +141,35 @@ class SeparateEgoTaskTests(unittest.TestCase):
         self.assertAlmostEqual(values[0], 10 * (1 - distance / scale))
         self.assertAlmostEqual(values[4], values[0] / 5)
         self.assertEqual(exit_config.potential(-1, scale, 0), 0)
+        self.assertEqual(exit_config.potential(float('nan'), scale, 0), 0)
+        self.assertEqual(exit_config.potential(3.53, float('nan'), 0), 0)
+
+    def test_e76_exit_invalid_route_distance_has_no_potential(self):
+        env = Merging(seed=1, task=exit_config.TASK_ID)
+        env.ego_id = 'ego'
+        env.ego_on_road = True
+        env.potential_distance_scale = 1260.74
+        fake = Mock()
+        fake.vehicle.getRoadID.return_value = 'E77'
+        fake.vehicle.getLaneIndex.return_value = 1
+        with patch('src.merging.traci', fake):
+            for invalid in (-1.0, float('nan'), float('inf')):
+                fake.vehicle.getDrivingDistance.return_value = invalid
+                self.assertEqual(env._exit_potential(), 0.0)
+            fake.vehicle.getDrivingDistance.return_value = 3.53
+            self.assertAlmostEqual(env._exit_potential(),
+                                   exit_config.potential(3.53, 1260.74, 1))
+            fake.vehicle.getRoadID.return_value = 'D3'
+            self.assertEqual(env._exit_potential(), exit_config.potential(0, 1260.74, 0))
+
+    def test_j105_straight_lane_geometry_exposes_raw_index_change(self):
+        network = ET.parse(Path(__file__).resolve().parents[1]
+                           / 'sumo_new/Antwerp.net.xml').getroot()
+        lanes = {lane.get('id'): lane for lane in network.iter('lane')}
+        for lane in range(5):
+            e76_y = float(lanes[f'E76_{lane}'].get('shape').split()[0].split(',')[1])
+            e77_y = float(lanes[f'E77_{lane + 1}'].get('shape').split()[0].split(',')[1])
+            self.assertAlmostEqual(e76_y, e77_y)
 
     def test_e76_exit_checkpoint_requires_potential_profile(self):
         model = SimpleNamespace(antwerp_env_version=ANTWERP_ENV_VERSION,
@@ -148,7 +177,8 @@ class SeparateEgoTaskTests(unittest.TestCase):
                                 gamma=exit_config.POTENTIAL_GAMMA,
                                 exit_potential_beta=exit_config.POTENTIAL_BETA,
                                 exit_potential_gamma=exit_config.POTENTIAL_GAMMA,
-                                exit_reward_profile=exit_config.REWARD_PROFILE)
+                                exit_reward_profile=exit_config.REWARD_PROFILE,
+                                exit_control_profile=exit_config.CONTROL_PROFILE)
         validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
         model.exit_potential_beta = 5
         with self.assertRaisesRegex(ValueError, 'potential configuration'):
@@ -158,9 +188,146 @@ class SeparateEgoTaskTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'reward profile'):
             validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
         model.exit_reward_profile = exit_config.REWARD_PROFILE
+        del model.exit_control_profile
+        with self.assertRaisesRegex(ValueError, 'control profile'):
+            validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
+        model.exit_control_profile = exit_config.CONTROL_PROFILE
         model.exit_potential_gamma = 0.999
         with self.assertRaisesRegex(ValueError, 'gamma do not match'):
             validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
+
+    def test_e77_lane_change_requires_room_before_junction(self):
+        env = Merging(seed=1, task=exit_config.TASK_ID)
+        env.ego_id = 'ego'
+        env.lane_name = 'E77'
+        env.lane_idx = 2
+        fake = Mock()
+        fake.edge.getLaneNumber.return_value = 6
+        fake.vehicle.getLaneID.return_value = 'E77_2'
+        fake.lane.getLength.return_value = 172.35
+        fake.vehicle.getLength.return_value = 5.0
+        fake.vehicle.getSpeed.return_value = 10.0
+        fake.simulation.getTime.return_value = 100.0
+        with patch('src.merging.traci', fake):
+            fake.vehicle.getLanePosition.return_value = 100.0
+            env._apply_lane_change(-1)
+            fake.vehicle.changeLane.assert_called_once_with(
+                'ego', 1, exit_config.LANE_CHANGE_TIME_SECONDS)
+            fake.vehicle.changeLane.reset_mock()
+            env._apply_lane_change(1)
+            fake.vehicle.changeLane.assert_not_called()
+            env.exit_maneuver = None
+            fake.vehicle.getLanePosition.return_value = 140.0
+            env._apply_lane_change(-1)
+            fake.vehicle.changeLane.assert_not_called()
+
+    def test_exit_maneuver_stays_latched_across_j105_until_stable(self):
+        env = Merging(seed=1, task=exit_config.TASK_ID)
+        env.ego_id = 'ego'
+        env.exit_maneuver = {'edge': 'E76', 'target': 2, 'start_time': 100.0,
+                             'last_progress_time': 100.0, 'stable_steps': 0}
+        fake = Mock()
+        fake.vehicle.getLaneID.return_value = ':J105_0_3'
+        fake.vehicle.getWidth.return_value = 1.8
+        fake.lane.getWidth.return_value = 3.2
+        fake.vehicle.getLateralLanePosition.return_value = 0.0
+        fake.vehicle.getLateralSpeed.return_value = 0.0
+        with patch('src.merging.traci', fake):
+            env.lane_name, env.lane_idx = ':J105_0', 3
+            fake.simulation.getTime.return_value = 102.0
+            env._update_exit_maneuver()
+            self.assertIsNotNone(env.exit_maneuver)
+            self.assertEqual(env.exit_maneuver['stable_steps'], 1)
+            env.lane_name = 'E77'
+            fake.vehicle.getLaneID.return_value = 'E77_3'
+            for time in (102.1, 102.2):
+                fake.simulation.getTime.return_value = time
+                env._update_exit_maneuver()
+            self.assertIsNone(env.exit_maneuver)
+
+    def test_e77_legal_maneuver_gets_bounded_completion_window(self):
+        env = Merging(seed=1, task=exit_config.TASK_ID)
+        env.exit_maneuver = {'edge': 'E77', 'target': 0, 'start_time': 100.0,
+                             'last_progress_time': 102.0, 'stable_steps': 0}
+        fake = Mock()
+        with patch('src.merging.traci', fake):
+            fake.simulation.getTime.return_value = 103.0
+            self.assertTrue(env._e77_maneuver_can_finish())
+            fake.simulation.getTime.return_value = 104.0
+            self.assertFalse(env._e77_maneuver_can_finish())
+            env.exit_maneuver['last_progress_time'] = 105.0
+            fake.simulation.getTime.return_value = 106.0
+            self.assertFalse(env._e77_maneuver_can_finish())
+
+    def test_exit_maneuver_stays_latched_across_j106(self):
+        env = Merging(seed=1, task=exit_config.TASK_ID)
+        env.ego_id = 'ego'
+        env.exit_maneuver = {'edge': 'E77', 'target': 0, 'start_time': 100.0,
+                             'last_progress_time': 100.0, 'stable_steps': 0}
+        fake = Mock()
+        fake.vehicle.getLaneID.return_value = ':J106_0_0'
+        fake.vehicle.getWidth.return_value = 1.8
+        fake.vehicle.getLateralLanePosition.return_value = 1.0
+        fake.vehicle.getLateralSpeed.return_value = -1.0
+        fake.lane.getWidth.return_value = 3.2
+        with patch('src.merging.traci', fake):
+            env.lane_name, env.lane_idx = ':J106_0', 0
+            fake.simulation.getTime.return_value = 102.0
+            env._update_exit_maneuver()
+            self.assertIsNotNone(env.exit_maneuver)
+            env.lane_name = 'D3'
+            fake.vehicle.getLaneID.return_value = 'D3_0'
+            fake.vehicle.getLateralLanePosition.return_value = 0.0
+            fake.vehicle.getLateralSpeed.return_value = 0.0
+            for time in (102.1, 102.2, 102.3):
+                fake.simulation.getTime.return_value = time
+                env._update_exit_maneuver()
+            self.assertIsNone(env.exit_maneuver)
+            fake.vehicle.getSpeed.return_value = 0.0
+            fake.vehicle.getLanePosition.return_value = 172.35
+            env._apply_lane_change(-1)
+            fake.vehicle.changeLane.assert_not_called()
+
+    def test_e77_lane_end_misses_exit_even_after_lane_index_changes_to_zero(self):
+        env = Merging(seed=1, task=exit_config.TASK_ID)
+        env.ego_id = 'ego'
+        env.ego_on_road = True
+        env.potential_distance_scale = 1260.74
+        env.potential_previous = 5.0
+        env.given_merge_reward = False
+        env.parsed_action = [0, -1]
+        env.action = [0, -5]
+        env.counter = 1
+        env.state = np.zeros((31, 3), np.float32)
+        env.observation = env.state.copy()
+        fake = Mock()
+        fake.vehicle.getIDList.return_value = ('ego',)
+        fake.vehicle.getRoadID.return_value = 'E77'
+        fake.vehicle.getLaneID.return_value = 'E77_0'
+        fake.vehicle.getLaneIndex.return_value = 0
+        fake.vehicle.getLanePosition.return_value = 172.35
+        fake.vehicle.getWidth.return_value = 1.8
+        fake.vehicle.getLateralLanePosition.return_value = 1.55
+        fake.vehicle.getLateralSpeed.return_value = -1.0
+        fake.lane.getLength.return_value = 172.35
+        fake.lane.getWidth.return_value = 3.2
+        for name in ('getStartingTeleportIDList', 'getEndingTeleportIDList',
+                     'getCollidingVehiclesIDList', 'getArrivedIDList',
+                     'getEmergencyStoppingVehiclesIDList'):
+            getattr(fake.simulation, name).return_value = ()
+        with patch('src.merging.traci', fake), patch('src.merging.safe_gap', return_value=(True, True)), \
+                patch.object(env, '_get_obs', return_value=env.state.copy()):
+            _, reward, terminated, truncated, info = env.collect_step(True, close_on_done=False)
+        self.assertTrue(terminated)
+        self.assertFalse(truncated)
+        self.assertEqual(info['message'], 'Missed Exit')
+        self.assertFalse(info['stage_reached'])
+        self.assertFalse(info['is_success'])
+        self.assertEqual(info['reward_components']['missed_exit'], -100.0)
+        self.assertEqual(info['reward_components']['arrival'], 0.0)
+        self.assertEqual(info['reward_components']['stage'], 0.0)
+        self.assertEqual(info['potential_reward'], -5.0)
+        self.assertLess(reward, -100.0)
 
     def test_e76_exit_does_not_penalize_lane_command(self):
         fake = Mock()
@@ -524,6 +691,18 @@ class EvaluationProtocolTests(unittest.TestCase):
         env.step.return_value = (None, 0, True, False, {'message': 'Unknown'})
         with self.assertRaisesRegex(ValueError, 'Unexpected episode outcome'):
             evaluate(self.model(), env, 1, 10)
+
+    def test_missed_exit_is_counted_separately_from_timeout(self):
+        env = Mock()
+        env.reset.return_value = (np.zeros(134), {})
+        env.step.return_value = (None, -100, True, False,
+                                 {'message': 'Missed Exit', 'ego_teleported': False,
+                                  'stage_reached': False})
+        report = evaluate(self.model(), env, 1, 10, task=exit_config.TASK_ID)
+        self.assertEqual(report['Missed Exit'], 1)
+        self.assertEqual(report['missed_exit_rate'], 100)
+        self.assertEqual(report['timeout_rate'], 0)
+        self.assertEqual(report['success_rate'], 0)
 
 
 class PacketEnv(gym.Env):

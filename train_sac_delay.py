@@ -76,6 +76,7 @@ class EpisodeRewardCallback(BaseCallback):
                 'train/teleported_arrival': int(outcome == 'Arrived' and info['ego_teleported']),
                 'train/collision': int(outcome == 'Collision'),
                 'train/emergency_stopping': int(outcome == 'Emergency Stopping'),
+                'train/missed_exit': int(outcome == 'Missed Exit'),
                 'train/no_stage_timeout': int(outcome == 'Max Steps' and not stage_reached),
                 'train/stage_reached_timeout': int(outcome == 'Max Steps' and stage_reached),
                 'train/stage_reached': int(stage_reached),
@@ -313,6 +314,7 @@ def main():
         potential_beta=(exit_config.POTENTIAL_BETA if args.exit_phase else None),
         potential_gamma=(args.gamma if args.exit_phase else None),
         reward_profile=(exit_config.REWARD_PROFILE if args.exit_phase else None),
+        exit_control_profile=(exit_config.CONTROL_PROFILE if args.exit_phase else None),
         metric_schema=('env_steps_v2' if args.exit_phase else None),
         wandb_project=args.project,
         wandb_entity=args.entity,
@@ -406,6 +408,9 @@ def main():
                 if (getattr(loaded_model, 'exit_reward_profile', None)
                         != exit_config.REWARD_PROFILE):
                     raise ValueError('Loaded model has a different E76-to-D3 reward profile')
+                if (getattr(loaded_model, 'exit_control_profile', None)
+                        != exit_config.CONTROL_PROFILE):
+                    raise ValueError('Loaded model has a different E76-to-D3 control profile')
                 loaded_gamma = getattr(loaded_model, 'exit_potential_gamma',
                                        getattr(loaded_model, 'gamma', None))
                 if (not np.isclose(float(loaded_gamma), args.gamma, rtol=0.0, atol=1e-12)
@@ -429,16 +434,18 @@ def main():
         model.exit_potential_beta = exit_config.POTENTIAL_BETA
         model.exit_potential_gamma = args.gamma
         model.exit_reward_profile = exit_config.REWARD_PROFILE
+        model.exit_control_profile = exit_config.CONTROL_PROFILE
 
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
                      mode=args.wandb_mode, dir=args.log_dir,
                      sync_tensorboard=not args.exit_phase,
                      save_code=not args.exit_phase, resume=args.resume, id=args.run_id,
-                     group=f'e76-d3-{args.exit_phase}-{exit_config.REWARD_PROFILE}'
+                     group=(f'e76-d3-{args.exit_phase}-{exit_config.REWARD_PROFILE}'
+                            f'-{exit_config.CONTROL_PROFILE}')
                      if args.exit_phase else None,
                      job_type=args.exit_phase,
                      tags=['E76-D3', 'single-ego', 'potential-beta10', 'metric-schema-v2',
-                           exit_config.REWARD_PROFILE]
+                           exit_config.REWARD_PROFILE, exit_config.CONTROL_PROFILE]
                      if args.exit_phase else None)
     if not args.exit_phase:
         run.log_code('src')

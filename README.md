@@ -530,13 +530,38 @@ the Forge `train/ego_start_lane` metric. No uniform departure distribution is
 assumed. Only E77_0 connects to D3, so other starting lanes require a lane
 change before the E77→D3 junction.
 
+The `tracked_lane_change_v2` control profile requires each new E76 or E77 lane
+change to have enough remaining lane length for a 4 s maneuver, the ego's
+length, and a 5 m buffer. The 4 s allowance rounds up a same-seed TraCI probe
+that took 3.3 s from first lateral motion to full containment in the adjacent
+lane. A legal request is sent once and its target remains latched across J105
+or J106 until the ego is fully contained and laterally settled for three steps;
+opposing commands cannot interrupt it. At the E77 lane end, an active maneuver
+toward `E77_0` may finish within six seconds of its start, provided lateral
+progress has occurred within two seconds. Otherwise the episode terminates as
+`Missed Exit`
+with a −100 scaled penalty, matching the existing timeout penalty magnitude;
+it earns neither exit-stage nor arrival bonus. Evaluation reports
+`missed_exit_rate` separately from `timeout_rate`, and training logs
+`train/missed_exit`. New E76→D3 checkpoints store `exit_control_profile`;
+old checkpoints and replay buffers cannot resume under this rule. The profile
+applies only to `exit_e76_d3`.
+
 Only this task adds potential shaping to the existing scaled reward:
 `F(s,s') = 0.99 Φ(s') − Φ(s)`, where
 `Φ(s) = 10 · clip(1 − d/D, 0, 1) · (1 − min(n,5)/5)`.
-Here `d` is SUMO driving distance to the **D3 entrance**, `n` is the current
+Here `d` is SUMO driving distance to the **D3 entrance**, `n` is the reported
 lane index, and `D` is the fixed total length of E76, E77 and D3 (1260.74 m
-in the current network). Including D3 in `D` gives different starting lanes
-distinct initial potential values. Terminal potential is zero, and teleport
+in the current network). At J105, `E76_0` connects to both `E77_0` and
+`E77_1`, while `E76_i` connects to `E77_(i+1)` for `i=1..4`. Thus the
+index increase on a straight crossing can represent an additional lane change
+needed after passing the junction, even without physical lateral motion. It
+does not by itself establish a calculation error. Adding one to every E76
+index would also incorrectly penalize `E76_0`, which already has a direct
+path to `E77_0`. The 1M `e76-d3-easy-1m-nolc-20261024` run used the raw-index
+profile; compare its potential results only under that definition. Including
+D3 in `D` gives different starting lanes distinct initial potentials. Terminal
+potential is zero, and teleport
 permanently disables subsequent positive shaping. `reward_components.potential`
 and Forge `train/episode_potential_reward` expose its contribution.
 For the next E76→D3 run, the per-command lane-change deduction is disabled:
@@ -569,12 +594,26 @@ and PBRS gamma to 0.999. It trains for 200,000 steps and saves model and replay
 buffer checkpoints at 100,000 and 200,000 steps. A 250,000-step gamma-0.99
 checkpoint may be reported as a reference, but it is not an equal-budget
 control for the 200,000-step EXP-005 model.
+Its historical 25-episode evaluation had 18 arrivals; full trajectories show
+that 11 of those arrivals reached the E77 lane end before completing the
+required lane change. This is historical evidence under the earlier control
+profile, not an adjusted result for the new profile. A new policy must be
+trained from scratch and evaluated on the same seeds before comparing outcomes.
+
+The corrected-control γ=0.99 baseline uses `gamma099_baseline_800k`: Easy,
+seed 42, the original lane-index potential above, the
+`tracked_lane_change_v2` controller, safety off, `paper_raw` GRU, uniform
+0–20-step delay, and 800,000 fresh SAC steps. It saves model and replay
+checkpoints at 200,000-step intervals under a new run name. Historical
+γ=0.999 checkpoints and replay buffers are not inputs to this baseline.
 
 ```bash
 python -B train_sac_delay.py --exit_phase easy_pilot --seed 42 --wandb_mode online
 python -B train_sac_delay.py --exit_phase easy_1m --seed 42 --wandb_mode online
 python -B train_sac_delay.py --exit_phase exp005_gamma0999_200k --seed 42 \
     --run_name E76D3-GAMMA0999-S42-200K --wandb_mode online
+python -B train_sac_delay.py --exit_phase gamma099_baseline_800k --seed 42 \
+    --run_name E76D3-GAMMA099-S42-800K-V2 --wandb_mode online
 python -B evaluate_sac_delay.py models_experiments/e76-d3/RUN_NAME.zip \
     --task exit_e76_d3 --scenario easy --episodes 32 --seed 100001 \
     --no-safety --output tmp/ai/e76-d3/eval-easy-no-safety.json

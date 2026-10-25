@@ -86,6 +86,8 @@ class Merging(gym.Env):
         self.last_stage_reward = 0.0
         self.ego_teleported = False
         self.ego_teleporting = False
+        self.missed_exit = False
+        self.exit_maneuver = None
         self.ego_on_road = False
         self.teleport_transition = False
         self.observation_snapshot = None
@@ -141,6 +143,8 @@ class Merging(gym.Env):
         self.last_stage_reward = 0.0
         self.ego_teleported = False
         self.ego_teleporting = False
+        self.missed_exit = False
+        self.exit_maneuver = None
         self.ego_on_road = False
         self.teleport_transition = False
         self.observation_snapshot = None
@@ -180,6 +184,76 @@ class Merging(gym.Env):
         if not math.isfinite(distance):
             return 0.0
         return exit_config.potential(distance, self.potential_distance_scale, lane_index)
+
+    def _e77_remaining(self):
+        lane_id = self.traci.vehicle.getLaneID(self.ego_id)
+        return max(0.0, self.traci.lane.getLength(lane_id)
+                   - self.traci.vehicle.getLanePosition(self.ego_id))
+
+    def _e77_exit_lane_ready(self):
+        if self.traci.vehicle.getLaneIndex(self.ego_id) != 0:
+            return False
+        lane_id = self.traci.vehicle.getLaneID(self.ego_id)
+        clearance = (self.traci.lane.getWidth(lane_id)
+                     - self.traci.vehicle.getWidth(self.ego_id)) / 2.0
+        return (clearance >= 0
+                and abs(self.traci.vehicle.getLateralLanePosition(self.ego_id)) <= clearance
+                and abs(self.traci.vehicle.getLateralSpeed(self.ego_id))
+                <= exit_config.LATERAL_SETTLED_SPEED_MPS)
+
+    def _exit_change_has_room(self):
+        speed = max(self.traci.vehicle.getSpeed(self.ego_id),
+                    exit_config.MIN_MANEUVER_SPEED_MPS)
+        required = (speed * exit_config.LANE_CHANGE_TIME_SECONDS
+                    + self.traci.vehicle.getLength(self.ego_id)
+                    + exit_config.LANE_END_BUFFER_METERS)
+        lane_id = self.traci.vehicle.getLaneID(self.ego_id)
+        remaining = self.traci.lane.getLength(lane_id) - self.traci.vehicle.getLanePosition(self.ego_id)
+        return remaining > required
+
+    def _exit_maneuver_target_matches(self):
+        maneuver = self.exit_maneuver
+        road = self.lane_name
+        target = maneuver['target']
+        if road == maneuver['edge']:
+            return self.lane_idx == target
+        if maneuver['edge'] == 'E76' and (road == 'E77' or road.startswith(':J105')):
+            # J105 adds a lane on the D3 side. E76_0 also has a D3 connector.
+            return self.lane_idx == target + 1 or (target == 0 and self.lane_idx == 0)
+        if maneuver['edge'] == 'E77' and (road == 'D3' or road.startswith(':J106')):
+            return target == 0 and self.lane_idx == 0
+        return False
+
+    def _update_exit_maneuver(self):
+        maneuver = self.exit_maneuver
+        if maneuver is None:
+            return
+        lateral_speed = abs(self.traci.vehicle.getLateralSpeed(self.ego_id))
+        now = self.traci.simulation.getTime()
+        if lateral_speed > exit_config.LATERAL_SETTLED_SPEED_MPS:
+            maneuver['last_progress_time'] = now
+        lane_id = self.traci.vehicle.getLaneID(self.ego_id)
+        clearance = (self.traci.lane.getWidth(lane_id)
+                     - self.traci.vehicle.getWidth(self.ego_id)) / 2.0
+        settled = (self._exit_maneuver_target_matches() and clearance >= 0
+                   and abs(self.traci.vehicle.getLateralLanePosition(self.ego_id)) <= clearance
+                   and lateral_speed <= exit_config.LATERAL_SETTLED_SPEED_MPS)
+        maneuver['stable_steps'] = maneuver['stable_steps'] + 1 if settled else 0
+        if maneuver['stable_steps'] >= exit_config.MANEUVER_STABLE_STEPS:
+            self.exit_maneuver = None
+        elif (now - maneuver['start_time'] >= exit_config.MANEUVER_MAX_SECONDS
+              and lateral_speed <= exit_config.LATERAL_SETTLED_SPEED_MPS):
+            # An unfulfilled command expires; a vehicle still moving laterally
+            # remains locked until it settles or the exit is missed.
+            self.exit_maneuver = None
+
+    def _e77_maneuver_can_finish(self):
+        maneuver = self.exit_maneuver
+        if maneuver is None or maneuver['target'] != 0:
+            return False
+        now = self.traci.simulation.getTime()
+        return (now - maneuver['start_time'] < exit_config.MANEUVER_MAX_SECONDS
+                and now - maneuver['last_progress_time'] < exit_config.MANEUVER_STALL_SECONDS)
 
     def reset(self, seed=None, options=None):
         # Seed the environment RNG per Gymnasium API
@@ -309,11 +383,15 @@ class Merging(gym.Env):
         merge_reward = 0.0
         lane_command_penalty = 0.0
         max_steps_penalty = 0.0
+        missed_exit_penalty = 0.0
 
         if self.ego_id in self.traci.simulation.getCollidingVehiclesIDList():
             print("Colliding")
             collision_penalty = 1000
             r -= collision_penalty
+        elif self.missed_exit:
+            missed_exit_penalty = exit_config.MISSED_EXIT_PENALTY
+            r -= missed_exit_penalty
         elif self.ego_id in self.traci.simulation.getArrivedIDList():
             print("Arrived")
             arrived_reward = 0 if self.ego_teleported else 500
@@ -357,7 +435,9 @@ class Merging(gym.Env):
             'behind_gap': -penalty_behind * 0.1, 'ahead_gap': -penalty_ahead * 0.1,
             'collision': -collision_penalty * 0.1, 'arrival': arrived_reward * 0.1,
             'emergency': -emergency_stopping_penalty * 0.1, 'stage': merge_reward * 0.1,
-            'timeout': -max_steps_penalty * 0.1, 'lane_command': -lane_command_penalty * 0.1,
+            'timeout': -max_steps_penalty * 0.1,
+            'missed_exit': -missed_exit_penalty * 0.1,
+            'lane_command': -lane_command_penalty * 0.1,
         }
         self.reward_components = {key: float(value) for key, value in self.reward_components.items()}
         return 0.1*r    
@@ -434,8 +514,20 @@ class Merging(gym.Env):
 
     def _apply_lane_change(self, direction):
         if direction and self.lane_name in LANE_CHANGE_EDGES:
+            if self.task == exit_config.TASK_ID and self.exit_maneuver is not None:
+                return
             target = self.lane_idx + direction
             if 0 <= target < self.traci.edge.getLaneNumber(self.lane_name):
+                if self.task == exit_config.TASK_ID and self.lane_name in ('E76', 'E77'):
+                    if not self._exit_change_has_room():
+                        return
+                    now = self.traci.simulation.getTime()
+                    self.traci.vehicle.changeLane(
+                        self.ego_id, target, exit_config.LANE_CHANGE_TIME_SECONDS)
+                    self.exit_maneuver = {'edge': self.lane_name, 'target': target,
+                                          'start_time': now, 'last_progress_time': now,
+                                          'stable_steps': 0}
+                    return
                 self.target_lane_idx = target
                 self.traci.vehicle.changeLane(self.ego_id, target, 0)
 
@@ -480,12 +572,27 @@ class Merging(gym.Env):
         self.ego_on_road = (self.ego_id in self.traci.vehicle.getIDList()
                             and not self.ego_teleporting)
         self.teleport_transition = started or ended or not was_on_road
+        self.missed_exit = False
+        previous_road = self.lane_name
         if self.ego_on_road:
             self.lane_id = self.traci.vehicle.getLaneID(self.ego_id)
             self.lane_name = self.traci.vehicle.getRoadID(self.ego_id)
             self.lane_idx = self.traci.vehicle.getLaneIndex(self.ego_id)
             if self.teleport_transition:
                 self.traci.vehicle.setLaneChangeMode(self.ego_id, 0)
+                self.exit_maneuver = None
+            elif self.task == exit_config.TASK_ID:
+                self._update_exit_maneuver()
+            if (self.task == exit_config.TASK_ID and self.lane_name == 'E77'
+                    and self._e77_remaining() <= exit_config.LANE_END_EPSILON_METERS
+                    and not self._e77_exit_lane_ready()
+                    and not self._e77_maneuver_can_finish()):
+                self.missed_exit = True
+            if (self.task == exit_config.TASK_ID and previous_road == 'E77'
+                    and (self.lane_name == 'E78'
+                         or (self.lane_name.startswith(':J106')
+                             and self.lane_id != ':J106_0_0'))):
+                self.missed_exit = True
             if self.stage_name == 'exit':
                 if self.lane_name == 'D3':
                     self.stage_reached = True
@@ -493,9 +600,13 @@ class Merging(gym.Env):
                 self.merged = self.stage_reached = True
         else:
             self._ahead_state = self._behind_state = [0.0, 0.0, 0.0]
+            self.exit_maneuver = None
 
         if self.ego_id in self.traci.simulation.getCollidingVehiclesIDList():
             info['message'] = 'Collision'
+            terminated = True
+        elif self.missed_exit:
+            info['message'] = 'Missed Exit'
             terminated = True
         elif self.ego_id in self.traci.simulation.getArrivedIDList():
             info['message'] = 'Arrived'
@@ -539,6 +650,8 @@ class Merging(gym.Env):
                      'ego_teleporting': bool(self.ego_teleporting),
                      'ego_on_road': bool(self.ego_on_road),
                      'ego_start_lane': self.ego_start_lane,
+                     'missed_exit': self.missed_exit,
+                     'exit_maneuver_active': self.exit_maneuver is not None,
                      'initial_potential': self.initial_potential,
                      'potential': self.potential_previous,
                      'potential_reward': potential_reward,

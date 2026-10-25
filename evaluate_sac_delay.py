@@ -16,13 +16,13 @@ from src import exit_e76_d3_config as exit_config
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
-OUTCOMES = ('Arrived', 'Collision', 'Max Steps', 'Emergency Stopping')
+OUTCOMES = ('Arrived', 'Collision', 'Max Steps', 'Emergency Stopping', 'Missed Exit')
 TIMEOUT_DETAILS = ('No Merge Timeout', 'Merged Timeout')
 EXIT_TIMEOUT_DETAILS = ('No Exit Timeout', 'Exit Reached Timeout')
 ARRIVAL_DETAILS = ('Uninterrupted Arrived', 'Teleported Arrived', 'Ego Teleported')
 REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout_rate',
                   'no_merge_rate', 'emergency_stopping_rate', 'ego_teleport_rate',
-                  'mean_return')
+                  'missed_exit_rate', 'mean_return')
 
 
 def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1',
@@ -53,6 +53,8 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
         raise ValueError('Checkpoint E76-to-D3 potential configuration does not match')
     if task == exit_config.TASK_ID and getattr(model, 'exit_reward_profile', None) != exit_config.REWARD_PROFILE:
         raise ValueError('Checkpoint E76-to-D3 reward profile does not match')
+    if task == exit_config.TASK_ID and getattr(model, 'exit_control_profile', None) != exit_config.CONTROL_PROFILE:
+        raise ValueError('Checkpoint E76-to-D3 control profile does not match')
     potential_gamma = None
     if task == exit_config.TASK_ID:
         potential_gamma = float(getattr(model, 'exit_potential_gamma', model.gamma))
@@ -123,6 +125,7 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
             'collision_rate': 100 * counts['Collision'] / episodes,
             'timeout_rate': 100 * counts['Max Steps'] / episodes,
             'emergency_stopping_rate': 100 * counts['Emergency Stopping'] / episodes,
+            'missed_exit_rate': 100 * counts['Missed Exit'] / episodes,
             'mean_return': float(np.mean(returns)), 'episode_results': records}
     if ANTWERP_TASKS[task][2] != 'exit':
         result['no_merge_rate'] = result['timeout_rate']  # historical report field
