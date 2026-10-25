@@ -101,6 +101,21 @@ class SeparateEgoTaskTests(unittest.TestCase):
                          (250_000, 'cuda', 'GRU'))
         self.assertTrue(args.save_replay_buffer)
 
+    def test_exp005_phase_changes_only_discount_and_schedule(self):
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
+                                'exp005_gamma0999_200k', '--run_name',
+                                'E76D3-GAMMA0999-S42-200K']):
+            args = parse_train_args()
+        self.assertEqual(args.run_name, 'E76D3-GAMMA0999-S42-200K')
+        self.assertEqual((args.task, args.scenario, args.seed),
+                         (exit_config.TASK_ID, 'easy', 42))
+        self.assertEqual((args.total_timesteps, args.checkpoint_freq),
+                         (200_000, 100_000))
+        self.assertEqual(args.gamma, 0.999)
+        self.assertFalse(args.use_safety)
+        self.assertEqual((args.encoder_mode, args.gru_input_mode, args.delay_mode),
+                         ('GRU', 'paper_raw', 'uniform'))
+
     def test_each_route_changes_only_the_ego_trip(self):
         routes = Path(__file__).resolve().parents[1] / 'sumo_new'
         for scenario in ('easy', 'medium', 'hard'):
@@ -130,7 +145,9 @@ class SeparateEgoTaskTests(unittest.TestCase):
     def test_e76_exit_checkpoint_requires_potential_profile(self):
         model = SimpleNamespace(antwerp_env_version=ANTWERP_ENV_VERSION,
                                 antwerp_task=exit_config.TASK_ID,
+                                gamma=exit_config.POTENTIAL_GAMMA,
                                 exit_potential_beta=exit_config.POTENTIAL_BETA,
+                                exit_potential_gamma=exit_config.POTENTIAL_GAMMA,
                                 exit_reward_profile=exit_config.REWARD_PROFILE)
         validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
         model.exit_potential_beta = 5
@@ -139,6 +156,10 @@ class SeparateEgoTaskTests(unittest.TestCase):
         model.exit_potential_beta = exit_config.POTENTIAL_BETA
         model.exit_reward_profile = None
         with self.assertRaisesRegex(ValueError, 'reward profile'):
+            validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
+        model.exit_reward_profile = exit_config.REWARD_PROFILE
+        model.exit_potential_gamma = 0.999
+        with self.assertRaisesRegex(ValueError, 'gamma do not match'):
             validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
 
     def test_e76_exit_does_not_penalize_lane_command(self):

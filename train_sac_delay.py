@@ -162,9 +162,10 @@ def load_model(path: str, env: gym.Env) -> SAC:
     return SAC.load(path, env=env)
 
 def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
-             ablation='full', task='legacy_o3_d1'):
+             ablation='full', task='legacy_o3_d1', potential_gamma=None):
     env = DelayWrapper(
-        Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task),
+        Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
+                potential_gamma=potential_gamma),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation,
     )
@@ -221,6 +222,7 @@ def parse_args():
         args.scenario = phase['scenario']
         args.total_timesteps = phase['total_timesteps']
         args.checkpoint_freq = phase['checkpoint_freq']
+        args.gamma = phase['gamma']
         args.save_replay_buffer = True
         if args.project not in (None, exit_config.WANDB_PROJECT):
             parser.error('E76-to-D3 profile uses the designated DAROM-OUT Forge project')
@@ -244,6 +246,7 @@ def parse_args():
         parser.error('Use --exit_phase for the E76-to-D3 task')
     else:
         args.project = args.project or 'merging-SAC_experiments'
+        args.gamma = 0.99
     if args.exit_phase and bool(args.load_path) != bool(args.replay_buffer_path):
         parser.error('E76-to-D3 continuation requires both model and replay-buffer paths')
     if args.ablation != 'full' and args.encoder_mode != 'GRU':
@@ -277,7 +280,7 @@ def main():
     max_delay = 20
     sac_parameters = dict(
         learning_rate=3e-5, batch_size=512, buffer_size=1_000_000,
-        learning_starts=100, gamma=0.99, tau=0.005, train_freq=1,
+        learning_starts=100, gamma=args.gamma, tau=0.005, train_freq=1,
         gradient_steps=1, target_update_interval=1, ent_coef='auto',
         target_entropy='auto', use_sde=False,
     )
@@ -301,7 +304,7 @@ def main():
         exit_phase=args.exit_phase,
         ego_depart_lane=(exit_config.DEPART_LANE if args.exit_phase else None),
         potential_beta=(exit_config.POTENTIAL_BETA if args.exit_phase else None),
-        potential_gamma=(exit_config.POTENTIAL_GAMMA if args.exit_phase else None),
+        potential_gamma=(args.gamma if args.exit_phase else None),
         reward_profile=(exit_config.REWARD_PROFILE if args.exit_phase else None),
         metric_schema=('env_steps_v2' if args.exit_phase else None),
         wandb_project=args.project,
@@ -318,7 +321,8 @@ def main():
     # Create env
     def _fn():
         return make_env(args.seed, args.scenario, args.delay_mode, max_delay,
-                        args.use_safety, args.render_mode, args.ablation, args.task)
+                        args.use_safety, args.render_mode, args.ablation, args.task,
+                        args.gamma if args.exit_phase else None)
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -395,6 +399,12 @@ def main():
                 if (getattr(loaded_model, 'exit_reward_profile', None)
                         != exit_config.REWARD_PROFILE):
                     raise ValueError('Loaded model has a different E76-to-D3 reward profile')
+                loaded_gamma = getattr(loaded_model, 'exit_potential_gamma',
+                                       getattr(loaded_model, 'gamma', None))
+                if (not np.isclose(float(loaded_gamma), args.gamma, rtol=0.0, atol=1e-12)
+                        or not np.isclose(float(loaded_model.gamma), args.gamma,
+                                          rtol=0.0, atol=1e-12)):
+                    raise ValueError('Loaded model has a different E76-to-D3 discount factor')
                 loaded_model.load_replay_buffer(args.replay_buffer_path)
                 if loaded_model.num_timesteps >= args.total_timesteps:
                     raise ValueError('Checkpoint already reached the configured total step budget')
@@ -410,6 +420,7 @@ def main():
     model.experiment_id = args.run_name
     if args.exit_phase:
         model.exit_potential_beta = exit_config.POTENTIAL_BETA
+        model.exit_potential_gamma = args.gamma
         model.exit_reward_profile = exit_config.REWARD_PROFILE
 
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,

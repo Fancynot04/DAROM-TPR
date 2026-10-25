@@ -14,9 +14,13 @@ WANDB_PROJECT = 'DAROM-OUT'
 
 PHASES = {
     'easy_pilot': {'scenario': 'easy', 'total_timesteps': 20_000,
-                   'checkpoint_freq': 10_000},
+                   'checkpoint_freq': 10_000, 'gamma': POTENTIAL_GAMMA},
     'easy_1m': {'scenario': 'easy', 'total_timesteps': 1_000_000,
-                'checkpoint_freq': 250_000},
+                'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA},
+    'exp005_gamma0999_200k': {
+        'scenario': 'easy', 'total_timesteps': 200_000,
+        'checkpoint_freq': 100_000, 'gamma': 0.999,
+    },
 }
 
 

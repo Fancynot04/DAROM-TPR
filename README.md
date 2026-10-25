@@ -562,9 +562,19 @@ under entity `arlikache-anhui-university`. Online metrics omit source and
 model file uploads. Outputs remain under ignored `tmp/ai/e76-d3/` and
 `models_experiments/e76-d3/`.
 
+EXP-005 (`E76D3-GAMMA0999-S42-200K`) is an isolated Easy discount-factor
+experiment. It keeps the same seed, GRU/SAC architecture, reward weights,
+uniform delay, lane-change mode 0 and safety-off setup, while setting both SAC
+and PBRS gamma to 0.999. It trains for 200,000 steps and saves model and replay
+buffer checkpoints at 100,000 and 200,000 steps. A 250,000-step gamma-0.99
+checkpoint may be reported as a reference, but it is not an equal-budget
+control for the 200,000-step EXP-005 model.
+
 ```bash
 python -B train_sac_delay.py --exit_phase easy_pilot --seed 42 --wandb_mode online
 python -B train_sac_delay.py --exit_phase easy_1m --seed 42 --wandb_mode online
+python -B train_sac_delay.py --exit_phase exp005_gamma0999_200k --seed 42 \
+    --run_name E76D3-GAMMA0999-S42-200K --wandb_mode online
 python -B evaluate_sac_delay.py models_experiments/e76-d3/RUN_NAME.zip \
     --task exit_e76_d3 --scenario easy --episodes 32 --seed 100001 \
     --no-safety --output tmp/ai/e76-d3/eval-easy-no-safety.json

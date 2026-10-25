@@ -25,8 +25,10 @@ REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout
                   'mean_return')
 
 
-def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1'):
-    env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task),
+def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1',
+             potential_gamma=None):
+    env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
+                               potential_gamma=potential_gamma),
                        max_delay=20, mode='all', delay_mode=delay_mode,
                        seed=seed, ablation=ablation)
     return SafetyWrapper(env) if safety else env
@@ -51,8 +53,16 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
         raise ValueError('Checkpoint E76-to-D3 potential configuration does not match')
     if task == exit_config.TASK_ID and getattr(model, 'exit_reward_profile', None) != exit_config.REWARD_PROFILE:
         raise ValueError('Checkpoint E76-to-D3 reward profile does not match')
-    return {'training_safety': getattr(model, 'training_safety', None),
-            'evaluation_safety': bool(safety)}
+    potential_gamma = None
+    if task == exit_config.TASK_ID:
+        potential_gamma = float(getattr(model, 'exit_potential_gamma', model.gamma))
+        if not np.isclose(potential_gamma, float(model.gamma), rtol=0.0, atol=1e-12):
+            raise ValueError('Checkpoint SAC and E76-to-D3 potential gamma do not match')
+    setup = {'training_safety': getattr(model, 'training_safety', None),
+             'evaluation_safety': bool(safety)}
+    if potential_gamma is not None:
+        setup['potential_gamma'] = potential_gamma
+    return setup
 
 
 def checkpoint_gru_input_mode(model):
@@ -147,7 +157,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
     setup = validate_checkpoint_setup(model, ablation, safety, task)
     runs = []
     for seed in seeds:
-        env = make_env(seed, scenario, delay_mode, safety, ablation, task=task)
+        env = make_env(seed, scenario, delay_mode, safety, ablation, task=task,
+                       potential_gamma=setup.get('potential_gamma'))
         try:
             runs.append({'seed': seed, 'episodes': episodes,
                          **evaluate(model, env, episodes, seed, task=task)})

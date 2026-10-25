@@ -59,13 +59,15 @@ def set_ego_lane_mode(vehicle_name):
 class Merging(gym.Env):
     metadata = {"render_modes": ["human", "none"], "render_fps": 10}
     def __init__(self, seed, mode='all', radius = 50, render_mode= None, runSafetyCheck=False,
-                 scenario='medium', task='legacy_o3_d1'):
+                 scenario='medium', task='legacy_o3_d1', potential_gamma=None):
         if scenario not in ('easy', 'medium', 'hard'):
             raise ValueError(f'Unknown Antwerp scenario: {scenario}')
         if task not in ANTWERP_TASKS:
             raise ValueError(f'Unknown Antwerp task: {task}')
         self.scenario = scenario
         self.task = task
+        self.potential_gamma = (exit_config.POTENTIAL_GAMMA
+                                if potential_gamma is None else float(potential_gamma))
         self.origin, self.destination, self.stage_name = ANTWERP_TASKS[task]
         self.ego_id = None
         self.ego_depart_time = None
@@ -515,7 +517,7 @@ class Merging(gym.Env):
         potential_reward = 0.0
         if self.task == exit_config.TASK_ID:
             next_potential = 0.0 if self.done else self._exit_potential()
-            potential_reward = (exit_config.POTENTIAL_GAMMA * next_potential
+            potential_reward = (self.potential_gamma * next_potential
                                 - self.potential_previous)
             self.potential_previous = next_potential
             self.reward += potential_reward
