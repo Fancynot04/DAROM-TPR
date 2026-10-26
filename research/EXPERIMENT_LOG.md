@@ -8,7 +8,7 @@ Active branch at update: `codex/e76-d3-gamma099-800k`
 
 Controller-fix commit: `f16be9f`
 
-## EXP-E76-NAV136-300K: approved continuation, not yet launched
+## EXP-E76-NAV136-300K: running
 
 **Decision gate:** NAV136 improved from 10/25 strict arrivals at 100k to
 16/25 at 200k on the same 25 development cases; 10 cases improved and four
@@ -37,10 +37,31 @@ does not promise bit-for-bit continuity of environment/random-number streams.
 300k (Easy/uniform/no safety/deterministic). Report strict arrival, missed
 exit, collisions, toward/away actor requests, and the number of episodes in
 which the ego physically changed from E77_0 to a higher-index E77 lane after
-entering E77_0. Re-evaluate the frozen 200k model with the same diagnostic
-counter for a fair baseline; normal E77_0→J106→D3 travel is not a departure.
+entering E77_0. The frozen 200k model was re-evaluated with this counter:
+**8/25** episodes physically left E77_0 after entering it (3 such moves in
+one episode); a normal E77_0→J106→D3 transition is not a departure. The
+new diagnostic reproduced all 25 original 200k outcomes and toward/away
+request counts exactly. Its ignored report is
+`tmp/ai/e76-d3/nav_300k/eval_200k_25_e77.json` (SHA-256
+`6a6107e7ef176b77db7daa1c92e80927585dab14b613407437dfeab0cf4a7023`).
 These reused seeds guide development, not independent final testing. Review
 the 300k trend and fresh resource/risk gate before considering 400k.
+
+**Launch (2026-10-26):** a separate remote checkout
+`/home/cyl/project/DAROM-TPR-nav136-300k` at immutable code revision
+`f10bdecc8fe027c0cac1aed83b227c8f367e7837` passed 95 tests
+(12 skipped); SUMO was 1.18.0 and disk had 352 GB free. The frozen source
+model reported 200,000 steps, shape `(136,)`, γ=0.99, the expected navigation
+and controller profiles, and matching source hashes. The completed 134-input
+control's 25-case report was checked before launching. Run
+`E76D3-NAV136-GAMMA099-S42-300K-CONT` started as background PID `3211922`
+with `--wandb_mode offline`, W&B local ID `mnwie7g9`; no Forge run or file
+upload was created. The ignored JSONL is
+`tmp/ai/e76-d3/nav_300k/E76D3-NAV136-GAMMA099-S42-300K-CONT.jsonl`.
+Startup verification showed the source model loaded, CUDA active, and finite
+scalar metrics continuing from cumulative `env_steps=200,400–200,600`.
+These are startup checks, not an outcome. A 15-minute heartbeat will monitor
+the run and perform the frozen 300k evaluation after completion.
 
 ## EXP-E76-CONTROL134-200K: completed
 
