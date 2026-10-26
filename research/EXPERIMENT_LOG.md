@@ -1,6 +1,6 @@
 # AI Experiment Log
 
-Last updated: 2026-10-26
+Last updated: 2026-10-27
 
 Active scope: Antwerp `E76 -> D3` single-ego exit task
 
@@ -8,7 +8,7 @@ Active branch at update: `codex/e76-d3-gamma099-800k`
 
 Controller-fix commit: `f16be9f`
 
-## EXP-E76-SEED43-PAIRED-200K: running CONTROL134
+## EXP-E76-SEED43-PAIRED-200K: completed
 
 **Question:** whether CONTROL134's seed-42 result of 19/25 strict arrivals
 (76%) repeats under a second learner seed, and whether NAV136's effect relative
@@ -55,8 +55,59 @@ four loss/entropy keys. The synchronizer's first file-path invocation failed
 before uploading because the package root was absent from `sys.path`; it was
 restarted with the supported module entry point and stable run ID while the
 unaffected learner continued. This caused initial curve lag, not a training
-restart or missing local metrics. NAV136 remains gated on completed CONTROL134
-training plus both frozen evaluations.
+restart or missing local metrics. CONTROL134 finished before NAV136 started;
+there was no learner overlap. NAV136 used online run `84386a32`, visible at
+the [Forge DAROM-OUT run](https://forge.coreweave.com/wandb/arlikache-anhui-university/DAROM-OUT/runs/84386a32).
+Cloud API readback marked both runs finished at exactly 200,000 `env_steps`;
+local JSONL and synchronizer state agree. No source, model, replay or
+TensorBoard artifact was uploaded.
+
+**Frozen results:** CONTROL134 reached 0/5 at 100k and **1/25 at 200k**;
+the 200k failures were 23 missed exits and one collision. NAV136 reached 3/5
+at 100k and **2/25 at 200k**, with 23 missed exits and no collision. At 200k,
+neither policy physically left E77_0 after entering it. Per-start-lane 200k
+results and raw E76/E77 actor requests follow:
+
+| Start lane | CONTROL strict / missed / collision | NAV strict / missed / collision | CONTROL toward / away | NAV toward / away |
+|---:|---:|---:|---:|---:|
+| 0 | 0 / 5 / 0 | 0 / 5 / 0 | 364 / 1,944 | 1,886 / 1,011 |
+| 1 | 0 / 5 / 0 | 2 / 3 / 0 | 453 / 1,978 | 2,098 / 577 |
+| 2 | 1 / 4 / 0 | 0 / 5 / 0 | 816 / 2,659 | 2,326 / 970 |
+| 3 | 0 / 5 / 0 | 0 / 5 / 0 | 323 / 2,586 | 2,062 / 906 |
+| 4 | 0 / 4 / 1 | 0 / 5 / 0 | 441 / 2,220 | 1,975 / 1,009 |
+| **Total** | **1 / 23 / 1** | **2 / 23 / 0** | **2,397 / 11,387** | **10,347 / 4,473** |
+
+CONTROL134's away-request share was 82.61%; NAV136's was 30.18%. On paired
+cases CONTROL alone succeeded on seed 200006, NAV alone on seeds 200014 and
+200016, neither succeeded on the same case, and both failed on 22. Thus seed
+43 does **not** reproduce CONTROL134 seed 42's 19/25 (76%): it falls to 1/25.
+The navigation contrast changes sign, from NAV minus CONTROL = -3 successes
+at seed 42 (16 versus 19) to +1 at seed 43 (2 versus 1), but both seed-43
+models perform poorly. The defensible conclusion is high learner-seed
+variance and no stable navigation-feature benefit from these two repetitions,
+not that navigation is proven useful or harmful. Two learner seeds are only
+two independent training repetitions; the reused 25 development cases do not
+increase that number to 50.
+
+CONTROL134 200k model/replay SHA-256 values are
+`b543be70940edecb42c237b1d59cba3f7fd5fba502990e3565c6eb6ce44c1855`
+and `be386629b9624add90093f0008d28c183049b65f44f8aa8841ff034cf3796551`;
+its 100k model/replay values are
+`b80adb84a7e38088cda15a8ddd61ecf3710644bdabdda351d62fb8c267099482`
+and `be644d5b380c2ce1ff6e18387d16310e2c0b93a75bdec28db733477aab7d2386`.
+NAV136 200k model/replay values are
+`87cee19177cdf3755ea2bbc11fccb94ebbeede1a5f37ff55c74e56a2ca81972a`
+and `f149efb8a483b0a3b1150cd78044a58e707439820c698d3307eb810094253f65`;
+its 100k model/replay values are
+`54e68e8a9e5d388dffa7d951055f34d5264895037f6c72ee3195e38606d8877f`
+and `5aede2e879b5d77b6bed15e9d6b50036f8ccf3125c539441c34785b91e0c37fe`.
+The ignored 200k reports have SHA-256
+`dd48977a96e3dd0e7e43dc13af816e42353a5ec3f5a49c791903631df783af5b`
+(CONTROL134) and
+`af39d36d4993e771e01eaa51984b2de6d2953ff9b90b1d6bf8cb4dd93f3c44bd`
+(NAV136); the 100k five-case report hashes are
+`c99ba6624f432e82bc70da23c97c65a30424a8157f1b31a0a8bfac4f417d0378`
+and `b6d977d53eee7b1333503db10b332b01e3128dfd82e91b9d8d5a26be783dd8ee`.
 
 ## EXP-E76-NAV136-300K: completed
 
