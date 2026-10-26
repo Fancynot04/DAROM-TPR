@@ -643,6 +643,11 @@ toward or away from D3. Empty request windows have no away fraction. All
 At 100k, use five fixed development cases spanning the five start lanes; at
 200k, report 25 balanced fixed cases with outcomes and request directions.
 Old checkpoints are historical reference, not an input-only causal control.
+The completed seed-42 nav run and its actual offline-monitoring deviation,
+checkpoint hashes, five-case development check, and 25-case per-lane outcome
+are recorded in [the AI experiment log](research/EXPERIMENT_LOG.md). Forge
+was unreachable for the online API check, so this run was deliberately kept
+offline under the user's follow-up instruction; no online run was created.
 
 ```bash
 python -B train_sac_delay.py --exit_phase easy_pilot --seed 42 --wandb_mode online

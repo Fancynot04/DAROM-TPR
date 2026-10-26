@@ -8,7 +8,7 @@ Active branch at update: `codex/e76-d3-gamma099-800k`
 
 Controller-fix commit: `f16be9f`
 
-## EXP-E76-NAV136-200K: approved, not yet launched
+## EXP-E76-NAV136-200K: completed
 
 **Purpose:** test whether explicit live D3 distance and required road-network
 lane changes reduce wrong-direction requests and produce strict arrivals under
@@ -24,7 +24,7 @@ delay, training safety off, γ=0.99, unchanged potential/reward/controller,
 E76/E77 lane indices and the actual J105 target lane. A nonterminal invalid
 driving distance is a hard error. Model and replay save at 100k and 200k.
 
-**Monitoring and decisions:** one online `DAROM-OUT` Forge run, `env_steps`
+**Planned monitoring:** one online `DAROM-OUT` Forge run, `env_steps`
 for all `train/*` curves; 100-step losses and entropy metrics, per-episode
 outcomes and start lane, latest-20-episode strict success/missed/collision
 rates, and 1k-step toward/away request counts and nonempty-window away ratio.
@@ -36,14 +36,73 @@ diagnose seeds `200017, 200004, 200003, 200005, 200001` (historically lanes
 `200001–200012, 200014, 200016–200020, 200036–200037, 200045, 200047,
 200050, 200063–200064`. Verify actual start lanes in each new report. Report
 fixed cases separately from training curves. Do not upload model artifacts or
-sync duplicate TensorBoard curves. No training, Forge run ID, checkpoint hash
-or result exists yet; fill these fields only after measured execution.
+sync duplicate TensorBoard curves.
 
-**Launch gate:** local and remote 136-shape/J105/distance/GRU/compatibility/
-checkpoint tests; SUMO 1.18.0, code revision, free disk and Forge connection.
-Stop on nonfinite observation, shape misalignment or reward/controller drift.
-Remote code transfer and online Forge writes need a fresh one-time AGENTS.md
-confirmation. Older checkpoint and log files remain untouched.
+**Executed configuration and deviation:** code commit
+`b87098077a4853415db53a6a8d2798b0d91474a2`, remote checkout
+`/home/cyl/project/DAROM-TPR-nav136-200k`, run
+`E76D3-NAV136-GAMMA099-S42-200K`. Remote SUMO was 1.18.0, CUDA device
+was an RTX 4090, and the remote 91-test suite passed (12 skipped). A real
+SUMO reset returned a finite 136-value observation. Forge API verification
+timed out despite the remote proxy responding to a basic HTTP request. With
+the user's subsequent approval to proceed without Forge, training used
+`--wandb_mode offline`: **no online Forge run was created**, no model or
+TensorBoard files were uploaded. The offline W&B run ID was `64eavsbr`;
+JSONL and TensorBoard remain local to the remote checkout. The prior four
+checkpoints and their logs were not changed.
+
+**Training fact:** 200,000 environment steps and 199,899 SAC updates were
+recorded in the JSONL; elapsed training time was 5,687.97 s (35.16
+steps/s). There were 229 completed training episodes: 31 strict arrivals,
+187 missed exits and 11 collisions. These training outcomes are *not* the
+fixed-seed evaluation. Model and replay checkpoints exist at both 100k and
+200k, plus final files. SHA-256 of the 100k model checkpoint:
+`3b9e8c07dcc7017ca340d6ac411f66da207c7366b64e5fb0c040fd57df571380`;
+200k model checkpoint:
+`208297efdf20e9196ed0fbbaa726cf64f4a538fd8d9b335d30cc83500317be08`;
+final model:
+`29cc4da724bf508dee59559f338d75f4831c721fe5cfe8358ae7f538dc19c5e7`;
+final replay:
+`3a4add54d65d0200d1fdd25b0b84d471b04fbfe5336f294b0d4b66c42a5b00da`.
+
+**Fixed-seed evaluations, Easy/uniform/no safety/deterministic:** at 100k,
+the five development seeds covered lanes 0–4 and gave 3/5 strict arrivals,
+2/5 missed exits and 0 collisions. At 200k, the 25 historical balanced
+seeds again gave five cases per lane: **16/25 strict arrivals, 9/25 missed
+exits, 0/25 collisions**. Per-lane results and raw actor request directions:
+
+| E76 start lane | Strict arrivals | Missed exits | Collisions | Toward D3 | Away from D3 |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 3/5 | 2/5 | 0/5 | 3,763 | 169 |
+| 1 | 5/5 | 0/5 | 0/5 | 3,667 | 149 |
+| 2 | 3/5 | 2/5 | 0/5 | 3,796 | 142 |
+| 3 | 2/5 | 3/5 | 0/5 | 3,334 | 233 |
+| 4 | 3/5 | 2/5 | 0/5 | 3,690 | 137 |
+| **Total** | **16/25** | **9/25** | **0/25** | **18,250** | **830** |
+
+The away-request share among nonzero E76/E77 actor directions was 830/19,080
+= 4.35%; the policy is no longer *predominantly* requesting away from D3,
+although wrong-direction requests remain, especially in lane 3. Requests
+include commands ignored by pending-maneuver or room checks; they are not
+accepted lane changes. The 100k five-case result was a development diagnostic,
+not a model-selection step.
+
+**Interpretation:** the new checkpoint reaches D3 in these cases and requests
+away far less often than the historically measured 800k actor (13,063 away
+versus 1,211 toward over its 25 cases). This is
+descriptive only: the old checkpoints differ in training history and budget,
+so they do not isolate the causal effect of the two navigation inputs. Lane 3
+remains the weakest in this small evaluation. A matched fresh 134-dimensional
+control would be needed to attribute the improvement to navigation alone;
+it was outside this approved budget and was not run.
+
+**Artifacts (remote, ignored):**
+`tmp/ai/e76-d3/nav_200k/E76D3-NAV136-GAMMA099-S42-200K.jsonl`,
+`tmp/ai/e76-d3/nav_200k/eval_100k_5.json` (SHA-256
+`b6c849ca8d7ebcd383fdd5609a05e75db230a5fe7af013e5cd017af93be8666f`),
+and `tmp/ai/e76-d3/nav_200k/eval_200k_25.json` (SHA-256
+`8d7fb2843300a34a49a0870979d6a1b00ffcffdd1a3eeb76ddfaf7fcbeb82a87`).
+Models and replay are under `models_experiments/e76-d3/` in that checkout.
 
 ## How an AI should use this file
 
@@ -95,9 +154,9 @@ history to show only successful runs.
   post-fix cases the ratio was 2,622 versus 155.
 - **Decision:** Preserve all four version-2 checkpoints and their logs. Do not
   spend more large-scale evaluation budget on these old models.
-- **Decision:** No training is running. Do not start training or a large
-  evaluation without a new explicit instruction and a configuration/risk
-  review.
+- **Historical decision:** The later NAV136 run required a new explicit
+  instruction and configuration/risk review; that approval was given and the
+  200k experiment above is now complete. No training is currently running.
 - **Decision:** Do not reopen terminal in-place lateral movement as a fix. Do
   not silently change gamma, potential shaping, reward weights, or the formal
   observation contract.
@@ -260,8 +319,9 @@ the simple rule is not a robust solution. Lane 3 is the clearest stress case.
 
 ## Known problems and open questions
 
-1. **Wrong-direction SAC actions.** The dominant failure is not a lack of
-   lane-change commands, but a large excess of commands away from D3.
+1. **Wrong-direction SAC actions in old checkpoints.** Their dominant failure
+   was a large excess of commands away from D3. The new NAV136 policy has a
+   much lower away-request fraction, but still has 9/25 missed exits.
 2. **Lane-3 traffic interaction.** Even a route-aware rule can collide or be
    blocked by safety interventions. Feasibility in a few seeds is not a robust
    success estimate.
