@@ -648,6 +648,12 @@ checkpoint hashes, five-case development check, and 25-case per-lane outcome
 are recorded in [the AI experiment log](research/EXPERIMENT_LOG.md). Forge
 was unreachable for the online API check, so this run was deliberately kept
 offline under the user's follow-up instruction; no online run was created.
+The paired `control_134_200k` phase starts a separate random-initialized
+seed-42 run with the same v3 environment, schedule, GRU/SAC settings and
+evaluation seeds, but leaves navigation disabled (`[93, 40, 1]` = 134 values).
+It is the intended comparison for isolating the navigation-input contribution;
+the first fusion layer necessarily has two fewer input weights per output
+unit, so this is not a perfectly parameter-matched ablation.
 
 ```bash
 python -B train_sac_delay.py --exit_phase easy_pilot --seed 42 --wandb_mode online
@@ -658,6 +664,8 @@ python -B train_sac_delay.py --exit_phase gamma099_baseline_800k --seed 42 \
     --run_name E76D3-GAMMA099-S42-800K-V2 --wandb_mode online
 python -B train_sac_delay.py --exit_phase nav_200k --seed 42 \
     --run_name E76D3-NAV136-GAMMA099-S42-200K --wandb_mode online
+python -B train_sac_delay.py --exit_phase control_134_200k --seed 42 \
+    --run_name E76D3-CONTROL134-GAMMA099-S42-200K --wandb_mode offline
 python -B evaluate_sac_delay.py models_experiments/e76-d3/RUN_NAME.zip \
     --task exit_e76_d3 --scenario easy --episodes 32 --seed 100001 \
     --no-safety --output tmp/ai/e76-d3/eval-easy-no-safety.json

@@ -8,6 +8,35 @@ Active branch at update: `codex/e76-d3-gamma099-800k`
 
 Controller-fix commit: `f16be9f`
 
+## EXP-E76-CONTROL134-200K: configured, not yet launched
+
+**Question:** how much of the NAV136 result is attributable to adding live
+D3 distance and required-lane navigation, rather than only to fresh training
+under the v3 controller? Train a fresh 134-dimensional SAC control with the
+same seed and 200k budget; do not reuse any old checkpoint or replay.
+
+**Paired configuration:** Easy E76→D3, SUMO 1.18.0/environment v3 with 1 mm
+containment tolerance, seed 42, γ=0.99, unchanged potential/reward/safety and
+lane-change logic, `paper_raw` GRU/SAC, uniform 0–20-step delay, training
+safety off. The sole intended input difference from NAV136 is no two-value
+navigation block: observation `[vehicle 93, action history 40, delay 1]`.
+This also removes two columns from the GRU fusion layer, so parameter count
+is not exactly matched. Schedule: 200,000 environment steps; model and replay
+at 100k and 200k. Use a distinct run name and output directory; record local
+JSONL and offline W&B metrics (Forge was unreachable for NAV136). Run the same
+five fixed development seeds at 100k and same balanced 25 seeds at 200k,
+Easy/uniform/no safety/deterministic. Compare strict arrival, collision,
+missed exit and E76/E77 actor request direction by starting lane. The matched
+seed reduces one source of variation but one training seed is still not a
+robust causal estimate.
+
+**Risk and launch gate:** about 95 minutes of GPU training at NAV136's
+measured 35.16 steps/s, plus saving and evaluation; isolate the remote
+checkout so no old outputs are touched. Run 134-shape/profile/compatibility
+tests, verify SUMO 1.18.0, GPU, disk and exact code revision. Stop on
+nonfinite observations, contract drift or failed checkpoint save. No training
+result or run ID exists yet; do not fill outcomes before measurement.
+
 ## EXP-E76-NAV136-200K: completed
 
 **Purpose:** test whether explicit live D3 distance and required road-network

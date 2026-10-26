@@ -202,6 +202,27 @@ class SeparateEgoTaskTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 parse_train_args()
 
+    def test_control_134_phase_matches_nav_schedule_except_navigation(self):
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'nav_200k']):
+            nav = parse_train_args()
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'control_134_200k']):
+            control = parse_train_args()
+        for field in ('task', 'scenario', 'seed', 'radius', 'total_timesteps',
+                      'checkpoint_freq', 'gamma', 'use_safety', 'encoder_mode',
+                      'gru_input_mode', 'delay_mode', 'ablation', 'torch_threads'):
+            self.assertEqual(getattr(nav, field), getattr(control, field), field)
+        self.assertTrue(nav.nav_features)
+        self.assertFalse(control.nav_features)
+        env = DelayWrapper(Merging(seed=42, task=exit_config.TASK_ID,
+                                   scenario='easy'), max_delay=20, mode='all',
+                           nav_features=control.nav_features)
+        self.assertEqual(env.observation_space.shape, (134,))
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
+                                'control_134_200k', '--load_path', 'old.zip',
+                                '--replay_buffer_path', 'old.pkl']):
+            with self.assertRaises(SystemExit):
+                parse_train_args()
+
     def test_each_route_changes_only_the_ego_trip(self):
         routes = Path(__file__).resolve().parents[1] / 'sumo_new'
         for scenario in ('easy', 'medium', 'hard'):

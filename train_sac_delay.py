@@ -287,8 +287,8 @@ def parse_args():
         args.nav_features = False
     if args.exit_phase and bool(args.load_path) != bool(args.replay_buffer_path):
         parser.error('E76-to-D3 continuation requires both model and replay-buffer paths')
-    if args.exit_phase == 'nav_200k' and args.load_path:
-        parser.error('The nav_200k experiment must start from random initialization')
+    if args.exit_phase in ('nav_200k', 'control_134_200k') and args.load_path:
+        parser.error('The paired 200k experiment must start from random initialization')
     if args.ablation != 'full' and args.encoder_mode != 'GRU':
         parser.error('Table IV ablations require --encoder_mode GRU')
     if args.encoder_mode != 'GRU' and args.gru_input_mode != 'paper_raw':
