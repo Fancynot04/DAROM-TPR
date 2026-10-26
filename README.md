@@ -606,6 +606,16 @@ under entity `arlikache-anhui-university`. Online metrics omit source and
 model file uploads. Outputs remain under ignored `tmp/ai/e76-d3/` and
 `models_experiments/e76-d3/`.
 
+The matched `control_134_200k` and `nav_200k` phases accept only seeds 42 and
+43 and always start from random initialization. Seed 43 is the second paired
+replication: the control run finishes and is evaluated before the navigation
+run starts. For this replication the learner writes the durable JSONL stream
+with W&B disabled; `src/sync_exit_wandb.py` independently mirrors only its
+`train/*` scalars to `DAROM-OUT` about every 15 seconds. The synchronizer uses
+`env_steps` as the shared axis, disables code/system uploads, resumes a stable
+run ID after network failures, and never uploads model, replay or TensorBoard
+files. A Forge outage delays visibility without stopping the learner.
+
 EXP-005 (`E76D3-GAMMA0999-S42-200K`) is an isolated Easy discount-factor
 experiment. It keeps the same seed, GRU/SAC architecture, reward weights,
 uniform delay, lane-change mode 0 and safety-off setup, while setting both SAC

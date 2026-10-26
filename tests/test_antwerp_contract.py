@@ -4,6 +4,7 @@ import unittest
 import io
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import xml.etree.ElementTree as ET
@@ -21,6 +22,8 @@ from src import exit_e76_d3_config as exit_config
 from src.geometry import TrafficSnapshot, align_delayed_neighbors
 from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
 from src.safety_controller import safetyCheck
+from src.sync_exit_wandb import (expected_run_name, load_state, metric_from_record,
+                                 read_complete_records, validate_run)
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
@@ -199,6 +202,27 @@ class SeparateEgoTaskTests(unittest.TestCase):
                          (200_000, 100_000, 0.99))
         with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'nav_200k',
                                 '--load_path', 'old.zip', '--replay_buffer_path', 'old.pkl']):
+            with self.assertRaises(SystemExit):
+                parse_train_args()
+
+    def test_paired_200k_phases_allow_seed43_only_as_second_replication(self):
+        for phase, nav_features in (('control_134_200k', False), ('nav_200k', True)):
+            with self.subTest(phase=phase):
+                with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', phase,
+                                        '--seed', '43']):
+                    args = parse_train_args()
+                self.assertEqual(args.seed, 43)
+                self.assertEqual(args.nav_features, nav_features)
+                self.assertEqual((args.total_timesteps, args.checkpoint_freq),
+                                 (200_000, 100_000))
+                with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', phase,
+                                        '--seed', '44']):
+                    with self.assertRaises(SystemExit):
+                        parse_train_args()
+
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'nav_300k',
+                                '--seed', '43', '--load_path', 'model.zip',
+                                '--replay_buffer_path', 'replay.pkl']):
             with self.assertRaises(SystemExit):
                 parse_train_args()
 
@@ -805,6 +829,51 @@ class ManagedDiagnosticTests(unittest.TestCase):
             action, _ = self.controller(self.base)
             np.testing.assert_array_equal(action, [0, 0])
             self.assertIsNone(self.controller.edge)
+
+
+class ExitForgeSyncTests(unittest.TestCase):
+    def test_seed43_run_identity_and_formal_config_are_locked(self):
+        for phase, dimension in (('control_134_200k', 134), ('nav_200k', 136)):
+            name = expected_run_name(phase, 43)
+            config = validate_run(phase, 43, name)
+            self.assertEqual(config['seed'], 43)
+            self.assertEqual(config['observation_dim'], dimension)
+            self.assertEqual(config['total_timesteps'], 200_000)
+            self.assertFalse(config['training_safety'])
+        with self.assertRaisesRegex(ValueError, 'Expected run name'):
+            validate_run('nav_200k', 43, 'wrong')
+        with self.assertRaisesRegex(ValueError, 'not approved'):
+            validate_run('nav_200k', 44, expected_run_name('nav_200k', 44))
+
+    def test_sync_extracts_only_train_metrics_on_env_step_axis(self):
+        metric = metric_from_record({
+            'event': 'episode', 'steps': 123, 'env_steps': 123,
+            'outcome': 'Arrived', 'train/success': 1.0,
+            'train/episode_reward': 3.5,
+        })
+        self.assertEqual(metric, {'env_steps': 123, 'train/success': 1.0,
+                                  'train/episode_reward': 3.5})
+        self.assertIsNone(metric_from_record({'event': 'progress', 'env_steps': 123}))
+        with self.assertRaisesRegex(ValueError, 'missing env_steps'):
+            metric_from_record({'event': 'scalars', 'train/critic_loss': 1.0})
+
+    def test_sync_reader_ignores_incomplete_tail_and_state_rejects_other_run(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            stream = root / 'train.jsonl'
+            stream.write_text('{"event":"scalars","env_steps":100}\n'
+                              '{"event":"scalars","env_steps":200}')
+            records, consumed = read_complete_records(stream, 0)
+            self.assertEqual(([record['env_steps'] for record in records], consumed),
+                             ([100], 1))
+            state_path = root / 'state.json'
+            state = load_state(state_path, 'nav_200k', 43,
+                               expected_run_name('nav_200k', 43))
+            self.assertEqual(state['consumed_lines'], 0)
+            state_path.write_text(json.dumps(state) + '\n')
+            with self.assertRaisesRegex(ValueError, 'different formal run'):
+                load_state(state_path, 'control_134_200k', 43,
+                           expected_run_name('control_134_200k', 43))
 
 
 class EvaluationProtocolTests(unittest.TestCase):

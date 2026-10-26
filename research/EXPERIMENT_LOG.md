@@ -8,6 +8,36 @@ Active branch at update: `codex/e76-d3-gamma099-800k`
 
 Controller-fix commit: `f16be9f`
 
+## EXP-E76-SEED43-PAIRED-200K: approved, not launched
+
+**Question:** whether CONTROL134's seed-42 result of 19/25 strict arrivals
+(76%) repeats under a second learner seed, and whether NAV136's effect relative
+to CONTROL134 has the same direction in a second matched pair.
+
+Run fresh `E76D3-CONTROL134-GAMMA099-S43-200K` first, then fresh
+`E76D3-NAV136-GAMMA099-S43-200K`; never overlap them and never load an older
+model or replay. Apart from the two live navigation values and corresponding
+134/136-dimensional encoder input, both runs keep environment v3, Easy,
+uniform 0–20 delay, `paper_raw` GRU, training safety off, gamma 0.99, current
+potential/reward/controller, seed 43 and a 200,000-step budget. Save model and
+replay at 100k and 200k.
+
+At 100k evaluate the fixed five seeds `200017, 200004, 200003, 200005,
+200001`; at 200k evaluate the same balanced 25 development seeds used for
+seed 42. Record strict arrivals, missed exits, collisions, per-lane outcomes,
+toward/away actor requests and physical E77_0 re-departure episodes. These are
+reused development cases, and two learner seeds are only two independent
+training repetitions; do not reinterpret 50 evaluation episodes as 50
+independent training runs.
+
+Each learner writes local JSONL with direct W&B logging disabled. A separate
+15-second synchronizer creates one online `DAROM-OUT` run per learner and
+uploads only scalar `train/*` records with `env_steps` as the shared axis; it
+does not upload code, models, replay or TensorBoard. Network failure must not
+stop training: retain local records, retry the same stable run ID and report
+cloud lag honestly. Remote transfer and online Forge writes require the
+project's one-time dangerous-operation confirmation before launch.
+
 ## EXP-E76-NAV136-300K: completed
 
 **Decision gate:** NAV136 improved from 10/25 strict arrivals at 100k to

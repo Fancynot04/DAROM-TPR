@@ -246,14 +246,15 @@ def parse_args():
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
     if args.exit_phase:
+        phase = exit_config.PHASES[args.exit_phase]
+        allowed_seeds = tuple(phase.get('allowed_seeds', (42,)))
         if args.task not in ('legacy_o3_d1', exit_config.TASK_ID):
             parser.error('--exit_phase cannot be combined with another task')
-        if (args.seed != 42 or args.radius != 50 or args.use_safety
+        if (args.seed not in allowed_seeds or args.radius != 50 or args.use_safety
                 or args.encoder_mode != 'GRU' or args.gru_input_mode != 'paper_raw'
                 or args.ablation != 'full' or args.delay_mode != 'uniform'):
-            parser.error('E76-to-D3 phase requires the D-group seed, radius, '
+            parser.error('E76-to-D3 phase requires an approved seed, radius 50, '
                          'safety-off, full paper_raw GRU and uniform delay settings')
-        phase = exit_config.PHASES[args.exit_phase]
         args.task = exit_config.TASK_ID
         args.scenario = phase['scenario']
         args.total_timesteps = phase['total_timesteps']
