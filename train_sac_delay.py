@@ -4,6 +4,7 @@ import time
 import argparse
 import json
 import subprocess
+from collections import deque
 import torch
 from typing import Optional
 from src.wrapper import SafetyWrapper
@@ -33,6 +34,9 @@ class EpisodeRewardCallback(BaseCallback):
         self.current_potential_reward = 0.0
         self.lane_episodes = [0] * 5
         self.lane_successes = [0] * 5
+        self.recent_outcomes = deque(maxlen=20)
+        self.toward_requests = 0
+        self.away_requests = 0
         self.started = time.monotonic()
         self.log_file = None
         if log_path:
@@ -49,6 +53,9 @@ class EpisodeRewardCallback(BaseCallback):
             self.log_file.close()
 
     def _on_step(self) -> bool:
+        direction = self.locals['infos'][0].get('exit_actor_request_direction', 0)
+        self.toward_requests += int(direction == -1)
+        self.away_requests += int(direction == 1)
         # Track episode reward and length
         self.current_episode_reward += self.locals['rewards'][0]
         self.current_potential_reward += self.locals['infos'][0].get('potential_reward', 0.0)
@@ -63,6 +70,10 @@ class EpisodeRewardCallback(BaseCallback):
             merged = bool(info.get('merged'))
             stage_reached = bool(info.get('stage_reached', merged))
             exit_task = info.get('stage_name') == 'exit'
+            if exit_task:
+                self.recent_outcomes.append((int(bool(info['is_success'])),
+                                             int(outcome == 'Missed Exit'),
+                                             int(outcome == 'Collision')))
             
             # Log to wandb
             metrics = {
@@ -81,13 +92,21 @@ class EpisodeRewardCallback(BaseCallback):
                 'train/stage_reached_timeout': int(outcome == 'Max Steps' and stage_reached),
                 'train/stage_reached': int(stage_reached),
                 'train/stage_reward_paid': int(info.get('stage_reward_paid', False)),
+                'env_steps': self.num_timesteps,
             }
             if not exit_task:
                 metrics['train/no_merge_timeout'] = int(outcome == 'Max Steps' and not merged)
                 metrics['train/merged_timeout'] = int(outcome == 'Max Steps' and merged)
+            else:
+                recent = np.asarray(self.recent_outcomes, dtype=np.float32)
+                metrics.update({
+                    'train/recent20_episodes': len(self.recent_outcomes),
+                    'train/recent20_strict_success_rate': float(recent[:, 0].mean()),
+                    'train/recent20_missed_exit_rate': float(recent[:, 1].mean()),
+                    'train/recent20_collision_rate': float(recent[:, 2].mean()),
+                })
             if info.get('ego_start_lane') is not None:
                 start_lane = int(info['ego_start_lane'])
-                metrics['env_steps'] = self.num_timesteps
                 metrics['train/ego_start_lane'] = start_lane
                 metrics['train/initial_potential'] = float(info['initial_potential'])
                 metrics['train/episode_potential_reward'] = float(self.current_potential_reward)
@@ -118,6 +137,20 @@ class EpisodeRewardCallback(BaseCallback):
                 self._write({'event': 'scalars', 'steps': self.num_timesteps, **record})
 
         if self.num_timesteps % 1000 == 0:
+            if self.locals['infos'][0].get('stage_name') == 'exit':
+                total_requests = self.toward_requests + self.away_requests
+                request_metrics = {
+                    'env_steps': self.num_timesteps,
+                    'train/toward_request_count_1k': self.toward_requests,
+                    'train/away_request_count_1k': self.away_requests,
+                }
+                if total_requests:
+                    request_metrics['train/away_request_fraction_1k'] = (
+                        self.away_requests / total_requests)
+                wandb.log(request_metrics)
+                self._write({'event': 'request_window', 'steps': self.num_timesteps,
+                             **request_metrics})
+                self.toward_requests = self.away_requests = 0
             elapsed = time.monotonic() - self.started
             self._write({'event': 'progress', 'steps': self.num_timesteps,
                          'updates': int(self.model._n_updates), 'elapsed_seconds': elapsed,
@@ -164,12 +197,13 @@ def load_model(path: str, env: gym.Env) -> SAC:
     return SAC.load(path, env=env)
 
 def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
-             ablation='full', task='legacy_o3_d1', potential_gamma=None):
+             ablation='full', task='legacy_o3_d1', potential_gamma=None,
+             nav_features=False):
     env = DelayWrapper(
         Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
                 potential_gamma=potential_gamma),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
-        ablation=ablation,
+        ablation=ablation, nav_features=nav_features,
     )
     return SafetyWrapper(env) if use_safety else env
 
@@ -225,6 +259,7 @@ def parse_args():
         args.total_timesteps = phase['total_timesteps']
         args.checkpoint_freq = phase['checkpoint_freq']
         args.gamma = phase['gamma']
+        args.nav_features = phase.get('nav_features', False)
         args.save_replay_buffer = True
         if args.project not in (None, exit_config.WANDB_PROJECT):
             parser.error('E76-to-D3 profile uses the designated DAROM-OUT Forge project')
@@ -249,8 +284,11 @@ def parse_args():
     else:
         args.project = args.project or 'merging-SAC_experiments'
         args.gamma = 0.99
+        args.nav_features = False
     if args.exit_phase and bool(args.load_path) != bool(args.replay_buffer_path):
         parser.error('E76-to-D3 continuation requires both model and replay-buffer paths')
+    if args.exit_phase == 'nav_200k' and args.load_path:
+        parser.error('The nav_200k experiment must start from random initialization')
     if args.ablation != 'full' and args.encoder_mode != 'GRU':
         parser.error('Table IV ablations require --encoder_mode GRU')
     if args.encoder_mode != 'GRU' and args.gru_input_mode != 'paper_raw':
@@ -315,6 +353,11 @@ def main():
         potential_gamma=(args.gamma if args.exit_phase else None),
         reward_profile=(exit_config.REWARD_PROFILE if args.exit_phase else None),
         exit_control_profile=(exit_config.CONTROL_PROFILE if args.exit_phase else None),
+        exit_observation_profile=(exit_config.NAV_OBSERVATION_PROFILE
+                                  if args.nav_features else None),
+        observation_dim=(136 if args.nav_features else 134),
+        nav_distance_scale_meters=(exit_config.NAV_DISTANCE_SCALE_METERS
+                                   if args.nav_features else None),
         metric_schema=('env_steps_v2' if args.exit_phase else None),
         wandb_project=args.project,
         wandb_entity=args.entity,
@@ -331,7 +374,7 @@ def main():
     def _fn():
         return make_env(args.seed, args.scenario, args.delay_mode, max_delay,
                         args.use_safety, args.render_mode, args.ablation, args.task,
-                        args.gamma if args.exit_phase else None)
+                        args.gamma if args.exit_phase else None, args.nav_features)
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -359,7 +402,7 @@ def main():
         net_arch=[256, 256],      # actor/critic MLP after transformer
     )
     elif encoder_mode == 'GRU':
-        policy_kwargs = dict(features_extractor_class=DelayAwareGRUEncoder, features_extractor_kwargs=dict(act_dim=act_dim, hist_len=delay_env.max_delay, delay_dim=1, features_dim=256, gru_hidden=64, input_mode=args.gru_input_mode), net_arch=[256, 256])
+        policy_kwargs = dict(features_extractor_class=DelayAwareGRUEncoder, features_extractor_kwargs=dict(act_dim=act_dim, hist_len=delay_env.max_delay, delay_dim=1, features_dim=256, gru_hidden=64, input_mode=args.gru_input_mode, nav_dim=delay_env.nav_dim), net_arch=[256, 256])
     elif encoder_mode == 'MLP':
         policy_kwargs = dict(
         features_extractor_class=DelayAwareEncoder,
@@ -402,6 +445,12 @@ def main():
                     raise ValueError(f'Loaded model GRU input mode is {loaded_mode!r}; '
                                      f'requested {args.gru_input_mode!r}')
             if args.exit_phase:
+                expected_profile = (exit_config.NAV_OBSERVATION_PROFILE
+                                    if args.nav_features else None)
+                if getattr(loaded_model, 'exit_observation_profile', None) != expected_profile:
+                    raise ValueError('Loaded model E76-to-D3 observation profile does not match')
+                if loaded_model.observation_space.shape != vec_env.observation_space.shape:
+                    raise ValueError('Loaded model observation shape does not match')
                 if (getattr(loaded_model, 'exit_potential_beta', None)
                         != exit_config.POTENTIAL_BETA):
                     raise ValueError('Loaded model has a different E76-to-D3 potential profile')
@@ -431,6 +480,8 @@ def main():
     model.gru_input_mode = args.gru_input_mode if args.encoder_mode == 'GRU' else None
     model.experiment_id = args.run_name
     if args.exit_phase:
+        model.exit_observation_profile = (exit_config.NAV_OBSERVATION_PROFILE
+                                          if args.nav_features else None)
         model.exit_potential_beta = exit_config.POTENTIAL_BETA
         model.exit_potential_gamma = args.gamma
         model.exit_reward_profile = exit_config.REWARD_PROFILE

@@ -67,7 +67,7 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
 
     def __init__(self, observation_space, act_dim, hist_len, delay_dim,
                  features_dim=256, gru_hidden=64,
-                 input_mode='antwerp_scaled_reversed'):
+                 input_mode='antwerp_scaled_reversed', nav_dim=0):
         super().__init__(observation_space, features_dim)
 
         if input_mode not in self.INPUT_MODES:
@@ -78,12 +78,13 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
 
         # full action-history dimension in flattened obs
         self.act_hist_dim = act_dim * hist_len
-        self.obs_dim = flat_obs - self.act_hist_dim - delay_dim
+        self.obs_dim = flat_obs - self.act_hist_dim - delay_dim - nav_dim
+        self.nav_dim = nav_dim
 
         self.act_dim = act_dim
         self.hist_len = hist_len
         self.delay_dim = delay_dim
-        if self.obs_dim % 3 != 0 or delay_dim != 1:
+        if self.obs_dim % 3 != 0 or delay_dim != 1 or nav_dim not in (0, 2):
             raise ValueError('DAROM-GRU expects 3 features per vehicle and one delay value')
         num_entities = self.obs_dim // 3
         self.register_buffer(
@@ -116,7 +117,7 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
         # -------------------------------
         # 3) Fusion MLP
         # -------------------------------
-        fused_dim = 64 + gru_hidden + delay_dim
+        fused_dim = 64 + gru_hidden + delay_dim + nav_dim
         self.fusion = nn.Sequential(
             nn.Linear(fused_dim, 128),
             nn.LayerNorm(128),
@@ -138,8 +139,9 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
         B = obs.size(0)
 
         o_t = obs[:, :self.obs_dim]
+        nav = obs[:, self.obs_dim:self.obs_dim + self.nav_dim]
 
-        a_hist_flat = obs[:, self.obs_dim : self.obs_dim + self.act_hist_dim]
+        a_hist_flat = obs[:, self.obs_dim + self.nav_dim : self.obs_dim + self.nav_dim + self.act_hist_dim]
         delay = obs[:, -self.delay_dim:]
 
         # ---- Prepare action history ----
@@ -159,7 +161,7 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
         act_emb = h_last.squeeze(0)    # (B, hidden)
 
         # ---- Fuse ----
-        fused = th.cat([o_emb, act_emb, delay], dim=-1)
+        fused = th.cat([o_emb, nav, act_emb, delay], dim=-1)
         features = self.fusion(fused)
 
         return features

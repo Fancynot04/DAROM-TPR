@@ -11,6 +11,11 @@ POTENTIAL_GAMMA = 0.99
 REWARD_PROFILE = 'no_lane_command_penalty_v1'
 CONTROL_PROFILE = 'tracked_lane_change_v2'
 DISTANCE_SCALE_EDGES = ('E76', 'E77', 'D3')
+NAV_OBSERVATION_PROFILE = 'nav_d3_required_lanes_v1'
+NAV_DISTANCE_SCALE_METERS = 1260.74
+NAV_DIM = 2
+# J105 internal lanes follow the actual E76->E77 connections in Antwerp.net.xml.
+J105_TARGET_LANES = {f':J105_0_{index}': index for index in range(6)}
 # A same-seed TraCI probe needed 3.3 s from first lateral motion until the
 # vehicle was fully inside the adjacent lane. Reserve 4 s plus body clearance.
 LANE_CHANGE_TIME_SECONDS = 4.0
@@ -32,6 +37,9 @@ WANDB_ENTITY = 'arlikache-anhui-university'
 WANDB_PROJECT = 'DAROM-OUT'
 
 PHASES = {
+    'nav_200k': {'scenario': 'easy', 'total_timesteps': 200_000,
+                 'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
+                 'nav_features': True},
     'easy_pilot': {'scenario': 'easy', 'total_timesteps': 20_000,
                    'checkpoint_freq': 10_000, 'gamma': POTENTIAL_GAMMA},
     'easy_1m': {'scenario': 'easy', 'total_timesteps': 1_000_000,

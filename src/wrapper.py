@@ -15,11 +15,15 @@ ABLATION_MODES = ('full', 'delayed_state_only', 'delayed_state_delay',
 
 
 class DelayWrapper(ObservationWrapper):
-    def __init__(self, env, max_delay=10, mode=['only_delayed_state' 'delayed_state_and_action', 'delayed_state_and_delay', 'all'], drl_ormoc=False, delay_mode='uniform', seed=None, ablation='full'):
+    def __init__(self, env, max_delay=10, mode=['only_delayed_state' 'delayed_state_and_action', 'delayed_state_and_delay', 'all'], drl_ormoc=False, delay_mode='uniform', seed=None, ablation='full', nav_features=False):
         super().__init__(env)
         if ablation not in ABLATION_MODES or (ablation != 'full' and mode != 'all'):
             raise ValueError(f'Unsupported ablation/mode: {ablation}/{mode}')
         self.ablation = ablation
+        if nav_features and mode != 'all':
+            raise ValueError('Navigation features require the full observation layout')
+        self.nav_features = nav_features
+        self.nav_dim = 2 if nav_features else 0
         self.orig_shape = self.env.observation_space.shape
         orig_shape = self.env.observation_space.shape
         self.mode = mode
@@ -57,7 +61,7 @@ class DelayWrapper(ObservationWrapper):
             )
         elif self.mode == 'all':
             self.observation_space = Box(
-                shape=(self.orig_shape[0] * self.orig_shape[1] + self.max_delay * self.env.action_space.shape[0] + 1,),
+                shape=(self.orig_shape[0] * self.orig_shape[1] + self.nav_dim + self.max_delay * self.env.action_space.shape[0] + 1,),
                 low=-5000,
                 high=5000,
                 dtype=np.float32
@@ -119,7 +123,8 @@ class DelayWrapper(ObservationWrapper):
         #     "entities": self.obs,
         #     "global": flatten([[a.tolist() for a in self.action_history], [0]])
         # }
-        self.newX = np.asarray(flatten([self.obs, list(self.action_history), [0]]), dtype=np.float32)
+        nav = self.env.exit_navigation() if self.nav_features else []
+        self.newX = np.asarray(flatten([self.obs, nav, list(self.action_history), [0]]), dtype=np.float32)
         if self.mode == 'only_delayed_state':
             return self.obs, info
         elif self.mode == 'delayed_state_and_action':
@@ -167,6 +172,9 @@ class DelayWrapper(ObservationWrapper):
             raise ValueError(f"Unknown delay_mode: {self.delay_mode}")
 
     def _policy_observation(self):
+        if self.nav_features:
+            if self.newX.shape != self.observation_space.shape or not np.isfinite(self.newX).all():
+                raise ValueError('Nonfinite or misaligned E76-to-D3 navigation observation')
         if self.ablation == 'full':
             return self.newX
         policy_obs = self.newX.copy()
@@ -175,7 +183,7 @@ class DelayWrapper(ObservationWrapper):
             entities = policy_obs[:obs_size].reshape(self.orig_shape)
             entities[1:, 0] += entities[1:, 2] * self.delay_of_received_observation * 0.1
         if self.ablation in ('delayed_state_only', 'delayed_state_delay', 'linear_predictor'):
-            policy_obs[obs_size:-1] = 0
+            policy_obs[obs_size + self.nav_dim:-1] = 0
         if self.ablation in ('delayed_state_only', 'delayed_state_action', 'linear_predictor'):
             policy_obs[-1] = 0
         return policy_obs
@@ -222,7 +230,9 @@ class DelayWrapper(ObservationWrapper):
         masked_action_history = np.array(list(self.action_history)).copy()
         for i in range(self.delay_of_received_observation, len(masked_action_history)):
             masked_action_history[i] = np.zeros_like(masked_action_history[i])
-        self.newX = np.asarray(flatten([received_obs, masked_action_history, [self.delay_of_received_observation]]), dtype=np.float32)
+        nav = self.env.exit_navigation() if self.nav_features else []
+        self.newX = np.asarray(flatten([received_obs, nav, masked_action_history,
+                                        [self.delay_of_received_observation]]), dtype=np.float32)
         if self.mode == 'only_delayed_state':
             return received_obs
         elif self.mode == 'delayed_state_and_action':

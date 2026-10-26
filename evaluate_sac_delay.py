@@ -26,11 +26,11 @@ REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout
 
 
 def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1',
-             potential_gamma=None):
+             potential_gamma=None, nav_features=False):
     env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
                                potential_gamma=potential_gamma),
                        max_delay=20, mode='all', delay_mode=delay_mode,
-                       seed=seed, ablation=ablation)
+                       seed=seed, ablation=ablation, nav_features=nav_features)
     return SafetyWrapper(env) if safety else env
 
 
@@ -56,7 +56,19 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
     if task == exit_config.TASK_ID and getattr(model, 'exit_control_profile', None) != exit_config.CONTROL_PROFILE:
         raise ValueError('Checkpoint E76-to-D3 control profile does not match')
     potential_gamma = None
+    nav_features = False
     if task == exit_config.TASK_ID:
+        profile = getattr(model, 'exit_observation_profile', None)
+        if profile not in (None, exit_config.NAV_OBSERVATION_PROFILE):
+            raise ValueError(f'Unknown E76-to-D3 observation profile: {profile!r}')
+        nav_features = profile == exit_config.NAV_OBSERVATION_PROFILE
+        expected_dim = 136 if nav_features else 134
+        if model.observation_space.shape != (expected_dim,):
+            raise ValueError('Checkpoint E76-to-D3 observation profile and shape disagree')
+        encoder_nav_dim = (getattr(model, 'policy_kwargs', {}) or {}).get(
+            'features_extractor_kwargs', {}).get('nav_dim', 0)
+        if encoder_nav_dim != (2 if nav_features else 0):
+            raise ValueError('Checkpoint E76-to-D3 GRU navigation split disagrees')
         potential_gamma = float(getattr(model, 'exit_potential_gamma', model.gamma))
         if not np.isclose(potential_gamma, float(model.gamma), rtol=0.0, atol=1e-12):
             raise ValueError('Checkpoint SAC and E76-to-D3 potential gamma do not match')
@@ -64,6 +76,8 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
              'evaluation_safety': bool(safety)}
     if potential_gamma is not None:
         setup['potential_gamma'] = potential_gamma
+        setup['exit_observation_profile'] = getattr(model, 'exit_observation_profile', None)
+        setup['nav_features'] = nav_features
     return setup
 
 
@@ -86,9 +100,12 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
         observation, reset_info = env.reset(seed=seed + episode)
         episode_return = 0.0
         steps = 0
+        toward_requests = away_requests = 0
         while True:
             action, _ = model.predict(observation, deterministic=True)
             observation, reward, terminated, truncated, info = env.step(action)
+            toward_requests += int(info.get('exit_actor_request_direction') == -1)
+            away_requests += int(info.get('exit_actor_request_direction') == 1)
             episode_return += float(reward)
             steps += 1
             if terminated or truncated:
@@ -113,6 +130,8 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
                                 'stage_reached': bool(info.get('stage_reached', info.get('merged'))),
                                 'stage_reward_paid': bool(info.get('stage_reward_paid', False)),
                                 'success': outcome == 'Arrived' and not teleported,
+                                'toward_requests': toward_requests,
+                                'away_requests': away_requests,
                                 'return': episode_return, 'reset_info': reset_info})
                 break
     timeout_details = EXIT_TIMEOUT_DETAILS if ANTWERP_TASKS[task][2] == 'exit' else TIMEOUT_DETAILS
@@ -129,6 +148,9 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
             'mean_return': float(np.mean(returns)), 'episode_results': records}
     if ANTWERP_TASKS[task][2] != 'exit':
         result['no_merge_rate'] = result['timeout_rate']  # historical report field
+    else:
+        result['toward_requests'] = sum(item['toward_requests'] for item in records)
+        result['away_requests'] = sum(item['away_requests'] for item in records)
     return result
 
 
@@ -161,7 +183,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
     runs = []
     for seed in seeds:
         env = make_env(seed, scenario, delay_mode, safety, ablation, task=task,
-                       potential_gamma=setup.get('potential_gamma'))
+                       potential_gamma=setup.get('potential_gamma'),
+                       nav_features=setup.get('nav_features', False))
         try:
             runs.append({'seed': seed, 'episodes': episodes,
                          **evaluate(model, env, episodes, seed, task=task)})

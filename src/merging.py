@@ -95,6 +95,7 @@ class Merging(gym.Env):
         self.lane_name = ''
         self.lane_idx = 0
         self.parsed_action = None
+        self.exit_actor_request_direction = 0
         self.ego_start_lane = None
         self.potential_distance_scale = None
         self.potential_previous = 0.0
@@ -184,6 +185,31 @@ class Merging(gym.Env):
         if not math.isfinite(distance):
             return 0.0
         return exit_config.potential(distance, self.potential_distance_scale, lane_index)
+
+    def exit_navigation(self):
+        """Live route information for the opt-in E76-to-D3 observation only."""
+        if self.task != exit_config.TASK_ID:
+            raise ValueError('Exit navigation is only defined for E76-to-D3')
+        if self.done or not self.ego_on_road or self.ego_teleported:
+            return np.zeros(2, dtype=np.float32)
+        road = self.traci.vehicle.getRoadID(self.ego_id)
+        lane_id = self.traci.vehicle.getLaneID(self.ego_id)
+        if road == 'D3' or lane_id == ':J106_0_0':
+            distance, required = 0.0, 0
+        else:
+            distance = float(self.traci.vehicle.getDrivingDistance(self.ego_id, 'D3', 0.0))
+            if road in ('E76', 'E77'):
+                required = int(self.traci.vehicle.getLaneIndex(self.ego_id))
+            elif lane_id in exit_config.J105_TARGET_LANES:
+                required = exit_config.J105_TARGET_LANES[lane_id]
+            else:
+                raise ValueError(f'No D3 navigation mapping for nonterminal lane {lane_id!r}')
+        if not math.isfinite(distance) or distance < 0:
+            raise ValueError(f'Invalid nonterminal D3 driving distance: {distance!r}')
+        if not 0 <= required <= 5:
+            raise ValueError(f'Invalid required lane-change count: {required!r}')
+        return np.array([min(distance / exit_config.NAV_DISTANCE_SCALE_METERS, 1.0),
+                         required / 5.0], dtype=np.float32)
 
     def _e77_remaining(self):
         lane_id = self.traci.vehicle.getLaneID(self.ego_id)
@@ -542,6 +568,9 @@ class Merging(gym.Env):
             self.lane_name = self.traci.vehicle.getRoadID(self.ego_id)
             self.lane_idx = self.traci.vehicle.getLaneIndex(self.ego_id)
         parsed_action = parseAction(action)
+        self.exit_actor_request_direction = (
+            int(parsed_action[1]) if was_on_road and self.task == exit_config.TASK_ID
+            and self.lane_name in ('E76', 'E77') else 0)
         self.action = action
         if self.runSafetyCheck and was_on_road:
             from .safety_controller import safetyCheck, target_lane_line
@@ -656,6 +685,7 @@ class Merging(gym.Env):
                      'initial_potential': self.initial_potential,
                      'potential': self.potential_previous,
                      'potential_reward': potential_reward,
+                     'exit_actor_request_direction': self.exit_actor_request_direction,
                      'teleport_started': started, 'teleport_ended': ended,
                      'is_success': info['message'] == 'Arrived' and not self.ego_teleported})
         return self.observation, float(self.reward), terminated, truncated, info

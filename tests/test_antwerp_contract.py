@@ -25,6 +25,26 @@ from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
 class GRUInputContractTests(unittest.TestCase):
+    def test_navigation_split_keeps_vehicle_history_and_delay_positions(self):
+        class CaptureGRU(torch.nn.Module):
+            def forward(self, actions):
+                self.actions = actions.detach().clone()
+                return None, torch.zeros(1, actions.shape[0], 64)
+
+        sample = torch.arange(136, dtype=torch.float32).unsqueeze(0)
+        space = gym.spaces.Box(-5000, 5000, shape=(136,), dtype=np.float32)
+        encoder = DelayAwareGRUEncoder(space, act_dim=2, hist_len=20,
+                                       delay_dim=1, input_mode='paper_raw', nav_dim=2)
+        encoder.obs_encoder = torch.nn.Identity()
+        encoder.gru = CaptureGRU()
+        encoder.fusion = torch.nn.Identity()
+        output = encoder(sample)
+        torch.testing.assert_close(output[:, :95], sample[:, :95])
+        torch.testing.assert_close(encoder.gru.actions, sample[:, 95:135].reshape(1, 20, 2))
+        torch.testing.assert_close(output[:, -1:], sample[:, -1:])
+        with self.assertRaisesRegex(ValueError, '3 features per vehicle'):
+            DelayAwareGRUEncoder(space, act_dim=2, hist_len=20, delay_dim=1)
+
     def test_raw_and_legacy_modes_preserve_their_distinct_input_contracts(self):
         class CaptureGRU(torch.nn.Module):
             def forward(self, actions):
@@ -64,6 +84,58 @@ class GRUInputContractTests(unittest.TestCase):
 
 
 class SeparateEgoTaskTests(unittest.TestCase):
+    def test_navigation_uses_live_network_lane_and_rejects_bad_distance(self):
+        env = Merging(seed=1, task=exit_config.TASK_ID)
+        env.ego_id = 'ego'
+        env.ego_on_road = True
+        fake = Mock()
+        fake.vehicle.getRoadID.return_value = ':J105_0'
+        fake.vehicle.getLaneID.return_value = ':J105_0_3'
+        fake.vehicle.getDrivingDistance.return_value = 630.37
+        with patch('src.merging.traci', fake):
+            np.testing.assert_allclose(env.exit_navigation(), [0.5, 0.6], atol=1e-6)
+            fake.vehicle.getLaneID.return_value = 'E77_2'
+            fake.vehicle.getRoadID.return_value = 'E77'
+            fake.vehicle.getLaneIndex.return_value = 2
+            np.testing.assert_allclose(env.exit_navigation(), [0.5, 0.4], atol=1e-6)
+            fake.vehicle.getDrivingDistance.return_value = -1
+            with self.assertRaisesRegex(ValueError, 'Invalid nonterminal'):
+                env.exit_navigation()
+            fake.vehicle.getDrivingDistance.return_value = float('nan')
+            with self.assertRaisesRegex(ValueError, 'Invalid nonterminal'):
+                env.exit_navigation()
+            fake.vehicle.getRoadID.return_value = 'D3'
+            np.testing.assert_array_equal(env.exit_navigation(), [0, 0])
+
+    def test_navigation_checkpoint_profile_and_shape_must_agree(self):
+        model = SimpleNamespace(antwerp_env_version=ANTWERP_ENV_VERSION,
+                                antwerp_task=exit_config.TASK_ID,
+                                gamma=exit_config.POTENTIAL_GAMMA,
+                                exit_potential_beta=exit_config.POTENTIAL_BETA,
+                                exit_potential_gamma=exit_config.POTENTIAL_GAMMA,
+                                exit_reward_profile=exit_config.REWARD_PROFILE,
+                                exit_control_profile=exit_config.CONTROL_PROFILE,
+                                exit_observation_profile=exit_config.NAV_OBSERVATION_PROFILE,
+                                observation_space=gym.spaces.Box(-5000, 5000, (136,), np.float32),
+                                policy_kwargs={'features_extractor_kwargs': {'nav_dim': 2}})
+        self.assertTrue(validate_checkpoint_setup(model, 'full', False,
+                         task=exit_config.TASK_ID)['nav_features'])
+        model.observation_space = gym.spaces.Box(-5000, 5000, (134,), np.float32)
+        with self.assertRaisesRegex(ValueError, 'profile and shape disagree'):
+            validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
+
+    def test_forge_request_window_omits_fraction_without_requests(self):
+        callback = EpisodeRewardCallback()
+        callback.num_timesteps = 1000
+        callback.model = SimpleNamespace(_n_updates=900, logger=SimpleNamespace(name_to_value={}))
+        callback.locals = {'rewards': [0.0], 'dones': [False],
+                           'infos': [{'stage_name': 'exit', 'exit_actor_request_direction': 0}]}
+        with patch('train_sac_delay.wandb.log') as log:
+            callback._on_step()
+        record = log.call_args[0][0]
+        self.assertEqual(record['train/toward_request_count_1k'], 0)
+        self.assertNotIn('train/away_request_fraction_1k', record)
+
     def test_antwerp_environment_version_pins_completion_tolerance_contract(self):
         self.assertEqual(ANTWERP_ENV_VERSION, 3)
 
@@ -118,6 +190,17 @@ class SeparateEgoTaskTests(unittest.TestCase):
         self.assertFalse(args.use_safety)
         self.assertEqual((args.encoder_mode, args.gru_input_mode, args.delay_mode),
                          ('GRU', 'paper_raw', 'uniform'))
+
+    def test_nav_phase_is_200k_fresh_gamma099_profile(self):
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'nav_200k']):
+            args = parse_train_args()
+        self.assertTrue(args.nav_features)
+        self.assertEqual((args.total_timesteps, args.checkpoint_freq, args.gamma),
+                         (200_000, 100_000, 0.99))
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'nav_200k',
+                                '--load_path', 'old.zip', '--replay_buffer_path', 'old.pkl']):
+            with self.assertRaises(SystemExit):
+                parse_train_args()
 
     def test_each_route_changes_only_the_ego_trip(self):
         routes = Path(__file__).resolve().parents[1] / 'sumo_new'
@@ -174,6 +257,18 @@ class SeparateEgoTaskTests(unittest.TestCase):
             e77_y = float(lanes[f'E77_{lane + 1}'].get('shape').split()[0].split(',')[1])
             self.assertAlmostEqual(e76_y, e77_y)
 
+    def test_j105_navigation_targets_match_network_connections(self):
+        network = ET.parse(Path(__file__).resolve().parents[1]
+                           / 'sumo_new/Antwerp.net.xml').getroot()
+        lanes = {lane.get('id'): lane for lane in network.iter('lane')}
+        distance_scale = sum(float(lanes[f'{edge}_0'].get('length'))
+                             for edge in exit_config.DISTANCE_SCALE_EDGES)
+        self.assertAlmostEqual(distance_scale, exit_config.NAV_DISTANCE_SCALE_METERS)
+        connections = {node.get('via'): int(node.get('toLane'))
+                       for node in network.iter('connection')
+                       if node.get('from') == 'E76' and node.get('to') == 'E77'}
+        self.assertEqual(connections, exit_config.J105_TARGET_LANES)
+
     def test_e76_exit_checkpoint_requires_potential_profile(self):
         model = SimpleNamespace(antwerp_env_version=ANTWERP_ENV_VERSION,
                                 antwerp_task=exit_config.TASK_ID,
@@ -181,7 +276,9 @@ class SeparateEgoTaskTests(unittest.TestCase):
                                 exit_potential_beta=exit_config.POTENTIAL_BETA,
                                 exit_potential_gamma=exit_config.POTENTIAL_GAMMA,
                                 exit_reward_profile=exit_config.REWARD_PROFILE,
-                                exit_control_profile=exit_config.CONTROL_PROFILE)
+                                exit_control_profile=exit_config.CONTROL_PROFILE,
+                                observation_space=gym.spaces.Box(-5000, 5000, (134,), np.float32),
+                                policy_kwargs={'features_extractor_kwargs': {}})
         validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
         model.exit_potential_beta = 5
         with self.assertRaisesRegex(ValueError, 'potential configuration'):
@@ -768,8 +865,22 @@ class PacketEnv(gym.Env):
         self.observation[1] = [100, 96.8, 0]
         return self.observation, 0.0, False, False, {}
 
+    def exit_navigation(self):
+        return np.array([self.time / 10, 0.4], np.float32)
+
 
 class DelayedSafetyTests(unittest.TestCase):
+    def test_navigation_is_live_even_when_neighbor_packet_is_delayed(self):
+        delay = DelayWrapper(PacketEnv(), max_delay=20, mode='all', nav_features=True)
+        initial, _ = delay.reset()
+        self.assertEqual(initial.shape, (136,))
+        with patch.object(delay, '_sample_delay', return_value=20):
+            later, *_ = delay.step([0, 0])
+        self.assertEqual(later.shape, (136,))
+        self.assertAlmostEqual(later[93], 0.01)
+        self.assertAlmostEqual(later[94], 0.4)
+        self.assertEqual(later[4], 3.2)
+
     def test_masked_policy_still_gets_safety_from_matching_old_packet(self):
         for ablation in ABLATION_MODES:
             with self.subTest(ablation=ablation):

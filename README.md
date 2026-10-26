@@ -626,6 +626,24 @@ seed 42, the original lane-index potential above, the
 checkpoints at 200,000-step intervals under a new run name. Historical
 γ=0.999 checkpoints and replay buffers are not inputs to this baseline.
 
+The opt-in `nav_200k` phase starts a fresh seed-42 SAC policy with the same
+γ=0.99, reward, potential, 1 mm containment tolerance and tracked lane-change
+controller. Its only policy-input change is the 136-value layout
+`[vehicle state 93, live navigation 2, action history 40, delay 1]`.
+Navigation is `[clip(d_D3/1260.74, 0, 1), n_required/5]`; the lane count is
+the road-network minimum (`E76_i=i`, `E77_j=j`, J105 uses its connected E77
+target lane, D3 is zero). Invalid nonterminal route distance aborts the run.
+Neighbor packets retain their original delay. The GRU encodes navigation
+separately and new checkpoints carry `nav_d3_required_lanes_v1`; legacy tasks
+and checkpoints retain their 134-value contract. The 200k phase saves model
+and replay at 100k and 200k. It records the latest-20-episode strict success,
+missed-exit and collision rates, and every 1k steps counts E76/E77 requests
+toward or away from D3. Empty request windows have no away fraction. All
+`train/*` Forge curves use `env_steps`; local JSONL is kept separately.
+At 100k, use five fixed development cases spanning the five start lanes; at
+200k, report 25 balanced fixed cases with outcomes and request directions.
+Old checkpoints are historical reference, not an input-only causal control.
+
 ```bash
 python -B train_sac_delay.py --exit_phase easy_pilot --seed 42 --wandb_mode online
 python -B train_sac_delay.py --exit_phase easy_1m --seed 42 --wandb_mode online
@@ -633,6 +651,8 @@ python -B train_sac_delay.py --exit_phase exp005_gamma0999_200k --seed 42 \
     --run_name E76D3-GAMMA0999-S42-200K --wandb_mode online
 python -B train_sac_delay.py --exit_phase gamma099_baseline_800k --seed 42 \
     --run_name E76D3-GAMMA099-S42-800K-V2 --wandb_mode online
+python -B train_sac_delay.py --exit_phase nav_200k --seed 42 \
+    --run_name E76D3-NAV136-GAMMA099-S42-200K --wandb_mode online
 python -B evaluate_sac_delay.py models_experiments/e76-d3/RUN_NAME.zip \
     --task exit_e76_d3 --scenario easy --episodes 32 --seed 100001 \
     --no-safety --output tmp/ai/e76-d3/eval-easy-no-safety.json

@@ -8,6 +8,43 @@ Active branch at update: `codex/e76-d3-gamma099-800k`
 
 Controller-fix commit: `f16be9f`
 
+## EXP-E76-NAV136-200K: approved, not yet launched
+
+**Purpose:** test whether explicit live D3 distance and required road-network
+lane changes reduce wrong-direction requests and produce strict arrivals under
+the existing 1 mm containment controller. This is a fresh random-initialized
+policy; the four old checkpoints are historical reference only, not a matched
+causal control.
+
+**Configuration:** Easy E76→D3, seed 42, `paper_raw` GRU/SAC, 136 inputs
+`[vehicle 93, navigation 2, actions 40, delay 1]`, uniform 0–20-step neighbor
+delay, training safety off, γ=0.99, unchanged potential/reward/controller,
+200,000 environment steps. Navigation is current-time
+`[clip(d_D3/1260.74,0,1), n_required/5]`; the pure-network count follows
+E76/E77 lane indices and the actual J105 target lane. A nonterminal invalid
+driving distance is a hard error. Model and replay save at 100k and 200k.
+
+**Monitoring and decisions:** one online `DAROM-OUT` Forge run, `env_steps`
+for all `train/*` curves; 100-step losses and entropy metrics, per-episode
+outcomes and start lane, latest-20-episode strict success/missed/collision
+rates, and 1k-step toward/away request counts and nonempty-window away ratio.
+Local JSONL remains under ignored `tmp/ai/e76-d3/nav_200k/`. Verify run ID,
+first loss curves, continued metric updates at both checkpoints, and final
+step parity. Network lag is reported without restarting training. At 100k,
+diagnose seeds `200017, 200004, 200003, 200005, 200001` (historically lanes
+0–4); at 200k, report the existing 25 balanced seeds
+`200001–200012, 200014, 200016–200020, 200036–200037, 200045, 200047,
+200050, 200063–200064`. Verify actual start lanes in each new report. Report
+fixed cases separately from training curves. Do not upload model artifacts or
+sync duplicate TensorBoard curves. No training, Forge run ID, checkpoint hash
+or result exists yet; fill these fields only after measured execution.
+
+**Launch gate:** local and remote 136-shape/J105/distance/GRU/compatibility/
+checkpoint tests; SUMO 1.18.0, code revision, free disk and Forge connection.
+Stop on nonfinite observation, shape misalignment or reward/controller drift.
+Remote code transfer and online Forge writes need a fresh one-time AGENTS.md
+confirmation. Older checkpoint and log files remain untouched.
+
 ## How an AI should use this file
 
 This is the compact handoff and decision log for active experiments. Read it
