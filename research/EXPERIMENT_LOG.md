@@ -141,6 +141,35 @@ include commands ignored by pending-maneuver or room checks; they are not
 accepted lane changes. The 100k five-case result was a development diagnostic,
 not a model-selection step.
 
+**Additional 100k checkpoint evaluation on the same 25 development cases
+(2026-10-26):** frozen 100k model SHA-256
+`3b9e8c07dcc7017ca340d6ac411f66da207c7366b64e5fb0c040fd57df571380`;
+same Easy/uniform/no-safety/deterministic protocol and exact balanced seeds as
+the 200k report. The 100k model reached **10/25** strictly, missed **15/25**,
+and collided in **0/25**. The 200k model reached **16/25**, a descriptive gain
+of 6/25 (24 percentage points); 10 individual failures became arrivals, but
+4 arrivals regressed to misses. The comparison by starting lane is:
+
+| E76 start lane | 100k strict | 200k strict | 100k toward / away requests | 200k toward / away requests |
+|---:|---:|---:|---:|---:|
+| 0 | 3/5 | 3/5 | 952 / 231 | 3,763 / 169 |
+| 1 | 2/5 | 5/5 | 926 / 401 | 3,667 / 149 |
+| 2 | 3/5 | 3/5 | 1,386 / 377 | 3,796 / 142 |
+| 3 | 1/5 | 2/5 | 1,550 / 397 | 3,334 / 233 |
+| 4 | 1/5 | 3/5 | 1,257 / 216 | 3,690 / 137 |
+| **Total** | **10/25** | **16/25** | **6,071 / 1,622** | **18,250 / 830** |
+
+The away share among nonzero requests dropped from 1,622/7,693 = 21.08% to
+830/19,080 = 4.35%. Request totals also changed substantially, so counts
+alone do not identify a physical lane-change mechanism. This reused 25-case
+set measures development trajectory, not independent generalization or proof
+that added navigation inputs caused improvement. The ignored 100k report is
+`tmp/ai/e76-d3/nav_200k/eval_100k_25.json` (SHA-256
+`dc461be762e487cb010026969d2730b8a073862c4563ddee1493ea2519493e69`).
+The previous five-case 100k diagnostic remains valid but is superseded for
+100k→200k comparison by this paired 25-case report. No continuation training
+was launched as part of this evaluation.
+
 **Interpretation:** the new checkpoint reaches D3 in these cases and requests
 away far less often than the historically measured 800k actor (13,063 away
 versus 1,211 toward over its 25 cases). This is
