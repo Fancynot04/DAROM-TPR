@@ -289,6 +289,8 @@ def parse_args():
         parser.error('E76-to-D3 continuation requires both model and replay-buffer paths')
     if args.exit_phase in ('nav_200k', 'control_134_200k') and args.load_path:
         parser.error('The paired 200k experiment must start from random initialization')
+    if args.exit_phase == 'nav_300k' and not args.load_path:
+        parser.error('NAV136 300k continuation requires the 200k model and replay buffer')
     if args.ablation != 'full' and args.encoder_mode != 'GRU':
         parser.error('Table IV ablations require --encoder_mode GRU')
     if args.encoder_mode != 'GRU' and args.gru_input_mode != 'paper_raw':
@@ -466,6 +468,8 @@ def main():
                         or not np.isclose(float(loaded_model.gamma), args.gamma,
                                           rtol=0.0, atol=1e-12)):
                     raise ValueError('Loaded model has a different E76-to-D3 discount factor')
+                if args.exit_phase == 'nav_300k' and loaded_model.num_timesteps != 200_000:
+                    raise ValueError('NAV136 300k continuation requires a 200k checkpoint')
                 loaded_model.load_replay_buffer(args.replay_buffer_path)
                 if loaded_model.num_timesteps >= args.total_timesteps:
                     raise ValueError('Checkpoint already reached the configured total step budget')

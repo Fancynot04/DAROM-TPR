@@ -37,6 +37,9 @@ WANDB_ENTITY = 'arlikache-anhui-university'
 WANDB_PROJECT = 'DAROM-OUT'
 
 PHASES = {
+    'nav_300k': {'scenario': 'easy', 'total_timesteps': 300_000,
+                 'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
+                 'nav_features': True},
     'control_134_200k': {'scenario': 'easy', 'total_timesteps': 200_000,
                          'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
                          'nav_features': False},

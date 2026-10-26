@@ -4,6 +4,7 @@ import argparse
 from collections import Counter
 import hashlib
 import json
+from numbers import Integral
 from pathlib import Path
 
 import numpy as np
@@ -90,6 +91,17 @@ def checkpoint_gru_input_mode(model):
         'input_mode', 'antwerp_scaled_reversed')
 
 
+def e77_lane_index(env):
+    """Read realized E77 lane for diagnostics, never from the policy input."""
+    base = getattr(env, 'unwrapped', None)
+    lane = getattr(base, 'lane_idx', None)
+    if (getattr(base, 'ego_on_road', False)
+            and getattr(base, 'lane_name', None) == 'E77'
+            and isinstance(lane, Integral)):
+        return int(lane)
+    return None
+
+
 def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
     if episodes < 1:
         raise ValueError('episodes must be positive')
@@ -101,11 +113,18 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
         episode_return = 0.0
         steps = 0
         toward_requests = away_requests = 0
+        previous_e77_lane = None
+        e77_zero_departures = 0
         while True:
             action, _ = model.predict(observation, deterministic=True)
             observation, reward, terminated, truncated, info = env.step(action)
             toward_requests += int(info.get('exit_actor_request_direction') == -1)
             away_requests += int(info.get('exit_actor_request_direction') == 1)
+            if task == exit_config.TASK_ID:
+                current_e77_lane = e77_lane_index(env)
+                if previous_e77_lane == 0 and current_e77_lane is not None and current_e77_lane > 0:
+                    e77_zero_departures += 1
+                previous_e77_lane = current_e77_lane
             episode_return += float(reward)
             steps += 1
             if terminated or truncated:
@@ -125,14 +144,18 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
                         counts['Merged Timeout' if info.get('merged')
                                else 'No Merge Timeout'] += 1
                 returns.append(episode_return)
-                records.append({'seed': seed + episode, 'steps': steps, 'outcome': outcome,
+                record = {'seed': seed + episode, 'steps': steps, 'outcome': outcome,
                                 'merged': bool(info.get('merged')), 'ego_teleported': teleported,
                                 'stage_reached': bool(info.get('stage_reached', info.get('merged'))),
                                 'stage_reward_paid': bool(info.get('stage_reward_paid', False)),
                                 'success': outcome == 'Arrived' and not teleported,
                                 'toward_requests': toward_requests,
                                 'away_requests': away_requests,
-                                'return': episode_return, 'reset_info': reset_info})
+                                'return': episode_return, 'reset_info': reset_info}
+                if task == exit_config.TASK_ID:
+                    record['e77_zero_departures'] = e77_zero_departures
+                    record['left_e77_zero_after_entry'] = e77_zero_departures > 0
+                records.append(record)
                 break
     timeout_details = EXIT_TIMEOUT_DETAILS if ANTWERP_TASKS[task][2] == 'exit' else TIMEOUT_DETAILS
     result = {**{outcome: counts[outcome] for outcome in OUTCOMES},
@@ -151,6 +174,9 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
     else:
         result['toward_requests'] = sum(item['toward_requests'] for item in records)
         result['away_requests'] = sum(item['away_requests'] for item in records)
+        if task == exit_config.TASK_ID:
+            result['e77_zero_redeparture_episodes'] = sum(
+                item['left_e77_zero_after_entry'] for item in records)
     return result
 
 
@@ -190,7 +216,7 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
                          **evaluate(model, env, episodes, seed, task=task)})
         finally:
             env.close()
-    return {'protocol': 'antwerp-v2-evaluation-v1', 'scenario': scenario,
+    report = {'protocol': 'antwerp-v2-evaluation-v1', 'scenario': scenario,
             'task': task, 'stage_name': ANTWERP_TASKS[task][2],
             'delay_mode': delay_mode, 'ablation': ablation, **setup,
             'gru_input_mode': checkpoint_gru_input_mode(model),
@@ -204,6 +230,10 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
             'runs': runs, 'aggregate': summarize_runs(
                 runs, tuple(key for key in REPORT_METRICS
                             if ANTWERP_TASKS[task][2] != 'exit' or key != 'no_merge_rate'))}
+    if task == exit_config.TASK_ID:
+        report['e77_zero_redeparture_episodes'] = sum(
+            run['e77_zero_redeparture_episodes'] for run in runs)
+    return report
 
 
 def parse_args(argv=None):

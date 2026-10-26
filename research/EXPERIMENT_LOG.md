@@ -8,6 +8,37 @@ Active branch at update: `codex/e76-d3-gamma099-800k`
 
 Controller-fix commit: `f16be9f`
 
+## EXP-E76-NAV136-300K: approved continuation, not yet launched
+
+**Decision gate:** NAV136 improved from 10/25 strict arrivals at 100k to
+16/25 at 200k on the same 25 development cases; 10 cases improved and four
+regressed. The away-request share fell from 21.08% to 4.35%. This supports an
+exploratory 100k-step continuation, not a statistically secure generalization
+claim. The user authorized the 300k continuation on 2026-10-26. The separate
+134-dimensional 200k control must finish training and evaluation first so
+these jobs do not compete for the GPU. Do not automatically proceed to 400k.
+
+**Frozen source:** resume specifically from NAV136 200k model SHA-256
+`208297efdf20e9196ed0fbbaa726cf64f4a538fd8d9b335d30cc83500317be08`
+and 200k replay-buffer SHA-256
+`d7152d1c614d91997753abb01433cc291d97156dafc785090beadc289500d71c`.
+Both remain in the original NAV136 checkout and are read without overwriting.
+The new `nav_300k` phase keeps Easy, seed 42, 136-value navigation input,
+`paper_raw` GRU, uniform 0–20 delay, training safety off, γ=0.99, potential,
+reward and controller unchanged. It targets 300,000 *cumulative* environment
+steps with a new run name and distinct model/replay/JSONL paths, offline W&B,
+and a 300k checkpoint. Loading model and replay preserves learner state but
+does not promise bit-for-bit continuity of environment/random-number streams.
+
+**Evaluation and next gate:** run the same balanced 25 development cases at
+300k (Easy/uniform/no safety/deterministic). Report strict arrival, missed
+exit, collisions, toward/away actor requests, and the number of episodes in
+which the ego physically changed from E77_0 to a higher-index E77 lane after
+entering E77_0. Re-evaluate the frozen 200k model with the same diagnostic
+counter for a fair baseline; normal E77_0→J106→D3 travel is not a departure.
+These reused seeds guide development, not independent final testing. Review
+the 300k trend and fresh resource/risk gate before considering 400k.
+
 ## EXP-E76-CONTROL134-200K: running
 
 **Question:** how much of the NAV136 result is attributable to adding live

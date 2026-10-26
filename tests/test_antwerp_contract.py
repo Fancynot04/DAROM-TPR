@@ -202,6 +202,23 @@ class SeparateEgoTaskTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 parse_train_args()
 
+    def test_nav_300k_phase_requires_paired_resume_and_keeps_contract(self):
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'nav_300k']):
+            with self.assertRaises(SystemExit):
+                parse_train_args()
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'nav_300k',
+                                '--load_path', 'model.zip',
+                                '--replay_buffer_path', 'replay.pkl']):
+            continuation = parse_train_args()
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'nav_200k']):
+            original = parse_train_args()
+        self.assertEqual((continuation.total_timesteps, continuation.checkpoint_freq),
+                         (300_000, 100_000))
+        for field in ('task', 'scenario', 'seed', 'radius', 'gamma', 'nav_features',
+                      'use_safety', 'encoder_mode', 'gru_input_mode', 'delay_mode',
+                      'ablation', 'torch_threads'):
+            self.assertEqual(getattr(continuation, field), getattr(original, field), field)
+
     def test_control_134_phase_matches_nav_schedule_except_navigation(self):
         with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'nav_200k']):
             nav = parse_train_args()
@@ -596,6 +613,59 @@ class SeparateEgoTaskTests(unittest.TestCase):
         result = evaluate(model, env, 1, 1, task=exit_config.TASK_ID)
         self.assertEqual(result['No Exit Timeout'], 1)
         self.assertNotIn('no_merge_rate', result)
+
+    def test_exit_evaluation_counts_physical_e77_zero_departure_episodes(self):
+        class LaneSequenceEnv:
+            def __init__(self):
+                self.unwrapped = self
+                self.lanes = [1, 0, 1, 0, 1]
+                self.ego_on_road = True
+                self.lane_name = 'E77'
+                self.lane_idx = 1
+
+            def reset(self, seed):
+                self.index = 0
+                return np.zeros(136), {'ego_start_lane': 3}
+
+            def step(self, action):
+                self.lane_idx = self.lanes[self.index]
+                self.index += 1
+                done = self.index == len(self.lanes)
+                return np.zeros(136), 0.0, done, False, {
+                    'message': 'Missed Exit' if done else '',
+                    'ego_teleported': False,
+                    'exit_actor_request_direction': 0,
+                }
+
+        model = Mock()
+        model.predict.return_value = (np.zeros(2), None)
+        result = evaluate(model, LaneSequenceEnv(), 1, 1, task=exit_config.TASK_ID)
+        self.assertEqual(result['e77_zero_redeparture_episodes'], 1)
+        self.assertEqual(result['episode_results'][0]['e77_zero_departures'], 2)
+        self.assertTrue(result['episode_results'][0]['left_e77_zero_after_entry'])
+
+    def test_exit_evaluation_does_not_count_legitimate_d3_transition(self):
+        class DirectExitEnv:
+            def __init__(self):
+                self.unwrapped = self
+                self.ego_on_road = True
+                self.steps = iter((('E77', 0), (':J106_0', 0), ('D3', 0)))
+
+            def reset(self, seed):
+                return np.zeros(136), {'ego_start_lane': 0}
+
+            def step(self, action):
+                self.lane_name, self.lane_idx = next(self.steps)
+                arrived = self.lane_name == 'D3'
+                return np.zeros(136), 0.0, arrived, False, {
+                    'message': 'Arrived' if arrived else '', 'ego_teleported': False,
+                }
+
+        model = Mock()
+        model.predict.return_value = (np.zeros(2), None)
+        result = evaluate(model, DirectExitEnv(), 1, 1, task=exit_config.TASK_ID)
+        self.assertEqual(result['e77_zero_redeparture_episodes'], 0)
+        self.assertEqual(result['episode_results'][0]['e77_zero_departures'], 0)
 
 
 def snapshot(time=0.0, ego=(0, 0), angle=90, positions=((5, 3.2),),

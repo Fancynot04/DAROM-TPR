@@ -648,6 +648,18 @@ checkpoint hashes, five-case development check, and 25-case per-lane outcome
 are recorded in [the AI experiment log](research/EXPERIMENT_LOG.md). Forge
 was unreachable for the online API check, so this run was deliberately kept
 offline under the user's follow-up instruction; no online run was created.
+
+The separate `nav_300k` continuation phase requires both a 200k NAV136 model
+checkpoint and its matching replay buffer (`--load_path` and
+`--replay_buffer_path`). It preserves the same Easy/seed-42/γ=0.99/navigation,
+GRU, delay, reward and controller contracts, adds 100,000 environment steps
+to a 300,000-step total, and saves model and replay at the 300k milestone.
+The 200k phase cannot be resumed under its original name. For exit-task
+evaluation only, each episode now reports `e77_zero_departures` and whether
+the ego physically changed from E77_0 to a higher-index E77 lane after
+entering E77_0; a normal E77_0→J106→D3 transition is not counted. This
+diagnostic does not alter policy observations or training rewards.
+
 The paired `control_134_200k` phase starts a separate random-initialized
 seed-42 run with the same v3 environment, schedule, GRU/SAC settings and
 evaluation seeds, but leaves navigation disabled (`[93, 40, 1]` = 134 values).
