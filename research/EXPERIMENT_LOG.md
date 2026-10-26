@@ -8,7 +8,7 @@ Active branch at update: `codex/e76-d3-gamma099-800k`
 
 Controller-fix commit: `f16be9f`
 
-## EXP-E76-CONTROL134-200K: configured, not yet launched
+## EXP-E76-CONTROL134-200K: running
 
 **Question:** how much of the NAV136 result is attributable to adding live
 D3 distance and required-lane navigation, rather than only to fresh training
@@ -34,8 +34,20 @@ robust causal estimate.
 measured 35.16 steps/s, plus saving and evaluation; isolate the remote
 checkout so no old outputs are touched. Run 134-shape/profile/compatibility
 tests, verify SUMO 1.18.0, GPU, disk and exact code revision. Stop on
-nonfinite observations, contract drift or failed checkpoint save. No training
-result or run ID exists yet; do not fill outcomes before measurement.
+nonfinite observations, contract drift or failed checkpoint save.
+
+**Launch and current status (2026-10-26):** committed code revision
+`9546c3acf475c4f3961734eb8f0d4347192e63dc` in separate remote checkout
+`/home/cyl/project/DAROM-TPR-control134-200k`; run name
+`E76D3-CONTROL134-GAMMA099-S42-200K`. The remote 92-test suite passed
+(12 skipped), SUMO reported 1.18.0, and an actual reset yielded 134 finite
+inputs. GPU and disk preflight passed. Background training PID `2705923` used
+`--wandb_mode offline`, with offline W&B ID `jdxnmtp4`; no Forge sync or model
+upload. Its ignored JSONL is
+`tmp/ai/e76-d3/control_134_200k/E76D3-CONTROL134-GAMMA099-S42-200K.jsonl`.
+At the latest spot check the process was alive, scalar losses were present,
+and `env_steps=37,400`; this is progress, not a result. A 15-minute heartbeat
+will inspect both checkpoints and run the planned fixed-seed evaluations.
 
 ## EXP-E76-NAV136-200K: completed
 
@@ -122,8 +134,43 @@ versus 1,211 toward over its 25 cases). This is
 descriptive only: the old checkpoints differ in training history and budget,
 so they do not isolate the causal effect of the two navigation inputs. Lane 3
 remains the weakest in this small evaluation. A matched fresh 134-dimensional
-control would be needed to attribute the improvement to navigation alone;
-it was outside this approved budget and was not run.
+control is now running (above). Its result will improve the comparison, but
+one training seed still cannot establish a robust causal effect.
+
+**Frozen 200k failure diagnostic (five cases):** the deterministic evaluation
+was replayed step-by-step without training or modifying the controller. All
+five final outcomes and toward/away request counts matched the saved 25-case
+report. The three E76_3 missed-exit seeds were `200008`, `200009`, `200010`;
+additional missed-exit seeds `200002` (lane 4) and `200036` (lane 0) were
+checked for pattern coverage.
+
+| Seed | Observed decisive sequence | Classification |
+|---:|---|---|
+| 200008 | Reached E76_0 with about 515 m left and E77_0 with 172 m left; accepted E77_0→E77_1 **away** at 55 m; missed on E77_1. | C primary |
+| 200009 | Reached E76_0 with about 541 m left; accepted E76_0→E76_1 **away** at 66 m, then J105 mapped to E77_2. Later reached E77_1; the final toward E77_0 request was accepted at 96 m but recentered and timed out. | C primary, B secondary |
+| 200010 | Began toward D3 with about 814 m left and reached E76_0 with 313 m left. Later accepted two away changes on E76 at 104 m and 73 m, then two more on E77, and missed on E77_5. Earlier E76_1→0 pending attempts stalled before one succeeded. | C primary, B earlier contributor |
+| 200002 | Reached E76_0 and E77_0, then oscillated between E77_0 and E77_1 near the exit. | C primary |
+| 200036 | Started in E76_0, accepted an away change about 53 m before J105, then took the wrong J105/E77 lane path. | C primary |
+
+Here A means too-late first planning toward D3; B means a toward request was
+made but physical completion was blocked or timed out; C means unnecessary or
+repeated away changes. **A was not supported in these five cases.** For B,
+SUMO's live lane-change state on seed `200010` reported adjacent target-lane
+leader/follower blockage or overlap on 123 of 180 sampled steps across the
+three stalled E76 pending windows. On seed `200009`, the final E77 pending
+window reported leader blockage on 18 of 60 steps and follower blockage on 8;
+the car moved laterally but recentered before the pending timeout. This
+supports a real traffic/safety-gap contribution, not merely a pending-state
+counter artifact. These counts are diagnostic flags, not an isolated causal
+test of gap policy or lane-change duration. In all three lane-3 failures, the
+policy's late **accepted away** changes are the clearest shared mechanism;
+do not reopen terminal in-place lateral movement as a workaround.
+
+**Diagnostic artifacts (ignored, retained):**
+`tmp/ai/e76-d3/nav_200k/failure_diagnostic_200k_5.json` (SHA-256
+`f813c4030357e91466b999deaa2a45f87b6e68bb448faa31a6dd2d7f301f4dfd`)
+and `tmp/ai/e76-d3/nav_200k/failure_lane_state_200k_2.json` (SHA-256
+`dd1b404092964167fbeadeda154ba99933e357ecbd491f6ddcad128ce57c7d91`).
 
 **Artifacts (remote, ignored):**
 `tmp/ai/e76-d3/nav_200k/E76D3-NAV136-GAMMA099-S42-200K.jsonl`,
@@ -183,9 +230,10 @@ history to show only successful runs.
   post-fix cases the ratio was 2,622 versus 155.
 - **Decision:** Preserve all four version-2 checkpoints and their logs. Do not
   spend more large-scale evaluation budget on these old models.
-- **Historical decision:** The later NAV136 run required a new explicit
-  instruction and configuration/risk review; that approval was given and the
-  200k experiment above is now complete. No training is currently running.
+- **Fact:** NAV136 completed at 16/25 strict arrivals; a paired 134-input,
+  200k control is now training in a separate checkout. The five NAV136 missed
+  cases inspected so far chiefly involve accepted away changes near J105 or
+  the exit; two also showed target-lane blockage during pending changes.
 - **Decision:** Do not reopen terminal in-place lateral movement as a fix. Do
   not silently change gamma, potential shaping, reward weights, or the formal
   observation contract.
