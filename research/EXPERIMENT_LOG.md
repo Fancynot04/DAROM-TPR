@@ -8,7 +8,7 @@ Active branch at update: `codex/e76-d3-gamma099-800k`
 
 Controller-fix commit: `f16be9f`
 
-## EXP-E76-NAV136-300K: running
+## EXP-E76-NAV136-300K: completed
 
 **Decision gate:** NAV136 improved from 10/25 strict arrivals at 100k to
 16/25 at 200k on the same 25 development cases; 10 cases improved and four
@@ -60,8 +60,47 @@ upload was created. The ignored JSONL is
 `tmp/ai/e76-d3/nav_300k/E76D3-NAV136-GAMMA099-S42-300K-CONT.jsonl`.
 Startup verification showed the source model loaded, CUDA active, and finite
 scalar metrics continuing from cumulative `env_steps=200,400–200,600`.
-These are startup checks, not an outcome. A 15-minute heartbeat will monitor
-the run and perform the frozen 300k evaluation after completion.
+These were startup checks, not an outcome. Training finished normally at
+300,000 cumulative environment steps (299,898 SAC updates; 3,392.86 s reported
+elapsed training time). The 300k model checkpoint SHA-256 is
+`50574fe0267c9d2bc60bc917a338336c0a874357d408d88813f23e064d99f2c8`;
+the 300k replay checkpoint SHA-256 is
+`4e73b35476ab75441cb3eb178e9705f7ad2b4a1ccb0fdb991495e40cbfea525d`.
+The process exited, the JSONL ended at `env_steps=300000`, and both checkpoint
+files were nonempty. Evaluator code was the same immutable `f10bdec` checkout;
+SUMO reported 1.18.0 and the report records environment v3.
+
+**300k frozen 25-case evaluation:** exact same five-cases-per-start-lane seeds,
+Easy/uniform/no evaluation safety/deterministic protocol as 200k. Strict
+arrivals fell to **15/25** from NAV136 200k's **16/25**; missed exits rose to
+**10/25** from 9/25, and collisions remained **0/25**. E76/E77 actor requests
+were 9,248 toward D3 and 1,704 away, making the away share **15.56%**
+(1,704/10,952), versus 4.35% at 200k. These are actor requests, not completed
+lane changes. Episodes physically departing E77_0 after entering it fell to
+**3/25** from 8/25 (three departures total), but this diagnostic alone cannot
+establish better route following because overall strict arrival worsened.
+
+| E76 start lane | 300k strict | Missed | Collision | Toward / away requests | E77_0 re-departure episodes |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 3/5 | 2/5 | 0/5 | 1,660 / 263 | 1/5 |
+| 1 | 4/5 | 1/5 | 0/5 | 1,735 / 325 | 1/5 |
+| 2 | 3/5 | 2/5 | 0/5 | 1,939 / 417 | 1/5 |
+| 3 | 3/5 | 2/5 | 0/5 | 1,991 / 428 | 0/5 |
+| 4 | 2/5 | 3/5 | 0/5 | 1,923 / 271 | 0/5 |
+| **Total** | **15/25** | **10/25** | **0/25** | **9,248 / 1,704** | **3/25** |
+
+Against NAV136 200k on paired cases, seven failures became arrivals, eight
+arrivals became failures, eight stayed arrivals, and two stayed failures. The
+three E76_3 failures at 200k (seeds 200008, 200009, 200010) became two
+arrivals and one continued miss; this local improvement is offset by losses
+elsewhere. The 300k result remains below the matched 134-input **200k**
+control's 19/25, though 300k versus 200k is not an equal-budget feature
+ablation. These are repeatedly reused development seeds and one training seed,
+not an independent generalization estimate. The 200k→300k trend does **not**
+meet the proposed positive-trend gate for automatically proceeding to 400k;
+no 400k run was started. The ignored 300k report is
+`tmp/ai/e76-d3/nav_300k/eval_300k_25.json` (SHA-256
+`4f84bc0fe99eb9917bd4059d360a95030dee68bcfc0ebd5d90a233808318b7e0`).
 
 ## EXP-E76-CONTROL134-200K: completed
 
