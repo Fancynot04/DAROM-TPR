@@ -20,6 +20,11 @@ MANEUVER_STABLE_STEPS = 3
 LANE_END_BUFFER_METERS = 5.0
 MIN_MANEUVER_SPEED_MPS = 1.0
 LATERAL_SETTLED_SPEED_MPS = 0.05
+# SUMO's sublane solver may settle a fully-contained 1.8 m vehicle up to
+# about 0.5 mm beyond the analytic 0.7 m margin of a 3.2 m lane.  Keep this
+# tolerance far below the 0.8 m lateral resolution and apply it only after the
+# target lane matches and lateral motion has stopped.
+LATERAL_CONTAINMENT_EPSILON_METERS = 0.001
 LANE_END_EPSILON_METERS = 0.01
 MISSED_EXIT_PENALTY = 1000.0  # Before the environment's existing 0.1 scale.
 

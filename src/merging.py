@@ -17,7 +17,7 @@ EGO_DEPART_TIME = 120.0
 EGO_DEPARTURE_DEADLINE = 1200.0
 SUMO_STEP_LENGTH = 0.1
 LANE_CHANGE_EDGES = frozenset(('E75', 'E76', 'E77', 'E78', 'E82'))
-ANTWERP_ENV_VERSION = 2
+ANTWERP_ENV_VERSION = 3
 ANTWERP_TASKS = {
     'legacy_o3_d1': ('O3', 'D1', 'merge'),
     'entry': ('O3', 'E76', 'merge'),
@@ -193,11 +193,16 @@ class Merging(gym.Env):
     def _e77_exit_lane_ready(self):
         if self.traci.vehicle.getLaneIndex(self.ego_id) != 0:
             return False
+        return self._exit_laterally_settled()
+
+    def _exit_laterally_settled(self):
+        """Return whether SUMO has stopped with the body inside its lane."""
         lane_id = self.traci.vehicle.getLaneID(self.ego_id)
         clearance = (self.traci.lane.getWidth(lane_id)
                      - self.traci.vehicle.getWidth(self.ego_id)) / 2.0
         return (clearance >= 0
-                and abs(self.traci.vehicle.getLateralLanePosition(self.ego_id)) <= clearance
+                and abs(self.traci.vehicle.getLateralLanePosition(self.ego_id))
+                <= clearance + exit_config.LATERAL_CONTAINMENT_EPSILON_METERS
                 and abs(self.traci.vehicle.getLateralSpeed(self.ego_id))
                 <= exit_config.LATERAL_SETTLED_SPEED_MPS)
 
@@ -232,12 +237,8 @@ class Merging(gym.Env):
         now = self.traci.simulation.getTime()
         if lateral_speed > exit_config.LATERAL_SETTLED_SPEED_MPS:
             maneuver['last_progress_time'] = now
-        lane_id = self.traci.vehicle.getLaneID(self.ego_id)
-        clearance = (self.traci.lane.getWidth(lane_id)
-                     - self.traci.vehicle.getWidth(self.ego_id)) / 2.0
-        settled = (self._exit_maneuver_target_matches() and clearance >= 0
-                   and abs(self.traci.vehicle.getLateralLanePosition(self.ego_id)) <= clearance
-                   and lateral_speed <= exit_config.LATERAL_SETTLED_SPEED_MPS)
+        settled = (self._exit_maneuver_target_matches()
+                   and self._exit_laterally_settled())
         maneuver['stable_steps'] = maneuver['stable_steps'] + 1 if settled else 0
         if maneuver['stable_steps'] >= exit_config.MANEUVER_STABLE_STEPS:
             self.exit_maneuver = None

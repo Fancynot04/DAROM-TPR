@@ -536,9 +536,11 @@ length, and a 5 m buffer. The 4 s allowance rounds up a same-seed TraCI probe
 that took 3.3 s from first lateral motion to full containment in the adjacent
 lane. A legal request is sent once and its target remains latched across J105
 or J106 until the ego is fully contained and laterally settled for three steps;
-opposing commands cannot interrupt it. At the E77 lane end, an active maneuver
-toward `E77_0` may finish within six seconds of its start, provided lateral
-progress has occurred within two seconds. Otherwise the episode terminates as
+the containment check allows a 1 mm numerical tolerance beyond the analytic
+half-clearance, while still requiring the target lane and near-zero lateral
+speed. Opposing commands cannot interrupt it. At the E77 lane end, an active
+maneuver toward `E77_0` may finish within six seconds of its start, provided
+lateral progress has occurred within two seconds. Otherwise the episode terminates as
 `Missed Exit`
 with a −100 scaled penalty, matching the existing timeout penalty magnitude;
 it earns neither exit-stage nor arrival bonus. Evaluation reports
@@ -546,6 +548,19 @@ it earns neither exit-stage nor arrival bonus. Evaluation reports
 `train/missed_exit`. New E76→D3 checkpoints store `exit_control_profile`;
 old checkpoints and replay buffers cannot resume under this rule. The profile
 applies only to `exit_e76_d3`.
+
+This completion-tolerance fix defines Antwerp environment version 3. It was
+validated against SUMO 1.18.0: the targeted remote E76 controller suite passed
+21/21 tests. The post-version-pin contract suite passed 50/50 tests with
+`python3 -m unittest tests.test_antwerp_contract`. A post-fix five-seed frozen
+checkpoint diagnostic increased completed lane changes from 15 to 18 while
+reducing expiry from 7 to 4. The same diagnostic still reached D3 in 0/5
+episodes, so the numerical fix does not turn the existing SAC policy into a
+successful exit policy. The four existing gamma-0.99 checkpoints and their
+logs remain frozen environment-version-2 artifacts; retain them unchanged and
+do not spend further large-scale evaluation budget on them. Training resume
+and evaluation intentionally reject those checkpoints under environment
+version 3.
 
 Only this task adds potential shaping to the existing scaled reward:
 `F(s,s') = 0.99 Φ(s') − Φ(s)`, where
@@ -679,7 +694,7 @@ five configurations; those two policies need not be equal. Pass the matching
 `--ablation` value to evaluation. Both entry points default to `full` with
 safety off; use explicit evaluation `--safety` or `--no-safety` in experiments.
 New checkpoints also store `gru_input_mode`, alongside `training_safety`,
-`ablation` and `antwerp_env_version=2`.
+`ablation` and `antwerp_env_version=3`.
 Evaluation rejects incompatible environment/ablation settings, but independently
 selects evaluation safety and records both flags without modifying the model.
 Training resume still requires matching training safety to avoid silently

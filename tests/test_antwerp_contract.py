@@ -64,6 +64,9 @@ class GRUInputContractTests(unittest.TestCase):
 
 
 class SeparateEgoTaskTests(unittest.TestCase):
+    def test_antwerp_environment_version_pins_completion_tolerance_contract(self):
+        self.assertEqual(ANTWERP_ENV_VERSION, 3)
+
     def test_exit_forge_metrics_share_one_environment_step_axis(self):
         callback = EpisodeRewardCallback()
         callback.num_timesteps = 100
@@ -244,6 +247,40 @@ class SeparateEgoTaskTests(unittest.TestCase):
                 fake.simulation.getTime.return_value = time
                 env._update_exit_maneuver()
             self.assertIsNone(env.exit_maneuver)
+
+    def test_exit_lateral_settling_uses_only_millimetre_boundary_tolerance(self):
+        env = Merging(seed=1, task=exit_config.TASK_ID)
+        env.ego_id = 'ego'
+        fake = Mock()
+        fake.vehicle.getLaneID.return_value = 'E76_3'
+        fake.vehicle.getWidth.return_value = 1.8
+        fake.lane.getWidth.return_value = 3.2
+        fake.vehicle.getLateralSpeed.return_value = 0.0
+        with patch('src.merging.traci', fake):
+            fake.vehicle.getLateralLanePosition.return_value = 0.7005
+            self.assertTrue(env._exit_laterally_settled())
+            fake.vehicle.getLateralLanePosition.return_value = 0.7011
+            self.assertFalse(env._exit_laterally_settled())
+            fake.vehicle.getLateralLanePosition.return_value = 0.7005
+            fake.vehicle.getLateralSpeed.return_value = 0.051
+            self.assertFalse(env._exit_laterally_settled())
+
+    def test_exit_maneuver_tolerance_still_requires_target_lane(self):
+        env = Merging(seed=1, task=exit_config.TASK_ID)
+        env.ego_id = 'ego'
+        env.lane_name, env.lane_idx = 'E76', 2
+        env.exit_maneuver = {'edge': 'E76', 'target': 1, 'start_time': 100.0,
+                             'last_progress_time': 100.0, 'stable_steps': 0}
+        fake = Mock()
+        fake.vehicle.getLaneID.return_value = 'E76_2'
+        fake.vehicle.getWidth.return_value = 1.8
+        fake.lane.getWidth.return_value = 3.2
+        fake.vehicle.getLateralLanePosition.return_value = 0.7005
+        fake.vehicle.getLateralSpeed.return_value = 0.0
+        fake.simulation.getTime.return_value = 100.1
+        with patch('src.merging.traci', fake):
+            env._update_exit_maneuver()
+        self.assertEqual(env.exit_maneuver['stable_steps'], 0)
 
     def test_e77_legal_maneuver_gets_bounded_completion_window(self):
         env = Merging(seed=1, task=exit_config.TASK_ID)
