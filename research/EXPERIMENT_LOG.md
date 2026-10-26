@@ -45,9 +45,22 @@ inputs. GPU and disk preflight passed. Background training PID `2705923` used
 `--wandb_mode offline`, with offline W&B ID `jdxnmtp4`; no Forge sync or model
 upload. Its ignored JSONL is
 `tmp/ai/e76-d3/control_134_200k/E76D3-CONTROL134-GAMMA099-S42-200K.jsonl`.
-At the latest spot check the process was alive, scalar losses were present,
-and `env_steps=37,400`; this is progress, not a result. A 15-minute heartbeat
-will inspect both checkpoints and run the planned fixed-seed evaluations.
+At the 100k checkpoint spot check the process was alive, scalar losses were
+present, and training continued past `env_steps=108,000`. A 15-minute heartbeat
+will inspect the final checkpoint and run the remaining fixed-seed evaluation.
+
+**100k development diagnostic:** the model and replay checkpoints were saved.
+Their SHA-256 values are respectively
+`a734dd34ba067f6c757f69d2d723af614879a49b70a378e05a45bc58a5349a55`
+and `afa85c1aa44163c7c9374a5be4395f49e77fd507520a2eb8e69467c3c1de9fb1`.
+The five fixed seeds `200017, 200004, 200003, 200005, 200001` covered start
+lanes 0–4 and yielded **3/5 strict arrivals, 2/5 missed exits, 0 collisions**.
+Lanes 0, 1, 4 arrived; lanes 2, 3 missed. Raw E76/E77 actor directions were
+1,994 toward D3 and 185 away; these are requests, not completed changes.
+The ignored report is `tmp/ai/e76-d3/control_134_200k/eval_100k_5.json`
+(SHA-256 `6a57997da368434db5af2202aa1fada117d5983cc9829d55254136daadf4a1cc`).
+NAV136 also scored 3/5 on its 100k development set, so this small diagnostic
+does not show a success-count separation. It is not the final 25-case result.
 
 ## EXP-E76-NAV136-200K: completed
 
