@@ -8,7 +8,7 @@ Active branch at update: `codex/e76-d3-gamma099-800k`
 
 Controller-fix commit: `f16be9f`
 
-## EXP-E76-SEED43-PAIRED-200K: approved, not launched
+## EXP-E76-SEED43-PAIRED-200K: running CONTROL134
 
 **Question:** whether CONTROL134's seed-42 result of 19/25 strict arrivals
 (76%) repeats under a second learner seed, and whether NAV136's effect relative
@@ -37,6 +37,26 @@ does not upload code, models, replay or TensorBoard. Network failure must not
 stop training: retain local records, retry the same stable run ID and report
 cloud lag honestly. Remote transfer and online Forge writes require the
 project's one-time dangerous-operation confirmation before launch.
+
+**Launch (2026-10-26):** the user gave the required one-time confirmation.
+Implementation commit `885ca5d49e414bb31acd53489b1b7ce2e09428b5`
+passed 99 tests (12 skipped) both locally and remotely. Remote SUMO was 1.18.0,
+both 134/136 observation-shape probes passed, disk had 349 GB free, and the
+two fresh checkout paths were unused. Immutable learner/evaluator checkouts
+are `/home/cyl/project/DAROM-TPR-control134-s43-200k` and
+`/home/cyl/project/DAROM-TPR-nav136-s43-200k` at that commit.
+
+The sequential supervisor started CONTROL134 first as run
+`E76D3-CONTROL134-GAMMA099-S43-200K`. Direct learner W&B is disabled; its
+independent synchronizer created online run `bca31468`, visible at the
+[Forge DAROM-OUT run](https://forge.coreweave.com/wandb/arlikache-anhui-university/DAROM-OUT/runs/bca31468).
+Cloud API readback confirmed the run name, running state, `env_steps` and all
+four loss/entropy keys. The synchronizer's first file-path invocation failed
+before uploading because the package root was absent from `sys.path`; it was
+restarted with the supported module entry point and stable run ID while the
+unaffected learner continued. This caused initial curve lag, not a training
+restart or missing local metrics. NAV136 remains gated on completed CONTROL134
+training plus both frozen evaluations.
 
 ## EXP-E76-NAV136-300K: completed
 
