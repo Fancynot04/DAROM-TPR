@@ -15,8 +15,11 @@ Controller-fix commit: `f16be9f`
 regressed. The away-request share fell from 21.08% to 4.35%. This supports an
 exploratory 100k-step continuation, not a statistically secure generalization
 claim. The user authorized the 300k continuation on 2026-10-26. The separate
-134-dimensional 200k control must finish training and evaluation first so
-these jobs do not compete for the GPU. Do not automatically proceed to 400k.
+134-dimensional 200k control has now finished training and evaluation; it
+scored 19/25 versus NAV136's 16/25, so the navigation inputs have **not**
+shown a success-rate benefit in the matched 200k comparison. The 300k run is
+still an exploratory NAV136 learning-trajectory test, not a validation of
+feature causality. Do not automatically proceed to 400k.
 
 **Frozen source:** resume specifically from NAV136 200k model SHA-256
 `208297efdf20e9196ed0fbbaa726cf64f4a538fd8d9b335d30cc83500317be08`
@@ -39,7 +42,7 @@ counter for a fair baseline; normal E77_0→J106→D3 travel is not a departure.
 These reused seeds guide development, not independent final testing. Review
 the 300k trend and fresh resource/risk gate before considering 400k.
 
-## EXP-E76-CONTROL134-200K: running
+## EXP-E76-CONTROL134-200K: completed
 
 **Question:** how much of the NAV136 result is attributable to adding live
 D3 distance and required-lane navigation, rather than only to fresh training
@@ -67,7 +70,7 @@ checkout so no old outputs are touched. Run 134-shape/profile/compatibility
 tests, verify SUMO 1.18.0, GPU, disk and exact code revision. Stop on
 nonfinite observations, contract drift or failed checkpoint save.
 
-**Launch and current status (2026-10-26):** committed code revision
+**Executed configuration (2026-10-26):** committed code revision
 `9546c3acf475c4f3961734eb8f0d4347192e63dc` in separate remote checkout
 `/home/cyl/project/DAROM-TPR-control134-200k`; run name
 `E76D3-CONTROL134-GAMMA099-S42-200K`. The remote 92-test suite passed
@@ -76,9 +79,15 @@ inputs. GPU and disk preflight passed. Background training PID `2705923` used
 `--wandb_mode offline`, with offline W&B ID `jdxnmtp4`; no Forge sync or model
 upload. Its ignored JSONL is
 `tmp/ai/e76-d3/control_134_200k/E76D3-CONTROL134-GAMMA099-S42-200K.jsonl`.
-At the 100k checkpoint spot check the process was alive, scalar losses were
-present, and training continued past `env_steps=108,000`. A 15-minute heartbeat
-will inspect the final checkpoint and run the remaining fixed-seed evaluation.
+Training completed 200,000 environment steps and 199,899 SAC updates in
+6,333.94 s (31.58 steps/s). Its 219 training episodes contained 75 arrivals,
+136 missed exits and 8 collisions; these are not the fixed-seed evaluation.
+The 200k model/replay checkpoint SHA-256 values are
+`4ed43397b9cc13e782dbff81f546ffa7d5d2286febce74532545b1fa84fe9053`
+and `4555c77af0c1718109ae6d74a7aaccfa446b4fcc45287ca25ca7ec12dd044b6e`.
+The final model/replay hashes are
+`c99738447df759779daf59b64973c07e759ae57dd74f7f3e618e98b34d39bd06`
+and `1aaa0a417f7e423549dcc4d6f9fb1fd82568652f89890eb4d705e89c2bf06351`.
 
 **100k development diagnostic:** the model and replay checkpoints were saved.
 Their SHA-256 values are respectively
@@ -92,6 +101,31 @@ The ignored report is `tmp/ai/e76-d3/control_134_200k/eval_100k_5.json`
 (SHA-256 `6a57997da368434db5af2202aa1fada117d5983cc9829d55254136daadf4a1cc`).
 NAV136 also scored 3/5 on its 100k development set, so this small diagnostic
 does not show a success-count separation. It is not the final 25-case result.
+
+**200k fixed-seed evaluation:** all 25 balanced cases used the same seeds,
+Easy/uniform/no-safety/deterministic protocol, SUMO 1.18.0 and environment v3
+as NAV136. There were **19/25 strict arrivals, 6/25 missed exits and 0/25
+collisions**. Raw E76/E77 requests were 18,918 toward D3 and 890 away;
+the away share was 890/19,808 = 4.49%, close to NAV136's 4.35%.
+
+| E76 start lane | Control134 strict | NAV136 strict | Control134 toward / away | NAV136 toward / away |
+|---:|---:|---:|---:|---:|
+| 0 | 4/5 | 3/5 | 3,768 / 215 | 3,763 / 169 |
+| 1 | 4/5 | 5/5 | 3,833 / 145 | 3,667 / 149 |
+| 2 | 5/5 | 3/5 | 3,970 / 80 | 3,796 / 142 |
+| 3 | 4/5 | 2/5 | 3,844 / 110 | 3,334 / 233 |
+| 4 | 2/5 | 3/5 | 3,503 / 340 | 3,690 / 137 |
+| **Total** | **19/25** | **16/25** | **18,918 / 890** | **18,250 / 830** |
+
+The models agreed on 12 successes and 2 failures; control alone arrived on
+7 cases and NAV136 alone arrived on 4. This small, single-training-seed
+comparison does not prove navigation is harmful, but it directly contradicts
+the claim that these two inputs have already improved strict arrival rate.
+The encoder fusion layer also differs by two input columns, so this is a
+matched practical ablation rather than identical-parameter causal isolation.
+The ignored control report is
+`tmp/ai/e76-d3/control_134_200k/eval_200k_25.json` (SHA-256
+`73e4bebb3984c4401bb334bcb9c54f844a2d2a7bf555faff1ca46a0d86184957`).
 
 ## EXP-E76-NAV136-200K: completed
 
@@ -207,8 +241,9 @@ versus 1,211 toward over its 25 cases). This is
 descriptive only: the old checkpoints differ in training history and budget,
 so they do not isolate the causal effect of the two navigation inputs. Lane 3
 remains the weakest in this small evaluation. A matched fresh 134-dimensional
-control is now running (above). Its result will improve the comparison, but
-one training seed still cannot establish a robust causal effect.
+control has now completed at 19/25 (above), so the 200k matched comparison
+does not show a navigation-input benefit. One training seed still cannot
+establish a robust causal effect in either direction.
 
 **Frozen 200k failure diagnostic (five cases):** the deterministic evaluation
 was replayed step-by-step without training or modifying the controller. All
@@ -303,10 +338,10 @@ history to show only successful runs.
   post-fix cases the ratio was 2,622 versus 155.
 - **Decision:** Preserve all four version-2 checkpoints and their logs. Do not
   spend more large-scale evaluation budget on these old models.
-- **Fact:** NAV136 completed at 16/25 strict arrivals; a paired 134-input,
-  200k control is now training in a separate checkout. The five NAV136 missed
-  cases inspected so far chiefly involve accepted away changes near J105 or
-  the exit; two also showed target-lane blockage during pending changes.
+- **Fact:** NAV136 completed at 16/25 strict arrivals versus 19/25 for the
+  fresh matched 134-input 200k control. The five NAV136 missed cases inspected
+  so far chiefly involve accepted away changes near J105 or the exit; two
+  also showed target-lane blockage during pending changes.
 - **Decision:** Do not reopen terminal in-place lateral movement as a fix. Do
   not silently change gamma, potential shaping, reward weights, or the formal
   observation contract.
