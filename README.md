@@ -4,6 +4,10 @@
 
 The [2026-10-18 research archive](research/2026-10-18/README.md) preserves the completed 9,000-episode Antwerp evaluation, training/loss diagnostics, action-mode audit, and a separate DAROM D reproduction source/configuration snapshot with recorded curves. It includes provenance, checksums and an offline verification tool. Historical method references and unexecuted proposals are labeled explicitly; runtime logs, credentials, checkpoints and replay buffers remain outside Git. The archive does not change the active training or Forge synchronization.
 
+The living [AI experiment log](research/EXPERIMENT_LOG.md) records the active
+E76 -> D3 experiment lineage, configurations, evidence, conclusions, open
+problems, decisions, and unapproved next-step ideas for future agents.
+
 **DAROM** (Delay-Aware Reinforcement learning for On-ramp Merging) is a framework for autonomous highway on-ramp merging under stochastic V2I communication latency. The agent is modeled as a Random Delay Markov Decision Process (RDMDP) and trained with a Delay-Aware Encoder that jointly processes delayed observations, masked action histories, and delay magnitudes to recover the true latent traffic state.
 
 ## Overview
