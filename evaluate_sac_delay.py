@@ -31,9 +31,10 @@ REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout
 
 
 def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1',
-             potential_gamma=None, nav_features=False):
+             potential_gamma=None, nav_features=False, exit_reward_profile=None):
     env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
-                               potential_gamma=potential_gamma),
+                               potential_gamma=potential_gamma,
+                               exit_reward_profile=exit_reward_profile),
                        max_delay=20, mode='all', delay_mode=delay_mode,
                        seed=seed, ablation=ablation, nav_features=nav_features)
     return SafetyWrapper(env) if safety else env
@@ -54,10 +55,14 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
     checkpoint_task = getattr(model, 'antwerp_task', 'legacy_o3_d1')
     if checkpoint_task != task:
         raise ValueError(f'Checkpoint task={checkpoint_task!r}, requested {task!r}')
-    if task == exit_config.TASK_ID and getattr(model, 'exit_potential_beta', None) != exit_config.POTENTIAL_BETA:
-        raise ValueError('Checkpoint E76-to-D3 potential configuration does not match')
-    if task == exit_config.TASK_ID and getattr(model, 'exit_reward_profile', None) != exit_config.REWARD_PROFILE:
-        raise ValueError('Checkpoint E76-to-D3 reward profile does not match')
+    reward_profile = getattr(model, 'exit_reward_profile', None)
+    if task == exit_config.TASK_ID:
+        try:
+            expected_beta = exit_config.potential_beta_for_profile(reward_profile)
+        except ValueError as error:
+            raise ValueError('Checkpoint E76-to-D3 reward profile does not match') from error
+        if getattr(model, 'exit_potential_beta', None) != expected_beta:
+            raise ValueError('Checkpoint E76-to-D3 potential configuration does not match')
     if task == exit_config.TASK_ID and getattr(model, 'exit_control_profile', None) != exit_config.CONTROL_PROFILE:
         raise ValueError('Checkpoint E76-to-D3 control profile does not match')
     potential_gamma = None
@@ -74,6 +79,8 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
             'features_extractor_kwargs', {}).get('nav_dim', 0)
         if encoder_nav_dim != (2 if nav_features else 0):
             raise ValueError('Checkpoint E76-to-D3 GRU navigation split disagrees')
+        if reward_profile == exit_config.URGENCY_REWARD_PROFILE and nav_features:
+            raise ValueError('Urgency reward v1 requires the 134-dimensional observation')
         potential_gamma = float(getattr(model, 'exit_potential_gamma', model.gamma))
         if not np.isclose(potential_gamma, float(model.gamma), rtol=0.0, atol=1e-12):
             raise ValueError('Checkpoint SAC and E76-to-D3 potential gamma do not match')
@@ -83,6 +90,7 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
         setup['potential_gamma'] = potential_gamma
         setup['exit_observation_profile'] = getattr(model, 'exit_observation_profile', None)
         setup['nav_features'] = nav_features
+        setup['exit_reward_profile'] = reward_profile
     return setup
 
 
@@ -261,7 +269,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
         for seed in seeds:
             env = make_env(seed, scenario, delay_mode, safety, ablation, task=task,
                            potential_gamma=setup.get('potential_gamma'),
-                           nav_features=setup.get('nav_features', False))
+                           nav_features=setup.get('nav_features', False),
+                           exit_reward_profile=setup.get('exit_reward_profile'))
             try:
                 runs.append({'seed': seed, 'episodes': episodes,
                              **evaluate(model, env, episodes, seed, task=task,

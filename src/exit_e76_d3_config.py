@@ -9,6 +9,10 @@ DEPART_LANE = 'random'
 POTENTIAL_BETA = 10.0
 POTENTIAL_GAMMA = 0.99
 REWARD_PROFILE = 'no_lane_command_penalty_v1'
+URGENCY_REWARD_PROFILE = 'urgency_penalty_no_potential_v1'
+URGENCY_THRESHOLD = 0.15
+URGENCY_CLIP = 1.5
+URGENCY_WEIGHT = 0.10
 CONTROL_PROFILE = 'tracked_lane_change_v2'
 DISTANCE_SCALE_EDGES = ('E76', 'E77', 'D3')
 NAV_OBSERVATION_PROFILE = 'nav_d3_required_lanes_v1'
@@ -37,6 +41,10 @@ WANDB_ENTITY = 'arlikache-anhui-university'
 WANDB_PROJECT = 'DAROM-OUT'
 
 PHASES = {
+    'urgency_134_200k': {'scenario': 'easy', 'total_timesteps': 200_000,
+                         'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
+                         'nav_features': False, 'allowed_seeds': (42, 43),
+                         'reward_profile': URGENCY_REWARD_PROFILE},
     'nav_300k': {'scenario': 'easy', 'total_timesteps': 300_000,
                  'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
                  'nav_features': True},
@@ -59,6 +67,21 @@ PHASES = {
         'checkpoint_freq': 200_000, 'gamma': POTENTIAL_GAMMA,
     },
 }
+
+
+def potential_beta_for_profile(profile):
+    if profile == REWARD_PROFILE:
+        return POTENTIAL_BETA
+    if profile == URGENCY_REWARD_PROFILE:
+        return 0.0
+    raise ValueError(f'Unknown E76-to-D3 reward profile: {profile!r}')
+
+
+def urgency_penalty(urgency):
+    """Per 0.1 s step, in final reward units; never modify terminal rewards."""
+    if not math.isfinite(urgency) or urgency < 0:
+        raise ValueError(f'Invalid urgency for reward: {urgency!r}')
+    return -URGENCY_WEIGHT * min(max(urgency - URGENCY_THRESHOLD, 0.0), URGENCY_CLIP)
 
 
 def potential(distance_to_exit, distance_scale, lane_index):

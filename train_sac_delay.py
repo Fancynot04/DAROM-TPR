@@ -32,6 +32,7 @@ class EpisodeRewardCallback(BaseCallback):
         self.current_episode_reward = 0
         self.current_episode_length = 0
         self.current_potential_reward = 0.0
+        self.current_urgency_reward = 0.0
         self.lane_episodes = [0] * 5
         self.lane_successes = [0] * 5
         self.recent_outcomes = deque(maxlen=20)
@@ -59,6 +60,7 @@ class EpisodeRewardCallback(BaseCallback):
         # Track episode reward and length
         self.current_episode_reward += self.locals['rewards'][0]
         self.current_potential_reward += self.locals['infos'][0].get('potential_reward', 0.0)
+        self.current_urgency_reward += self.locals['infos'][0].get('urgency_reward', 0.0)
         self.current_episode_length += 1
 
         # Check if episode is done
@@ -110,6 +112,8 @@ class EpisodeRewardCallback(BaseCallback):
                 metrics['train/ego_start_lane'] = start_lane
                 metrics['train/initial_potential'] = float(info['initial_potential'])
                 metrics['train/episode_potential_reward'] = float(self.current_potential_reward)
+                if info.get('exit_reward_profile') == exit_config.URGENCY_REWARD_PROFILE:
+                    metrics['train/episode_urgency_reward'] = float(self.current_urgency_reward)
                 if 0 <= start_lane < 5:
                     self.lane_episodes[start_lane] += 1
                     self.lane_successes[start_lane] += int(info['is_success'])
@@ -124,6 +128,7 @@ class EpisodeRewardCallback(BaseCallback):
             self.current_episode_reward = 0
             self.current_episode_length = 0
             self.current_potential_reward = 0.0
+            self.current_urgency_reward = 0.0
 
         if self.num_timesteps % 100 == 0 and self.locals['infos'][0].get('ego_start_lane') is not None:
             latest = self.model.logger.name_to_value
@@ -198,10 +203,10 @@ def load_model(path: str, env: gym.Env) -> SAC:
 
 def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
              ablation='full', task='legacy_o3_d1', potential_gamma=None,
-             nav_features=False):
+             nav_features=False, exit_reward_profile=None):
     env = DelayWrapper(
         Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
-                potential_gamma=potential_gamma),
+                potential_gamma=potential_gamma, exit_reward_profile=exit_reward_profile),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation, nav_features=nav_features,
     )
@@ -261,6 +266,7 @@ def parse_args():
         args.checkpoint_freq = phase['checkpoint_freq']
         args.gamma = phase['gamma']
         args.nav_features = phase.get('nav_features', False)
+        args.exit_reward_profile = phase.get('reward_profile', exit_config.REWARD_PROFILE)
         args.save_replay_buffer = True
         if args.project not in (None, exit_config.WANDB_PROJECT):
             parser.error('E76-to-D3 profile uses the designated DAROM-OUT Forge project')
@@ -286,9 +292,10 @@ def parse_args():
         args.project = args.project or 'merging-SAC_experiments'
         args.gamma = 0.99
         args.nav_features = False
+        args.exit_reward_profile = None
     if args.exit_phase and bool(args.load_path) != bool(args.replay_buffer_path):
         parser.error('E76-to-D3 continuation requires both model and replay-buffer paths')
-    if args.exit_phase in ('nav_200k', 'control_134_200k') and args.load_path:
+    if args.exit_phase in ('nav_200k', 'control_134_200k', 'urgency_134_200k') and args.load_path:
         parser.error('The paired 200k experiment must start from random initialization')
     if args.exit_phase == 'nav_300k' and not args.load_path:
         parser.error('NAV136 300k continuation requires the 200k model and replay buffer')
@@ -352,9 +359,10 @@ def main():
         task=args.task,
         exit_phase=args.exit_phase,
         ego_depart_lane=(exit_config.DEPART_LANE if args.exit_phase else None),
-        potential_beta=(exit_config.POTENTIAL_BETA if args.exit_phase else None),
+        potential_beta=(exit_config.potential_beta_for_profile(args.exit_reward_profile)
+                        if args.exit_phase else None),
         potential_gamma=(args.gamma if args.exit_phase else None),
-        reward_profile=(exit_config.REWARD_PROFILE if args.exit_phase else None),
+        reward_profile=args.exit_reward_profile,
         exit_control_profile=(exit_config.CONTROL_PROFILE if args.exit_phase else None),
         exit_observation_profile=(exit_config.NAV_OBSERVATION_PROFILE
                                   if args.nav_features else None),
@@ -372,12 +380,18 @@ def main():
         checkpoint_freq=args.checkpoint_freq,
         save_replay_buffer=args.save_replay_buffer,
         replay_buffer_path=args.replay_buffer_path,
+        urgency_reward=(dict(weight=exit_config.URGENCY_WEIGHT,
+                             threshold=exit_config.URGENCY_THRESHOLD,
+                             clip=exit_config.URGENCY_CLIP)
+                        if args.exit_reward_profile == exit_config.URGENCY_REWARD_PROFILE
+                        else None),
     )
     # Create env
     def _fn():
         return make_env(args.seed, args.scenario, args.delay_mode, max_delay,
                         args.use_safety, args.render_mode, args.ablation, args.task,
-                        args.gamma if args.exit_phase else None, args.nav_features)
+                        args.gamma if args.exit_phase else None, args.nav_features,
+                        args.exit_reward_profile)
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -455,10 +469,10 @@ def main():
                 if loaded_model.observation_space.shape != vec_env.observation_space.shape:
                     raise ValueError('Loaded model observation shape does not match')
                 if (getattr(loaded_model, 'exit_potential_beta', None)
-                        != exit_config.POTENTIAL_BETA):
+                        != exit_config.potential_beta_for_profile(args.exit_reward_profile)):
                     raise ValueError('Loaded model has a different E76-to-D3 potential profile')
                 if (getattr(loaded_model, 'exit_reward_profile', None)
-                        != exit_config.REWARD_PROFILE):
+                        != args.exit_reward_profile):
                     raise ValueError('Loaded model has a different E76-to-D3 reward profile')
                 if (getattr(loaded_model, 'exit_control_profile', None)
                         != exit_config.CONTROL_PROFILE):
@@ -487,21 +501,21 @@ def main():
     if args.exit_phase:
         model.exit_observation_profile = (exit_config.NAV_OBSERVATION_PROFILE
                                           if args.nav_features else None)
-        model.exit_potential_beta = exit_config.POTENTIAL_BETA
+        model.exit_potential_beta = exit_config.potential_beta_for_profile(args.exit_reward_profile)
         model.exit_potential_gamma = args.gamma
-        model.exit_reward_profile = exit_config.REWARD_PROFILE
+        model.exit_reward_profile = args.exit_reward_profile
         model.exit_control_profile = exit_config.CONTROL_PROFILE
 
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
                      mode=args.wandb_mode, dir=args.log_dir,
                      sync_tensorboard=not args.exit_phase,
                      save_code=not args.exit_phase, resume=args.resume, id=args.run_id,
-                     group=(f'e76-d3-{args.exit_phase}-{exit_config.REWARD_PROFILE}'
+                     group=(f'e76-d3-{args.exit_phase}-{args.exit_reward_profile}'
                             f'-{exit_config.CONTROL_PROFILE}')
                      if args.exit_phase else None,
                      job_type=args.exit_phase,
-                     tags=['E76-D3', 'single-ego', 'potential-beta10', 'metric-schema-v2',
-                           exit_config.REWARD_PROFILE, exit_config.CONTROL_PROFILE]
+                     tags=['E76-D3', 'single-ego', 'metric-schema-v2',
+                           args.exit_reward_profile, exit_config.CONTROL_PROFILE]
                      if args.exit_phase else None)
     if not args.exit_phase:
         run.log_code('src')

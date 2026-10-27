@@ -9,6 +9,7 @@ from gymnasium import spaces
 from .utils import *
 from .geometry import TrafficSnapshot, driving_axes, world_velocity
 from . import exit_e76_d3_config as exit_config
+from .route_urgency import load_route_network, observe_route_urgency, route_urgency
 
 
 maxSteps = 6000
@@ -59,13 +60,23 @@ def set_ego_lane_mode(vehicle_name):
 class Merging(gym.Env):
     metadata = {"render_modes": ["human", "none"], "render_fps": 10}
     def __init__(self, seed, mode='all', radius = 50, render_mode= None, runSafetyCheck=False,
-                 scenario='medium', task='legacy_o3_d1', potential_gamma=None):
+                 scenario='medium', task='legacy_o3_d1', potential_gamma=None,
+                 exit_reward_profile=None):
         if scenario not in ('easy', 'medium', 'hard'):
             raise ValueError(f'Unknown Antwerp scenario: {scenario}')
         if task not in ANTWERP_TASKS:
             raise ValueError(f'Unknown Antwerp task: {task}')
         self.scenario = scenario
         self.task = task
+        self.exit_reward_profile = (exit_config.REWARD_PROFILE if exit_reward_profile is None
+                                    else exit_reward_profile)
+        if task == exit_config.TASK_ID:
+            exit_config.potential_beta_for_profile(self.exit_reward_profile)
+        elif exit_reward_profile is not None:
+            raise ValueError('An E76-to-D3 reward profile requires the E76-to-D3 task')
+        self.route_network = (load_route_network(ANTWERP_DIR / 'Antwerp.net.xml')
+                              if self.exit_reward_profile == exit_config.URGENCY_REWARD_PROFILE
+                              and task == exit_config.TASK_ID else None)
         self.potential_gamma = (exit_config.POTENTIAL_GAMMA
                                 if potential_gamma is None else float(potential_gamma))
         self.origin, self.destination, self.stage_name = ANTWERP_TASKS[task]
@@ -100,6 +111,9 @@ class Merging(gym.Env):
         self.potential_distance_scale = None
         self.potential_previous = 0.0
         self.initial_potential = 0.0
+        self.last_valid_urgency = None
+        self.last_settled_urgency_edge = None
+        self.last_settled_urgency_lane = None
         self.action = None
         self.runSafetyCheck = runSafetyCheck
         self.last_acc = 0
@@ -168,6 +182,45 @@ class Merging(gym.Env):
         self.potential_distance_scale = None
         self.potential_previous = 0.0
         self.initial_potential = 0.0
+        self.last_valid_urgency = None
+        self.last_settled_urgency_edge = None
+        self.last_settled_urgency_lane = None
+
+    def _reward_urgency(self):
+        """Use only settled lane-route estimates for the opt-in reward."""
+        if self.done or not self.ego_on_road or self.ego_teleported:
+            return 0.0, False
+        estimate = observe_route_urgency(
+            self, self.route_network, LANE_CHANGE_EDGES,
+            lane_change_seconds=exit_config.LANE_CHANGE_TIME_SECONDS)
+        if estimate['status'] == 'at_destination':
+            return 0.0, False
+        if estimate['status'] != 'ok':
+            raise ValueError(f'Invalid route urgency during reward: {estimate["status"]}')
+        if estimate['valid_for_threshold']:
+            self.last_valid_urgency = estimate['urgency']
+            self.last_settled_urgency_edge = estimate['projected_edge']
+            self.last_settled_urgency_lane = estimate['projected_lane']
+            return self.last_valid_urgency, False
+        if self.last_valid_urgency is None:
+            raise ValueError('No settled route urgency before provisional movement')
+        if estimate['road'] == self.last_settled_urgency_edge:
+            vehicle = self.traci.vehicle
+            route = tuple(vehicle.getRoute(self.ego_id))
+            edge_index = int(vehicle.getRouteIndex(self.ego_id))
+            if (0 <= edge_index < len(route)
+                    and route[edge_index] == self.last_settled_urgency_edge):
+                stable = route_urgency(
+                    self.route_network, route, edge_index,
+                    self.last_settled_urgency_lane,
+                    float(vehicle.getLanePosition(self.ego_id)),
+                    float(vehicle.getSpeed(self.ego_id)),
+                    float(vehicle.getLength(self.ego_id)), LANE_CHANGE_EDGES,
+                    lane_change_seconds=exit_config.LANE_CHANGE_TIME_SECONDS)
+                if stable['status'] != 'ok':
+                    raise ValueError('Settled-lane urgency route became unreachable')
+                return stable['urgency'], True
+        return self.last_valid_urgency, True
 
     def _exit_potential(self):
         if self.task != exit_config.TASK_ID or not self.ego_on_road or self.ego_teleported:
@@ -335,8 +388,11 @@ class Merging(gym.Env):
                         self.potential_distance_scale = sum(
                             self.traci.lane.getLength(f'{edge}_0')
                             for edge in exit_config.DISTANCE_SCALE_EDGES)
-                        self.potential_previous = self._exit_potential()
-                        self.initial_potential = self.potential_previous
+                        if self.exit_reward_profile == exit_config.REWARD_PROFILE:
+                            self.potential_previous = self._exit_potential()
+                            self.initial_potential = self.potential_previous
+                        else:
+                            self._reward_urgency()
                     self.observation = np.asarray(self._get_obs(), dtype=np.float32)
         if not self.ego_inserted:
             self.traci.close()
@@ -656,12 +712,22 @@ class Merging(gym.Env):
             self.observation_snapshot = None
         self.reward = self.getReward()
         potential_reward = 0.0
+        urgency_reward = 0.0
+        urgency_value = None
+        urgency_provisional = False
         if self.task == exit_config.TASK_ID:
-            next_potential = 0.0 if self.done else self._exit_potential()
-            potential_reward = (self.potential_gamma * next_potential
-                                - self.potential_previous)
-            self.potential_previous = next_potential
-            self.reward += potential_reward
+            if self.exit_reward_profile == exit_config.REWARD_PROFILE:
+                next_potential = 0.0 if self.done else self._exit_potential()
+                potential_reward = (self.potential_gamma * next_potential
+                                    - self.potential_previous)
+                self.potential_previous = next_potential
+                self.reward += potential_reward
+            else:
+                urgency_value, urgency_provisional = self._reward_urgency()
+                urgency_reward = (0.0 if self.done else
+                                  exit_config.urgency_penalty(urgency_value))
+                self.reward += urgency_reward
+                self.reward_components['urgency'] = float(urgency_reward)
             self.reward_components['potential'] = float(potential_reward)
         self.state = self.observation.copy()
         self.last_acc = self.parsed_action[0]
@@ -685,6 +751,11 @@ class Merging(gym.Env):
                      'initial_potential': self.initial_potential,
                      'potential': self.potential_previous,
                      'potential_reward': potential_reward,
+                     'urgency_reward': urgency_reward,
+                     'urgency_value': urgency_value,
+                     'urgency_provisional': urgency_provisional,
+                     'exit_reward_profile': (self.exit_reward_profile
+                                             if self.task == exit_config.TASK_ID else None),
                      'exit_actor_request_direction': self.exit_actor_request_direction,
                      'teleport_started': started, 'teleport_ended': ended,
                      'is_success': info['message'] == 'Arrived' and not self.ego_teleported})

@@ -726,6 +726,24 @@ not change model input, action execution, reward, or the evaluation report's
 success definition. The 4 s estimate is inherited from the E76 controller
 and needs separate calibration for the O1 exit task.
 
+The opt-in `--exit_phase urgency_134_200k` is a **new E76 → D3 reward
+contract**, not a continuation of NAV136. It trains from scratch with the
+original 134-value observation (the two live navigation inputs are absent),
+γ=0.99, the existing controller and safety-off Easy/uniform configuration.
+The old D3 potential is disabled (`potential_beta=0`). Instead, on every
+nonterminal 0.1 s step it adds
+`r_U = -0.10 * clip(U - 0.15, 0, 1.5)` to the existing base reward. The
+route-wide `U` comes from the lane graph, not a new policy input. It updates
+to a new lane only after the physical maneuver settles. During pending motion
+on the same edge, it recomputes urgency at the current position using the
+last settled lane; on a junction connector or until the new edge settles, it
+holds the last valid value. An unreachable route raises an error, and terminal
+steps receive no urgency penalty. Checkpoints carry a distinct reward profile
+and reject old-potential or 136-value observation contracts. This phase is
+only a configuration; defining it does not start training. Any later paired
+comparison needs a fresh 134-value, no-potential, no-urgency control—historical
+NAV136 results change multiple variables and are not that control.
+
 Run safety-on evaluation separately with `--safety` and a distinct output
 path. A short pilot verifies training mechanics, not policy convergence.
 To continue the Easy run from a numbered checkpoint, pass its matching model

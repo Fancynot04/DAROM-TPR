@@ -9,7 +9,8 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 from evaluate_sac_delay import diagnostic_reward_without_potential, evaluate
-from src.merging import ANTWERP_DIR, LANE_CHANGE_EDGES
+from src import exit_e76_d3_config as exit_config
+from src.merging import ANTWERP_DIR, LANE_CHANGE_EDGES, Merging
 from src.route_urgency import (load_route_network, observe_route_urgency,
                                route_urgency)
 
@@ -97,6 +98,63 @@ class RouteUrgencyTests(unittest.TestCase):
             self.estimate(('E77', 'D3'), 2, speed=float('nan'))
         with self.assertRaises(ValueError):
             self.estimate(('E77', 'D3'), 2, position=-1)
+
+    def test_reward_formula_is_bounded_and_rejects_invalid_values(self):
+        for urgency, expected in ((0.0, 0.0), (0.15, 0.0),
+                                  (0.5, -0.035), (1.0, -0.085),
+                                  (1.65, -0.15), (5.0, -0.15)):
+            with self.subTest(urgency=urgency):
+                self.assertAlmostEqual(exit_config.urgency_penalty(urgency), expected)
+        for invalid in (-1.0, float('nan'), float('inf')):
+            with self.assertRaises(ValueError):
+                exit_config.urgency_penalty(invalid)
+
+    def test_reward_waits_for_settled_lane_during_pending(self):
+        env = Merging(seed=42, task=exit_config.TASK_ID,
+                      exit_reward_profile=exit_config.URGENCY_REWARD_PROFILE)
+        env.ego_on_road = True
+        env.ego_id = 'ego'
+        with patch('src.merging.observe_route_urgency', side_effect=[
+                {'status': 'ok', 'urgency': 0.5, 'valid_for_threshold': True,
+                 'projected_edge': 'E76', 'projected_lane': 2},
+                {'status': 'ok', 'urgency': 0.0, 'valid_for_threshold': False,
+                 'road': ':J105_0'},
+                {'status': 'ok', 'urgency': 0.0, 'valid_for_threshold': True,
+                 'projected_edge': 'E77', 'projected_lane': 0}]):
+            self.assertEqual(env._reward_urgency(), (0.5, False))
+            self.assertEqual(env._reward_urgency(), (0.5, True))
+            self.assertEqual(env._reward_urgency(), (0.0, False))
+        self.assertEqual(env.last_valid_urgency, 0.0)
+
+    def test_pending_same_edge_uses_last_settled_lane_and_current_distance(self):
+        env = Merging(seed=42, task=exit_config.TASK_ID,
+                      exit_reward_profile=exit_config.URGENCY_REWARD_PROFILE)
+        env.ego_on_road = True
+        env.ego_id = 'ego'
+        env.last_valid_urgency = 0.2
+        env.last_settled_urgency_edge = 'E77'
+        env.last_settled_urgency_lane = 2
+        vehicle = Mock()
+        vehicle.getRoute.return_value = ('E77', 'D3')
+        vehicle.getRouteIndex.return_value = 0
+        vehicle.getLanePosition.return_value = 100.0
+        vehicle.getSpeed.return_value = 13.89
+        vehicle.getLength.return_value = 4.5
+        env._connection = SimpleNamespace(vehicle=vehicle)
+        with patch('src.merging.observe_route_urgency', return_value={
+                'status': 'ok', 'urgency': 0.0,
+                'valid_for_threshold': False, 'road': 'E77'}):
+            urgency, provisional = env._reward_urgency()
+        expected = route_urgency(self.network, ('E77', 'D3'), 0, 2, 100.0,
+                                 13.89, 4.5, LANE_CHANGE_EDGES)['urgency']
+        self.assertTrue(provisional)
+        self.assertAlmostEqual(urgency, expected)
+        self.assertGreater(urgency, env.last_valid_urgency)
+
+    def test_urgency_reward_profile_rejects_other_tasks(self):
+        with self.assertRaises(ValueError):
+            Merging(seed=42, task='exit',
+                    exit_reward_profile=exit_config.URGENCY_REWARD_PROFILE)
 
 
 class OptionalEvaluatorTraceTests(unittest.TestCase):

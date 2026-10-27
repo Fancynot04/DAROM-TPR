@@ -205,6 +205,21 @@ class SeparateEgoTaskTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 parse_train_args()
 
+    def test_urgency_phase_is_fresh_134_without_old_potential(self):
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
+                                'urgency_134_200k', '--seed', '43']):
+            args = parse_train_args()
+        self.assertEqual((args.total_timesteps, args.checkpoint_freq, args.gamma),
+                         (200_000, 100_000, 0.99))
+        self.assertFalse(args.nav_features)
+        self.assertEqual(args.exit_reward_profile, exit_config.URGENCY_REWARD_PROFILE)
+        self.assertEqual(exit_config.potential_beta_for_profile(args.exit_reward_profile), 0.0)
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
+                                'urgency_134_200k', '--load_path', 'old.zip',
+                                '--replay_buffer_path', 'old.pkl']):
+            with self.assertRaises(SystemExit):
+                parse_train_args()
+
     def test_paired_200k_phases_allow_seed43_only_as_second_replication(self):
         for phase, nav_features in (('control_134_200k', False), ('nav_200k', True)):
             with self.subTest(phase=phase):
@@ -356,6 +371,27 @@ class SeparateEgoTaskTests(unittest.TestCase):
         model.exit_control_profile = exit_config.CONTROL_PROFILE
         model.exit_potential_gamma = 0.999
         with self.assertRaisesRegex(ValueError, 'gamma do not match'):
+            validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
+
+    def test_urgency_checkpoint_requires_zero_potential_and_134_inputs(self):
+        model = SimpleNamespace(
+            antwerp_env_version=ANTWERP_ENV_VERSION,
+            antwerp_task=exit_config.TASK_ID,
+            gamma=0.99, exit_potential_beta=0.0,
+            exit_potential_gamma=0.99,
+            exit_reward_profile=exit_config.URGENCY_REWARD_PROFILE,
+            exit_control_profile=exit_config.CONTROL_PROFILE,
+            observation_space=gym.spaces.Box(-5000, 5000, (134,), np.float32),
+            policy_kwargs={'features_extractor_kwargs': {'nav_dim': 0}})
+        setup = validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
+        self.assertFalse(setup['nav_features'])
+        self.assertEqual(setup['exit_reward_profile'], exit_config.URGENCY_REWARD_PROFILE)
+        model.exit_potential_beta = exit_config.POTENTIAL_BETA
+        with self.assertRaisesRegex(ValueError, 'potential configuration'):
+            validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
+        model.exit_potential_beta = 0.0
+        model.observation_space = gym.spaces.Box(-5000, 5000, (136,), np.float32)
+        with self.assertRaisesRegex(ValueError, 'shape disagree'):
             validate_checkpoint_setup(model, 'full', False, task=exit_config.TASK_ID)
 
     def test_e77_lane_change_requires_room_before_junction(self):
