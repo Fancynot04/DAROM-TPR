@@ -2,8 +2,10 @@
 
 import argparse
 from collections import Counter
+from contextlib import ExitStack
 import hashlib
 import json
+import math
 from numbers import Integral
 from pathlib import Path
 
@@ -12,8 +14,10 @@ import torch
 from stable_baselines3 import SAC
 
 from src.delay_encoder import DelayAwareGRUEncoder
-from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
+from src.merging import (ANTWERP_DIR, ANTWERP_ENV_VERSION, ANTWERP_TASKS,
+                         LANE_CHANGE_EDGES, Merging, parseAction)
 from src import exit_e76_d3_config as exit_config
+from src.route_urgency import load_route_network, observe_route_urgency
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
@@ -102,7 +106,23 @@ def e77_lane_index(env):
     return None
 
 
-def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
+def diagnostic_reward_without_potential(reward, info, task):
+    """Remove shaping only from the reported diagnostic, not the environment."""
+    potential = float(info.get('potential_reward', 0.0))
+    if task == exit_config.TASK_ID:
+        components = info.get('reward_components', {})
+        if ('potential' not in components
+                or not math.isclose(potential, float(components['potential']),
+                                    rel_tol=0.0, abs_tol=1e-6)):
+            raise ValueError('Missing or inconsistent E76-to-D3 potential component')
+    unshaped = float(reward) - potential
+    if not math.isfinite(unshaped):
+        raise ValueError('Nonfinite diagnostic reward without potential')
+    return potential, unshaped
+
+
+def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
+             urgency_trace=None, route_network=None):
     if episodes < 1:
         raise ValueError('episodes must be positive')
     counts = Counter()
@@ -111,13 +131,32 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
     for episode in range(episodes):
         observation, reset_info = env.reset(seed=seed + episode)
         episode_return = 0.0
+        unshaped_episode_return = 0.0
         steps = 0
         toward_requests = away_requests = 0
         previous_e77_lane = None
         e77_zero_departures = 0
         while True:
+            urgency_record = None
+            if urgency_trace is not None:
+                urgency_record = observe_route_urgency(
+                    env.unwrapped, route_network, LANE_CHANGE_EDGES,
+                    lane_change_seconds=exit_config.LANE_CHANGE_TIME_SECONDS)
             action, _ = model.predict(observation, deterministic=True)
             observation, reward, terminated, truncated, info = env.step(action)
+            if urgency_record is not None:
+                potential, unshaped_reward = diagnostic_reward_without_potential(
+                    reward, info, task)
+                unshaped_episode_return += unshaped_reward
+                urgency_record.update(
+                    seed=seed + episode, step=steps, task=task,
+                    actor_lateral_request=int(parseAction(action)[1]),
+                    reward=float(reward), potential_reward=potential,
+                    reward_without_potential=unshaped_reward,
+                    cumulative_reward_without_potential=unshaped_episode_return,
+                    after_lane=info.get('lane'),
+                    outcome=info.get('message') if terminated or truncated else None)
+                urgency_trace.write(json.dumps(urgency_record, allow_nan=False) + '\n')
             toward_requests += int(info.get('exit_actor_request_direction') == -1)
             away_requests += int(info.get('exit_actor_request_direction') == 1)
             if task == exit_config.TASK_ID:
@@ -155,6 +194,8 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
                 if task == exit_config.TASK_ID:
                     record['e77_zero_departures'] = e77_zero_departures
                     record['left_e77_zero_after_entry'] = e77_zero_departures > 0
+                if urgency_trace is not None:
+                    record['return_without_potential'] = unshaped_episode_return
                 records.append(record)
                 break
     timeout_details = EXIT_TIMEOUT_DETAILS if ANTWERP_TASKS[task][2] == 'exit' else TIMEOUT_DETAILS
@@ -202,20 +243,31 @@ def summarize_runs(runs, metrics=REPORT_METRICS):
 
 
 def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds,
-                  task='legacy_o3_d1'):
+                  task='legacy_o3_d1', urgency_trace_path=None):
     """Repeat evaluation of ONE checkpoint; this is not training-seed variance."""
     validate_seed_ranges(episodes, seeds)
     setup = validate_checkpoint_setup(model, ablation, safety, task)
+    if urgency_trace_path is not None and ANTWERP_TASKS[task][2] != 'exit':
+        raise ValueError('Route urgency diagnostics require an exit task')
+    network = (load_route_network(ANTWERP_DIR / 'Antwerp.net.xml')
+               if urgency_trace_path is not None else None)
     runs = []
-    for seed in seeds:
-        env = make_env(seed, scenario, delay_mode, safety, ablation, task=task,
-                       potential_gamma=setup.get('potential_gamma'),
-                       nav_features=setup.get('nav_features', False))
-        try:
-            runs.append({'seed': seed, 'episodes': episodes,
-                         **evaluate(model, env, episodes, seed, task=task)})
-        finally:
-            env.close()
+    with ExitStack() as stack:
+        urgency_trace = None
+        if urgency_trace_path is not None:
+            urgency_trace_path = Path(urgency_trace_path)
+            urgency_trace_path.parent.mkdir(parents=True, exist_ok=True)
+            urgency_trace = stack.enter_context(urgency_trace_path.open('x'))
+        for seed in seeds:
+            env = make_env(seed, scenario, delay_mode, safety, ablation, task=task,
+                           potential_gamma=setup.get('potential_gamma'),
+                           nav_features=setup.get('nav_features', False))
+            try:
+                runs.append({'seed': seed, 'episodes': episodes,
+                             **evaluate(model, env, episodes, seed, task=task,
+                                        urgency_trace=urgency_trace, route_network=network)})
+            finally:
+                env.close()
     report = {'protocol': 'antwerp-v2-evaluation-v1', 'scenario': scenario,
             'task': task, 'stage_name': ANTWERP_TASKS[task][2],
             'delay_mode': delay_mode, 'ablation': ablation, **setup,
@@ -233,6 +285,10 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
     if task == exit_config.TASK_ID:
         report['e77_zero_redeparture_episodes'] = sum(
             run['e77_zero_redeparture_episodes'] for run in runs)
+    if urgency_trace_path is not None:
+        report['route_urgency_trace'] = str(urgency_trace_path)
+        report['route_urgency_profile'] = 'lane_graph_minimax_v1'
+        report['diagnostic_reward_profile'] = 'environment_reward_minus_potential_v1'
     return report
 
 
@@ -256,6 +312,8 @@ def parse_args(argv=None):
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--torch-threads', type=int, default=1)
     parser.add_argument('--output', type=Path, help='Save a new JSON report; never overwrite')
+    parser.add_argument('--urgency-trace', type=Path,
+                        help='Write a new read-only per-step route-urgency JSONL trace')
     args = parser.parse_args(argv)
     args.seeds = args.seeds if args.seeds is not None else [args.seed]
     try:
@@ -266,6 +324,13 @@ def parse_args(argv=None):
         parser.error('--torch-threads must be positive')
     if args.output and args.output.exists():
         parser.error(f'Output already exists: {args.output}')
+    if args.urgency_trace and args.urgency_trace.exists():
+        parser.error(f'Urgency trace already exists: {args.urgency_trace}')
+    if args.urgency_trace and ANTWERP_TASKS[args.task][2] != 'exit':
+        parser.error('--urgency-trace requires an exit task')
+    if (args.output and args.urgency_trace
+            and args.output.resolve() == args.urgency_trace.resolve()):
+        parser.error('--output and --urgency-trace must be different files')
     return args
 
 
@@ -278,7 +343,8 @@ def main():
     checkpoint_hash = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
     model = SAC.load(checkpoint, device=args.device)
     report = evaluate_runs(model, args.scenario, args.delay_mode, args.safety,
-                           args.ablation, args.episodes, args.seeds, task=args.task)
+                           args.ablation, args.episodes, args.seeds, task=args.task,
+                           urgency_trace_path=args.urgency_trace)
     report.update(checkpoint=str(checkpoint), checkpoint_sha256=checkpoint_hash,
                   device=args.device, torch_threads=args.torch_threads)
     print(f"{args.scenario} | {args.delay_mode} | task={args.task} | ablation={args.ablation} | "

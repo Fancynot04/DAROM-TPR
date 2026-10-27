@@ -693,6 +693,39 @@ python -B evaluate_sac_delay.py models_experiments/e76-d3/RUN_NAME.zip \
     --no-safety --output tmp/ai/e76-d3/eval-easy-no-safety.json
 ```
 
+For a read-only route-urgency trace, add
+`--urgency-trace tmp/ai/route-urgency/TRACE.jsonl` to a single-ego `exit`
+(O1 → D3) or `exit_e76_d3` evaluation. The new JSONL file contains one
+pre-action lane-route estimate per step, the actor's lateral request, and the
+observed reward and outcome. For urgency analysis, it also records
+`reward_without_potential = reward - potential_reward` and its cumulative
+episode value. The evaluator keeps the original environment reward and return
+for comparison with older runs; only the diagnostic return excludes potential
+shaping. For E76 → D3, the potential component is checked against the reward
+breakdown rather than silently assumed to be zero. The estimate reads the
+checkpoint's actual SUMO route and `Antwerp.net.xml` lane connections. On each
+candidate route through
+the lanes, it divides the number of required physical changes on an edge
+times a provisional 4 s per change by the usable time on that edge; the route
+score is its tightest edge, and the reported urgency is the lowest score over
+valid lane routes. Usable length reserves ego length plus 5 m. Projected speed
+is at least 70% of each edge's speed limit, so a stopped vehicle does not
+appear to have unlimited maneuver time. The trace separately reports the
+minimum number of changes and the selected lowest-urgency plan, which can
+use more changes. Pending lateral motion and junction-lane projections are
+flagged as provisional and cannot trigger a threshold; their current lane
+labels are not proof of a completed maneuver. `unreachable` is distinct from
+zero urgency.
+
+Values near 0.5 and 1 are exploratory warning levels, not feasibility or
+failure thresholds: traffic gaps, later speed changes, and task-specific
+lane-change execution time are not predicted. O1 and E74 correctly contribute
+zero actionable lane changes under the current controller; the calculation
+still looks ahead to E75, E76 and E77. The trace is diagnostic only and does
+not change model input, action execution, reward, or the evaluation report's
+success definition. The 4 s estimate is inherited from the E76 controller
+and needs separate calibration for the O1 exit task.
+
 Run safety-on evaluation separately with `--safety` and a distinct output
 path. A short pilot verifies training mechanics, not policy convergence.
 To continue the Easy run from a numbered checkpoint, pass its matching model
