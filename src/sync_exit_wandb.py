@@ -20,28 +20,32 @@ from src import exit_e76_d3_config as exit_config
 PAIRED_PHASES = {
     'control_134_200k': {'observation_dim': 134, 'nav_features': False},
     'nav_200k': {'observation_dim': 136, 'nav_features': True},
+    'urgency_134_curriculum_500k': {'observation_dim': 134, 'nav_features': False},
 }
 
 
 def expected_run_name(phase, seed):
+    if phase == 'urgency_134_curriculum_500k':
+        return f'E76D3-URG134-CURRICULUM-NOPOT-S{seed}-500K'
     label = 'CONTROL134' if phase == 'control_134_200k' else 'NAV136'
     return f'E76D3-{label}-GAMMA099-S{seed}-200K'
 
 
 def validate_run(phase, seed, run_name):
     if phase not in PAIRED_PHASES:
-        raise ValueError('Sync accepts only the paired 200k E76-to-D3 phases')
+        raise ValueError('Sync accepts only registered E76-to-D3 phases')
     if seed not in exit_config.PHASES[phase].get('allowed_seeds', (42,)):
         raise ValueError(f'Seed {seed} is not approved for {phase}')
     expected = expected_run_name(phase, seed)
     if run_name != expected:
         raise ValueError(f'Expected run name {expected}, got {run_name}')
-    return {
+    profile = exit_config.PHASES[phase]
+    formal = {
         'task': exit_config.TASK_ID,
         'exit_phase': phase,
         'seed': seed,
         'scenario': 'easy',
-        'total_timesteps': 200_000,
+        'total_timesteps': profile['total_timesteps'],
         'gamma': exit_config.POTENTIAL_GAMMA,
         'observation_dim': PAIRED_PHASES[phase]['observation_dim'],
         'nav_features': PAIRED_PHASES[phase]['nav_features'],
@@ -49,10 +53,15 @@ def validate_run(phase, seed, run_name):
         'delay_mode': 'uniform',
         'delay_steps': [0, 20],
         'gru_input_mode': 'paper_raw',
-        'reward_profile': exit_config.REWARD_PROFILE,
+        'reward_profile': profile.get('reward_profile', exit_config.REWARD_PROFILE),
         'control_profile': exit_config.CONTROL_PROFILE,
         'metric_schema': 'env_steps_v2',
     }
+    if profile.get('curriculum_stages') is not None:
+        formal['curriculum_stages'] = profile['curriculum_stages']
+        formal['potential_beta'] = exit_config.potential_beta_for_profile(
+            formal['reward_profile'])
+    return formal
 
 
 def metric_from_record(record):
@@ -140,7 +149,9 @@ def sync_session(args, state, state_path):
     with wandb.init(entity=exit_config.WANDB_ENTITY,
                     project=exit_config.WANDB_PROJECT,
                     id=state['run_id'], resume='allow', name=args.run_name,
-                    group='e76-d3-seed43-paired-ablation',
+                    group=('e76-d3-urgency-curriculum-500k'
+                           if args.phase == 'urgency_134_curriculum_500k'
+                           else 'e76-d3-seed43-paired-ablation'),
                     job_type=args.phase, mode='online',
                     dir=str(args.state_dir), save_code=False,
                     config=args.formal_config, settings=settings) as run:
@@ -170,7 +181,7 @@ def sync_session(args, state, state_path):
             else:
                 idle_after_exit = 0
             if (not alive and idle_after_exit >= 2
-                    and state['latest_env_steps'] >= 200_000):
+                    and state['latest_env_steps'] >= args.formal_config['total_timesteps']):
                 run.summary['synced_env_steps'] = state['latest_env_steps']
                 run.summary['jsonl_lines'] = state['consumed_lines']
                 print(json.dumps({'event': 'complete', 'logged': logged,

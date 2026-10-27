@@ -28,6 +28,17 @@ from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper, ExitStartLa
 
 
 class ExitCurriculumContractTests(unittest.TestCase):
+    def test_curriculum_forge_config_matches_training_profile(self):
+        for seed in (42, 43):
+            run_name = expected_run_name('urgency_134_curriculum_500k', seed)
+            config = validate_run('urgency_134_curriculum_500k', seed, run_name)
+            self.assertEqual(config['total_timesteps'], 500_000)
+            self.assertEqual(config['reward_profile'], exit_config.URGENCY_REWARD_PROFILE)
+            self.assertEqual(config['potential_beta'], 0.0)
+            self.assertEqual(tuple(map(tuple, config['curriculum_stages'])),
+                             exit_config.URGENCY_CURRICULUM_STAGES)
+            self.assertEqual(config['observation_dim'], 134)
+
     def test_fresh_500k_phase_keeps_300k_reward_and_observation(self):
         for seed in (42, 43):
             with self.subTest(seed=seed):
