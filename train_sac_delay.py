@@ -295,8 +295,9 @@ def parse_args():
         args.exit_reward_profile = None
     if args.exit_phase and bool(args.load_path) != bool(args.replay_buffer_path):
         parser.error('E76-to-D3 continuation requires both model and replay-buffer paths')
-    if args.exit_phase in ('nav_200k', 'control_134_200k', 'urgency_134_200k') and args.load_path:
-        parser.error('The paired 200k experiment must start from random initialization')
+    if args.exit_phase in ('nav_200k', 'control_134_200k',
+                           'urgency_134_200k', 'urgency_134_300k') and args.load_path:
+        parser.error('This E76-to-D3 phase must start from random initialization')
     if args.exit_phase == 'nav_300k' and not args.load_path:
         parser.error('NAV136 300k continuation requires the 200k model and replay buffer')
     if args.ablation != 'full' and args.encoder_mode != 'GRU':

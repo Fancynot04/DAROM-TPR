@@ -743,6 +743,10 @@ and reject old-potential or 136-value observation contracts. This phase is
 only a configuration; defining it does not start training. Any later paired
 comparison needs a fresh 134-value, no-potential, no-urgency control—historical
 NAV136 results change multiple variables and are not that control.
+The separate `urgency_134_300k` phase keeps the identical reward, observation,
+controller and γ contracts, but runs a fresh seed-43 learner for 300k steps
+with model/replay checkpoints at 100k, 200k and 300k; it does not resume the
+200k phase or overwrite its outputs.
 
 Run safety-on evaluation separately with `--safety` and a distinct output
 path. A short pilot verifies training mechanics, not policy convergence.

@@ -220,6 +220,26 @@ class SeparateEgoTaskTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 parse_train_args()
 
+    def test_urgency_300k_is_fresh_seed43_and_keeps_reward_contract(self):
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
+                                'urgency_134_300k', '--seed', '43']):
+            args = parse_train_args()
+        self.assertEqual((args.total_timesteps, args.checkpoint_freq, args.gamma),
+                         (300_000, 100_000, 0.99))
+        self.assertEqual(args.exit_reward_profile, exit_config.URGENCY_REWARD_PROFILE)
+        self.assertFalse(args.nav_features)
+        self.assertTrue(args.save_replay_buffer)
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
+                                'urgency_134_300k', '--seed', '42']):
+            with self.assertRaises(SystemExit):
+                parse_train_args()
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
+                                'urgency_134_300k', '--seed', '43',
+                                '--load_path', 'old.zip',
+                                '--replay_buffer_path', 'old.pkl']):
+            with self.assertRaises(SystemExit):
+                parse_train_args()
+
     def test_paired_200k_phases_allow_seed43_only_as_second_replication(self):
         for phase, nav_features in (('control_134_200k', False), ('nav_200k', True)):
             with self.subTest(phase=phase):
