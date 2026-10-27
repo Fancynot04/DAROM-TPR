@@ -20,11 +20,76 @@ from train_sac_delay import EpisodeRewardCallback, parse_args as parse_train_arg
 from src.delay_encoder import DelayAwareGRUEncoder
 from src import exit_e76_d3_config as exit_config
 from src.geometry import TrafficSnapshot, align_delayed_neighbors
-from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
+from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging, curriculum_route_file
 from src.safety_controller import safetyCheck
 from src.sync_exit_wandb import (expected_run_name, load_state, metric_from_record,
                                  read_complete_records, validate_run)
-from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
+from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper, ExitStartLaneCurriculum
+
+
+class ExitCurriculumContractTests(unittest.TestCase):
+    def test_fresh_500k_phase_keeps_300k_reward_and_observation(self):
+        for seed in (42, 43):
+            with self.subTest(seed=seed):
+                with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
+                                        'urgency_134_curriculum_500k', '--seed', str(seed)]):
+                    args = parse_train_args()
+                self.assertEqual((args.total_timesteps, args.checkpoint_freq, args.gamma),
+                                 (500_000, 50_000, 0.99))
+                self.assertEqual(args.exit_reward_profile, exit_config.URGENCY_REWARD_PROFILE)
+                self.assertEqual(exit_config.potential_beta_for_profile(args.exit_reward_profile), 0.0)
+                self.assertFalse(args.nav_features)
+                self.assertFalse(args.use_safety)
+                self.assertTrue(args.save_replay_buffer)
+                with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
+                                        'urgency_134_curriculum_500k', '--seed', str(seed),
+                                        '--load_path', 'old.zip',
+                                        '--replay_buffer_path', 'old.pkl']):
+                    with self.assertRaises(SystemExit):
+                        parse_train_args()
+
+    def test_stage_changes_only_at_reset_and_lane_is_uniformly_sampled(self):
+        class FakeEnv(gym.Env):
+            observation_space = gym.spaces.Box(-1, 1, shape=(1,), dtype=np.float32)
+            action_space = gym.spaces.Box(-1, 1, shape=(1,), dtype=np.float32)
+
+            def reset(self, **kwargs):
+                return np.zeros(1, dtype=np.float32), {'ego_start_lane': self.curriculum_depart_lane}
+
+            def step(self, action):
+                return np.zeros(1, dtype=np.float32), 0.0, False, False, {}
+
+        env = ExitStartLaneCurriculum(FakeEnv(), exit_config.URGENCY_CURRICULUM_STAGES,
+                                       42, 'unused')
+        for at, stage, lanes in ((0, 1, (1,)), (49_999, 1, (1,)),
+                                 (50_000, 2, (1, 2)), (100_000, 3, (1, 2, 3)),
+                                 (150_000, 4, (0, 1, 2, 3)),
+                                 (200_000, 5, (0, 1, 2, 3, 4))):
+            env.env_steps = at
+            _, info = env.reset()
+            self.assertEqual((info['curriculum_stage'], info['curriculum_reset_step']),
+                             (stage, at))
+            self.assertEqual(tuple(info['curriculum_allowed_lanes']), lanes)
+            self.assertIn(info['ego_start_lane'], lanes)
+            env.env_steps = at + 50_000
+            _, _, _, _, step_info = env.step(np.zeros(1, dtype=np.float32))
+            self.assertEqual(step_info['curriculum_stage'], stage)
+        env.env_steps = 200_000
+        samples = [env.reset()[1]['ego_start_lane'] for _ in range(500)]
+        self.assertEqual(set(samples), set(range(5)))
+        self.assertLess(max(samples.count(i) for i in range(5))
+                        - min(samples.count(i) for i in range(5)), 45)
+
+    def test_route_variant_changes_only_ego_depart_lane(self):
+        source = Path(__file__).resolve().parents[1] / 'sumo_new' / 'Antwerp_easy_exit_e76_d3.rou.xml'
+        with TemporaryDirectory() as folder:
+            original = source.read_bytes()
+            for lane in range(5):
+                result = curriculum_route_file(source, lane, folder)
+                self.assertEqual(result.read_bytes(), original.replace(
+                    b'departLane="random" departSpeed="speedLimit" />',
+                    f'departLane="{lane}" departSpeed="speedLimit" />'.encode('ascii')))
+                self.assertEqual(curriculum_route_file(source, lane, folder), result)
 
 
 class GRUInputContractTests(unittest.TestCase):

@@ -3,6 +3,7 @@ import os
 import time
 import argparse
 import json
+import hashlib
 import subprocess
 from collections import deque
 import torch
@@ -22,7 +23,7 @@ from wandb.integration.sb3 import WandbCallback
 
 from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
 from src import exit_e76_d3_config as exit_config
-from src.wrapper import ABLATION_MODES, DelayWrapper
+from src.wrapper import ABLATION_MODES, DelayWrapper, ExitStartLaneCurriculum
 
 class EpisodeRewardCallback(BaseCallback):
     def __init__(self, verbose=0, log_path=None):
@@ -120,6 +121,9 @@ class EpisodeRewardCallback(BaseCallback):
                     metrics[f'train/lane_{start_lane}_episodes'] = self.lane_episodes[start_lane]
                     metrics[f'train/lane_{start_lane}_success_rate'] = (
                         self.lane_successes[start_lane] / self.lane_episodes[start_lane])
+            if info.get('curriculum_stage') is not None:
+                metrics['train/curriculum_stage'] = int(info['curriculum_stage'])
+                metrics['train/curriculum_reset_step'] = int(info['curriculum_reset_step'])
             wandb.log(metrics)
             self._write({'event': 'episode', 'steps': self.num_timesteps,
                          'outcome': outcome, **{k: float(v) for k, v in metrics.items()}})
@@ -203,13 +207,17 @@ def load_model(path: str, env: gym.Env) -> SAC:
 
 def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
              ablation='full', task='legacy_o3_d1', potential_gamma=None,
-             nav_features=False, exit_reward_profile=None):
+             nav_features=False, exit_reward_profile=None,
+             curriculum_stages=None, curriculum_route_dir=None):
     env = DelayWrapper(
         Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
                 potential_gamma=potential_gamma, exit_reward_profile=exit_reward_profile),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation, nav_features=nav_features,
     )
+    if curriculum_stages is not None:
+        env = ExitStartLaneCurriculum(env, curriculum_stages, seed,
+                                      curriculum_route_dir)
     return SafetyWrapper(env) if use_safety else env
 
 def parse_args():
@@ -296,7 +304,8 @@ def parse_args():
     if args.exit_phase and bool(args.load_path) != bool(args.replay_buffer_path):
         parser.error('E76-to-D3 continuation requires both model and replay-buffer paths')
     if args.exit_phase in ('nav_200k', 'control_134_200k',
-                           'urgency_134_200k', 'urgency_134_300k') and args.load_path:
+                           'urgency_134_200k', 'urgency_134_300k',
+                           'urgency_134_curriculum_500k') and args.load_path:
         parser.error('This E76-to-D3 phase must start from random initialization')
     if args.exit_phase == 'nav_300k' and not args.load_path:
         parser.error('NAV136 300k continuation requires the 200k model and replay buffer')
@@ -323,6 +332,9 @@ def main():
     for path in (model_path, checkpoint_dir, tensorboard_dir):
         if os.path.exists(path):
             raise FileExistsError(f'Run output already exists: {path}; choose a new --run_name')
+    if args.episode_log and (os.path.exists(args.episode_log)
+                             or os.path.exists(args.episode_log + '.config.json')):
+        raise FileExistsError('Run JSONL or configuration manifest already exists')
 
     if args.torch_threads is not None:
         torch.set_num_threads(args.torch_threads)
@@ -386,18 +398,35 @@ def main():
                              clip=exit_config.URGENCY_CLIP)
                         if args.exit_reward_profile == exit_config.URGENCY_REWARD_PROFILE
                         else None),
+        curriculum_stages=(exit_config.PHASES[args.exit_phase].get('curriculum_stages')
+                           if args.exit_phase else None),
     )
+    config_bytes = json.dumps(config, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    config_sha256 = hashlib.sha256(config_bytes).hexdigest()
+    if args.episode_log:
+        ensure_dirs(os.path.dirname(os.path.abspath(args.episode_log)))
+        with open(args.episode_log + '.config.json', 'x') as manifest:
+            json.dump({'sha256': config_sha256, 'config': config}, manifest,
+                      sort_keys=True, indent=2)
+            manifest.write('\n')
+    print(f'Experiment config SHA-256: {config_sha256}', flush=True)
     # Create env
     def _fn():
         return make_env(args.seed, args.scenario, args.delay_mode, max_delay,
                         args.use_safety, args.render_mode, args.ablation, args.task,
                         args.gamma if args.exit_phase else None, args.nav_features,
-                        args.exit_reward_profile)
+                        args.exit_reward_profile,
+                        config['curriculum_stages'],
+                        (os.path.join('tmp', 'ai', 'e76-d3', args.exit_phase,
+                                      args.run_name, 'routes')
+                         if config['curriculum_stages'] is not None else None))
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
 
     wrapped_env = vec_env.envs[0]
+    if config['curriculum_stages'] is not None:
+        wrapped_env = wrapped_env.env
     delay_env = wrapped_env.env if args.use_safety else wrapped_env
     entity_seq_len, entity_feat_dim = delay_env.orig_shape
     act_dim = delay_env.action_space.shape[0]
@@ -499,6 +528,7 @@ def main():
     model.training_safety = args.use_safety
     model.gru_input_mode = args.gru_input_mode if args.encoder_mode == 'GRU' else None
     model.experiment_id = args.run_name
+    model.experiment_config_sha256 = config_sha256
     if args.exit_phase:
         model.exit_observation_profile = (exit_config.NAV_OBSERVATION_PROFILE
                                           if args.nav_features else None)

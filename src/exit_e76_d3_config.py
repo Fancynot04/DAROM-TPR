@@ -40,7 +40,23 @@ MISSED_EXIT_PENALTY = 1000.0  # Before the environment's existing 0.1 scale.
 WANDB_ENTITY = 'arlikache-anhui-university'
 WANDB_PROJECT = 'DAROM-OUT'
 
+# Stage changes are selected only when a new training episode resets.
+URGENCY_CURRICULUM_STAGES = (
+    (0, (1,)),
+    (50_000, (1, 2)),
+    (100_000, (1, 2, 3)),
+    (150_000, (0, 1, 2, 3)),
+    (200_000, (0, 1, 2, 3, 4)),
+)
+
 PHASES = {
+    'urgency_134_curriculum_500k': {
+        'scenario': 'easy', 'total_timesteps': 500_000,
+        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'allowed_seeds': (42, 43),
+        'reward_profile': URGENCY_REWARD_PROFILE,
+        'curriculum_stages': URGENCY_CURRICULUM_STAGES,
+    },
     'urgency_134_300k': {'scenario': 'easy', 'total_timesteps': 300_000,
                          'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
                          'nav_features': False, 'allowed_seeds': (43,),

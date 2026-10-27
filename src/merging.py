@@ -1,6 +1,7 @@
 import os, sys
 import hashlib
 import math
+import re
 import numpy as np
 from pathlib import Path
 # from inference import model
@@ -19,6 +20,31 @@ EGO_DEPARTURE_DEADLINE = 1200.0
 SUMO_STEP_LENGTH = 0.1
 LANE_CHANGE_EDGES = frozenset(('E75', 'E76', 'E77', 'E78', 'E82'))
 ANTWERP_ENV_VERSION = 3
+
+
+def curriculum_route_file(source, lane, output_dir):
+    """Materialize a lane-specific route without changing any traffic entry."""
+    if lane not in range(5):
+        raise ValueError(f'Invalid E76 departure lane: {lane!r}')
+    source = Path(source)
+    output_dir = Path(output_dir)
+    original = source.read_bytes()
+    ego = re.search(rb'<trip\s+id="ego"(?=\s)[^>]*/>', original)
+    if ego is None or ego.group().count(b'departLane="random"') != 1:
+        raise ValueError('Expected exactly one random-lane ego trip in source route')
+    selected = ego.group().replace(b'departLane="random"',
+                                   f'departLane="{lane}"'.encode('ascii'))
+    variant = original[:ego.start()] + selected + original[ego.end():]
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target = output_dir / f'{source.stem}_ego_lane_{lane}.rou.xml'
+    if target.exists():
+        if target.read_bytes() != variant:
+            raise FileExistsError(f'Existing curriculum route differs: {target}')
+    else:
+        target.write_bytes(variant)
+    return target
+
+
 ANTWERP_TASKS = {
     'legacy_o3_d1': ('O3', 'D1', 'merge'),
     'entry': ('O3', 'E76', 'merge'),
@@ -108,6 +134,8 @@ class Merging(gym.Env):
         self.parsed_action = None
         self.exit_actor_request_direction = 0
         self.ego_start_lane = None
+        self.curriculum_depart_lane = None
+        self.curriculum_route_dir = None
         self.potential_distance_scale = None
         self.potential_previous = 0.0
         self.initial_potential = 0.0
@@ -352,9 +380,18 @@ class Merging(gym.Env):
 
         # Load the Antwerp network and one scenario route without detector output files.
         route_suffix = '' if self.task == 'legacy_o3_d1' else f'_{self.task}'
+        source_routes = ANTWERP_DIR / f'Antwerp_{self.scenario}{route_suffix}.rou.xml'
+        if self.curriculum_depart_lane is not None:
+            if self.task != exit_config.TASK_ID or self.curriculum_route_dir is None:
+                raise ValueError('Curriculum departure requires E76-to-D3 and a route output directory')
+            routes = curriculum_route_file(source_routes, self.curriculum_depart_lane,
+                                           self.curriculum_route_dir)
+        else:
+            routes = source_routes
         scene_paths = {'network': ANTWERP_DIR / 'Antwerp.net.xml',
-                       'routes': ANTWERP_DIR / f'Antwerp_{self.scenario}{route_suffix}.rou.xml'}
-        scene_files = {name: {'path': str(path.relative_to(ANTWERP_DIR.parent)),
+                       'routes': routes}
+        scene_files = {name: {'path': (str(path) if name == 'routes' and routes != source_routes
+                                      else str(path.relative_to(ANTWERP_DIR.parent))),
                               'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
                        for name, path in scene_paths.items()}
         sumo_cmd = [
@@ -385,6 +422,10 @@ class Merging(gym.Env):
                     self.ego_on_road = True
                     if self.task == exit_config.TASK_ID:
                         self.ego_start_lane = self.traci.vehicle.getLaneIndex(self.ego_id)
+                        if (self.curriculum_depart_lane is not None
+                                and self.ego_start_lane != self.curriculum_depart_lane):
+                            self.traci.close()
+                            raise RuntimeError('SUMO ego lane differs from selected curriculum lane')
                         self.potential_distance_scale = sum(
                             self.traci.lane.getLength(f'{edge}_0')
                             for edge in exit_config.DISTANCE_SCALE_EDGES)

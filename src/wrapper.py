@@ -14,6 +14,48 @@ ABLATION_MODES = ('full', 'delayed_state_only', 'delayed_state_delay',
                   'delayed_state_action', 'linear_predictor')
 
 
+class ExitStartLaneCurriculum(Wrapper):
+    """Select the next episode's E76 departure lane at reset, never mid-episode."""
+
+    def __init__(self, env, stages, seed, route_dir):
+        super().__init__(env)
+        self.stages = tuple((int(start), tuple(lanes)) for start, lanes in stages)
+        if (not self.stages or self.stages[0][0] != 0
+                or any(self.stages[i][0] >= self.stages[i + 1][0]
+                       for i in range(len(self.stages) - 1))
+                or any(not lanes or any(lane not in range(5) for lane in lanes)
+                       for _, lanes in self.stages)):
+            raise ValueError('Invalid E76 start-lane curriculum stages')
+        self.rng = np.random.default_rng(seed)
+        self.env_steps = 0
+        self.stage_index = 0
+        self.reset_step = 0
+        self.route_dir = route_dir
+
+    def reset(self, **kwargs):
+        self.stage_index = max(i for i, (start, _) in enumerate(self.stages)
+                               if self.env_steps >= start)
+        self.reset_step = self.env_steps
+        lanes = self.stages[self.stage_index][1]
+        selected_lane = int(self.rng.choice(lanes))
+        self.env.unwrapped.curriculum_depart_lane = selected_lane
+        self.env.unwrapped.curriculum_route_dir = self.route_dir
+        observation, info = self.env.reset(**kwargs)
+        info.update(curriculum_stage=self.stage_index + 1,
+                    curriculum_reset_step=self.reset_step,
+                    curriculum_allowed_lanes=list(lanes))
+        if info.get('ego_start_lane') != selected_lane:
+            raise RuntimeError('SUMO did not depart ego in the selected curriculum lane')
+        return observation, info
+
+    def step(self, action):
+        observation, reward, terminated, truncated, info = self.env.step(action)
+        self.env_steps += 1
+        info.update(curriculum_stage=self.stage_index + 1,
+                    curriculum_reset_step=self.reset_step)
+        return observation, reward, terminated, truncated, info
+
+
 class DelayWrapper(ObservationWrapper):
     def __init__(self, env, max_delay=10, mode=['only_delayed_state' 'delayed_state_and_action', 'delayed_state_and_delay', 'all'], drl_ormoc=False, delay_mode='uniform', seed=None, ablation='full', nav_features=False):
         super().__init__(env)
