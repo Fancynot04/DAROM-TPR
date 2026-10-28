@@ -748,6 +748,21 @@ controller and γ contracts, but runs a fresh seed-43 learner for 300k steps
 with model/replay checkpoints at 100k, 200k and 300k; it does not resume the
 200k phase or overwrite its outputs.
 
+The paired continuation phases `urgency_curriculum_hold2_150k` and
+`urgency_curriculum_expand3_150k` require the exact frozen seed-43 curriculum
+100k model AND its matching Replay Buffer; SHA-256 guards reject other inputs.
+They collect 50k additional steps each, preserving loaded SAC optimizers,
+entropy, target critics, replay, urgency reward, 134-value observation and v3
+controller. A retains lanes1/2; B enables lanes1/2/3, uniformly sampled at reset.
+Both start a fresh SUMO episode with common seed43 RNG initialization and
+absolute curriculum time100k. Old simulator/RNG state was not saved, so B is
+not an exact replay of the original uninterrupted100–150k training segment.
+Only absolute110k,125k,150k model/replay milestones are saved; probe/evaluation
+processes run separately from the learner. The phases do not start runs by
+being defined. Scalar-only Forge sync accepts distinct HOLD2/EXPAND3 run names;
+its failures must not stop training. See the preregistered experiment in
+`research/EXPERIMENT_LOG.md` for the fixed probes, cases and interpretation.
+
 Run safety-on evaluation separately with `--safety` and a distinct output
 path. A short pilot verifies training mechanics, not policy convergence.
 To continue the Easy run from a numbered checkpoint, pass its matching model

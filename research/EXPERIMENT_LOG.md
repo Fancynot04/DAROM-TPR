@@ -719,3 +719,78 @@ tracked source directories.
 Checkpoint and runtime-log bytes remain outside Git under their existing
 experiment storage. Never delete or overwrite them as part of updating this
 document.
+
+### Planned EXP-E76-S43-CURRICULUM-SWITCH-100K-150K
+
+Status: local implementation and contracts prepared; NOT launched. Remote
+transfer and new experiment execution require the scoped confirmation.
+Question: from the same seed43 100k learner/replay, does retaining stage2
+avoid the direction/value drift observed after introducing stage3?
+
+| Arm | Run name | Curriculum during 100k–150k | New steps |
+|---|---|---|---:|
+| A | E76D3-URG134-S43-BRANCH100K-HOLD2-150K | E76_1/E76_2, uniform | 50000 |
+| B | E76D3-URG134-S43-BRANCH100K-EXPAND3-150K | E76_1/E76_2/E76_3, uniform | 50000 |
+
+Common parent is the seed43 curriculum 100k snapshot in the original seed43
+500k checkout. Model SHA-256
+`83d9b67170220c33672f8ceaeb4e19685b014cbf8e89c77ba7135178af30064f`;
+replay SHA-256
+`10fdd7430ab1cab71af17b2093a6a469372a96e06006facd7066ce2a19a4120e`.
+Read-only inspection confirms100000 timesteps,99899 updates, seed43,
+134 inputs, gamma0.99, learning rate3e-5, batch512, entropy coefficient
+0.05095113, and saved actor/critic/entropy optimizer states. The periodic
+replay contains99999 transitions because its callback precedes adding that
+step's transition. Both arms load that exact replay without clearing it.
+Models preserve the target critics and optimizer/entropy state on load.
+
+Important recovery contract: this parent does not contain simulator or RNG
+snapshots. Both arms deliberately reset SUMO, history and RNG using seed43;
+the curriculum clock is restored to100000 before reset. They are matched
+restarted continuations; B does not reproduce the historical uninterrupted
+100k–150k trajectory exactly. Global Python/NumPy/Torch seeding is applied
+after logger initialization, identically in both branches. The independent
+curriculum/traffic/delay RNGs initialize identically, with the allowed lane
+set as the sole intended training configuration difference. Subsequent
+experience differs as a consequence of the intervention.
+
+Keep urgency_penalty_no_potential_v1, gamma0.99, SAC+paper_raw GRU, Easy,
+uniform0–20-step delay, no training/evaluation safety wrapper, controllerv3,
+and existing reward/observation unchanged. Run A then B sequentially in a new
+remote checkout, with independent outputs and no parent overwrite. Save only
+absolute110k,125k,150k model and replay milestones plus final artifacts.
+An independent scalar-only Forge run per arm uses env_steps as the x axis;
+connection failures delay curves without stopping either learner.
+
+Before training, freeze one bank of540 observations from the parent100k
+replay: E76 lanes1–3 × traveled-distance bins[100,300),[300,500),[500,750),
+60 per cell, speed>1m/s, deterministic sampling seed20261028. Persist indices,
+observation array and hashes; use the SAME bank for the parent and all six
+new checkpoints. Probe deterministic Actor direction and min(Q1,Q2) at lateral
+-2/3,0,+2/3 with Actor acceleration fixed per state; additionally report the
+zero-acceleration probe because the earlier audit found acceleration coupling.
+These are requested-action value rankings, without claims of gap/pending
+feasibility or counterfactual return accuracy.
+
+At each checkpoint evaluate the same five development seeds200017,200004,
+200003,200005,200001 (one per initial lane0–4), Easy/uniform/no-safety,
+deterministic, SUMO1.18.0/CUDA. Reuse the matching original100k five-case
+baseline only after checking its checkpoint/protocol; otherwise reevaluate
+that baseline once. Maximum30 new comparison episodes plus5 baseline cases.
+Train and evaluate in separate processes so evaluation/probes cannot consume
+learner RNG. Record outcomes, request directions, first toward-request
+distance, observed/completed/timed-out maneuvers and E77_0 re-departures where
+the instrument supports them. No200-case expansion is planned here.
+
+Interpret continuous direction/value trajectories alongside the small fixed
+case set. A remaining directional while B degrades supports a curriculum-set
+effect for THIS checkpoint/restart pair; it does not establish cross-seed
+robustness. If both degrade, stage3 exposure is not necessary for failure in
+this restart. If neither reproduces the historical failure, the restart/RNG
+change prevents attributing that historical event; do not conclude the
+curriculum is irrelevant. A degrading while B improves is also possible.
+Do not select a favorable checkpoint after seeing results or promote these
+five cases to evidence of generalization. Estimated pure training for both
+arms combined is52–56minutes at30–32steps/s, plus saves/evaluation; live GPU
+load can change that. Preflight saw~308GiB disk free and~7.6GiB GPU free with
+other GPU work active; recheck immediately before launch.

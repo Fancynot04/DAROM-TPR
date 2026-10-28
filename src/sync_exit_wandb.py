@@ -18,6 +18,8 @@ from src import exit_e76_d3_config as exit_config
 
 
 PAIRED_PHASES = {
+    'urgency_curriculum_hold2_150k': {'observation_dim': 134, 'nav_features': False},
+    'urgency_curriculum_expand3_150k': {'observation_dim': 134, 'nav_features': False},
     'control_134_200k': {'observation_dim': 134, 'nav_features': False},
     'nav_200k': {'observation_dim': 136, 'nav_features': True},
     'urgency_134_curriculum_500k': {'observation_dim': 134, 'nav_features': False},
@@ -25,6 +27,9 @@ PAIRED_PHASES = {
 
 
 def expected_run_name(phase, seed):
+    if phase in exit_config.CURRICULUM_BRANCH_PHASES:
+        arm = 'HOLD2' if phase == 'urgency_curriculum_hold2_150k' else 'EXPAND3'
+        return f'E76D3-URG134-S{seed}-BRANCH100K-{arm}-150K'
     if phase == 'urgency_134_curriculum_500k':
         return f'E76D3-URG134-CURRICULUM-NOPOT-S{seed}-500K'
     label = 'CONTROL134' if phase == 'control_134_200k' else 'NAV136'
@@ -61,6 +66,10 @@ def validate_run(phase, seed, run_name):
         formal['curriculum_stages'] = profile['curriculum_stages']
         formal['potential_beta'] = exit_config.potential_beta_for_profile(
             formal['reward_profile'])
+    if phase in exit_config.CURRICULUM_BRANCH_PHASES:
+        formal.update(resume_start_step=100_000, continuation_budget=50_000,
+                      parent_model_sha256=exit_config.CURRICULUM_BRANCH_MODEL_SHA256,
+                      parent_replay_sha256=exit_config.CURRICULUM_BRANCH_REPLAY_SHA256)
     return formal
 
 
@@ -149,7 +158,9 @@ def sync_session(args, state, state_path):
     with wandb.init(entity=exit_config.WANDB_ENTITY,
                     project=exit_config.WANDB_PROJECT,
                     id=state['run_id'], resume='allow', name=args.run_name,
-                    group=('e76-d3-urgency-curriculum-500k'
+                    group=('e76-d3-curriculum-switch-s43-100k'
+                           if args.phase in exit_config.CURRICULUM_BRANCH_PHASES else
+                           'e76-d3-urgency-curriculum-500k'
                            if args.phase == 'urgency_134_curriculum_500k'
                            else 'e76-d3-seed43-paired-ablation'),
                     job_type=args.phase, mode='online',

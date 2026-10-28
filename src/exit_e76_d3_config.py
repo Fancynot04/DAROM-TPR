@@ -49,7 +49,24 @@ URGENCY_CURRICULUM_STAGES = (
     (200_000, (0, 1, 2, 3, 4)),
 )
 
+# A paired continuation from one frozen seed-43 parent, not a fresh run.
+CURRICULUM_BRANCH_START = 100_000
+CURRICULUM_BRANCH_CHECKPOINTS = (110_000, 125_000, 150_000)
+CURRICULUM_BRANCH_MODEL_SHA256 = '83d9b67170220c33672f8ceaeb4e19685b014cbf8e89c77ba7135178af30064f'
+CURRICULUM_BRANCH_REPLAY_SHA256 = '10fdd7430ab1cab71af17b2093a6a469372a96e06006facd7066ce2a19a4120e'
+CURRICULUM_BRANCH_PHASES = {
+    'urgency_curriculum_hold2_150k': URGENCY_CURRICULUM_STAGES[:2],
+    'urgency_curriculum_expand3_150k': URGENCY_CURRICULUM_STAGES[:3],
+}
+
 PHASES = {
+    **{phase: {
+        'scenario': 'easy', 'total_timesteps': 150_000,
+        'checkpoint_freq': 5_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'allowed_seeds': (43,),
+        'reward_profile': URGENCY_REWARD_PROFILE,
+        'curriculum_stages': stages,
+    } for phase, stages in CURRICULUM_BRANCH_PHASES.items()},
     'urgency_134_curriculum_500k': {
         'scenario': 'easy', 'total_timesteps': 500_000,
         'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,

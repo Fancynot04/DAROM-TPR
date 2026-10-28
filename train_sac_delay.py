@@ -40,6 +40,7 @@ class EpisodeRewardCallback(BaseCallback):
         self.toward_requests = 0
         self.away_requests = 0
         self.started = time.monotonic()
+        self.starting_timesteps = 0
         self.log_file = None
         if log_path:
             os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
@@ -161,10 +162,11 @@ class EpisodeRewardCallback(BaseCallback):
                              **request_metrics})
                 self.toward_requests = self.away_requests = 0
             elapsed = time.monotonic() - self.started
+            collected_steps = self.num_timesteps - self.starting_timesteps
             self._write({'event': 'progress', 'steps': self.num_timesteps,
                          'updates': int(self.model._n_updates), 'elapsed_seconds': elapsed,
-                         'fps': self.num_timesteps / max(elapsed, 1e-6)})
-            print(f'Training step {self.num_timesteps}, {self.num_timesteps / max(elapsed, 1e-6):.1f} steps/s', flush=True)
+                         'fps': collected_steps / max(elapsed, 1e-6)})
+            print(f'Training step {self.num_timesteps}, {collected_steps / max(elapsed, 1e-6):.1f} steps/s', flush=True)
         return True
 
 class StepLoggingCallback(EpisodeRewardCallback):
@@ -309,6 +311,8 @@ def parse_args():
         parser.error('This E76-to-D3 phase must start from random initialization')
     if args.exit_phase == 'nav_300k' and not args.load_path:
         parser.error('NAV136 300k continuation requires the 200k model and replay buffer')
+    if args.exit_phase in exit_config.CURRICULUM_BRANCH_PHASES and not args.load_path:
+        parser.error('Curriculum branch requires the frozen seed43 100k model and replay')
     if args.ablation != 'full' and args.encoder_mode != 'GRU':
         parser.error('Table IV ablations require --encoder_mode GRU')
     if args.encoder_mode != 'GRU' and args.gru_input_mode != 'paper_raw':
@@ -322,6 +326,11 @@ def ensure_dirs(path: str):
 
 def main():
     args = parse_args()
+    curriculum_branch = args.exit_phase in exit_config.CURRICULUM_BRANCH_PHASES
+    parent_hashes = None
+    if curriculum_branch:
+        from src.curriculum_branch import validate_parent_files
+        parent_hashes = validate_parent_files(args.load_path, args.replay_buffer_path)
 
     if args.run_name is None:
         args.run_name = f"SAC-merging-delay-wrapper-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -401,6 +410,11 @@ def main():
         curriculum_stages=(exit_config.PHASES[args.exit_phase].get('curriculum_stages')
                            if args.exit_phase else None),
     )
+    if curriculum_branch:
+        config.update(parent_hashes, resume_start_step=100_000,
+                      continuation_budget=50_000,
+                      checkpoint_steps=exit_config.CURRICULUM_BRANCH_CHECKPOINTS,
+                      reset_protocol='fresh_episode_common_seed43_rng_v1')
     config_bytes = json.dumps(config, sort_keys=True, separators=(',', ':')).encode('utf-8')
     config_sha256 = hashlib.sha256(config_bytes).hexdigest()
     if args.episode_log:
@@ -468,7 +482,8 @@ def main():
         if not os.path.exists(args.load_path):
             raise FileNotFoundError(f'Checkpoint does not exist: {args.load_path}')
         try:
-            loaded_model = SAC.load(args.load_path, env=vec_env)
+            loaded_model = SAC.load(args.load_path, env=vec_env, device=args.device,
+                                    force_reset=True)
         except Exception as e:
             raise RuntimeError(f'Failed to load checkpoint at {args.load_path}') from e
         else:
@@ -516,6 +531,9 @@ def main():
                 if args.exit_phase == 'nav_300k' and loaded_model.num_timesteps != 200_000:
                     raise ValueError('NAV136 300k continuation requires a 200k checkpoint')
                 loaded_model.load_replay_buffer(args.replay_buffer_path)
+                if curriculum_branch:
+                    from src.curriculum_branch import prepare_branch
+                    prepare_branch(loaded_model, vec_env)
                 if loaded_model.num_timesteps >= args.total_timesteps:
                     raise ValueError('Checkpoint already reached the configured total step budget')
                 loaded_model.tensorboard_log = os.path.join(args.log_dir, args.run_name)
@@ -563,6 +581,14 @@ def main():
         name_prefix=args.run_name, verbose=2,
         save_replay_buffer=args.save_replay_buffer,
     )
+    if curriculum_branch:
+        from src.curriculum_branch import AbsoluteCheckpointCallback, restored_learner_summary
+        episode_callback.starting_timesteps = 100_000
+        checkpoint_callback = AbsoluteCheckpointCallback(checkpoint_dir, args.run_name)
+        episode_callback._write({'event': 'branch_resume', 'steps': 100_000,
+                                 'env_steps': 100_000, **parent_hashes,
+                                 'reset_protocol': config['reset_protocol'],
+                                 **restored_learner_summary(model)})
     wandb_callback = WandbCallback(
         gradient_save_freq=0 if args.exit_phase else 1000,
         verbose=2,
@@ -573,6 +599,10 @@ def main():
 
     # Train and save before closing the single active TraCI connection.
     try:
+        if curriculum_branch:
+            # Reset Python/NumPy/Torch RNGs identically AFTER logger setup.
+            # Optimizers, entropy, target critics and replay remain loaded.
+            model.set_random_seed(args.seed)
         continuing_exit = bool(args.exit_phase and args.load_path)
         remaining_steps = (args.total_timesteps - model.num_timesteps
                            if continuing_exit else args.total_timesteps)
