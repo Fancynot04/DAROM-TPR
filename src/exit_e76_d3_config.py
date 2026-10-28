@@ -60,6 +60,14 @@ CURRICULUM_BRANCH_PHASES = {
 }
 
 PHASES = {
+    **{f'e09_pending_{mode}': {
+        'scenario': 'easy', 'total_timesteps': 250_000,
+        'checkpoint_freq': 150_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'allowed_seeds': (43,),
+        'reward_profile': URGENCY_REWARD_PROFILE,
+        'curriculum_stages': URGENCY_CURRICULUM_STAGES,
+        'e09_pending_mode': mode,
+    } for mode in ('on', 'off')},
     **{phase: {
         'scenario': 'easy', 'total_timesteps': 150_000,
         'checkpoint_freq': 5_000, 'gamma': POTENTIAL_GAMMA,

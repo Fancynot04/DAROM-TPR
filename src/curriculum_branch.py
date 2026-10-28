@@ -51,6 +51,26 @@ def prepare_branch(model, vec_env):
     model._last_obs = None
 
 
+def prepare_empty_replay_branch(model, vec_env, warmup_steps=100):
+    """Start E09 with restored learner state but a fresh replay and episode."""
+    if (model.num_timesteps != 100_000 or model.seed != 43
+            or model.observation_space.shape != (134,) or model.gamma != 0.99
+            or model.batch_size != 512 or model.learning_rate != 3e-5):
+        raise ValueError('E09 parent learner does not match the 100k contract')
+    replay = model.replay_buffer
+    if (replay is None or replay.size() != 0 or replay.buffer_size != 1_000_000
+            or replay.n_envs != 1 or replay.observation_space.shape != (134,)):
+        raise ValueError('E09 requires a new, empty compatible replay buffer')
+    curriculum = vec_env.envs[0]
+    if not isinstance(curriculum, ExitStartLaneCurriculum):
+        raise ValueError('E09 requires the original start-lane curriculum')
+    if not isinstance(warmup_steps, int) or warmup_steps < 1:
+        raise ValueError('E09 warmup must be a positive number of new steps')
+    curriculum.env_steps = model.num_timesteps
+    model.learning_starts = model.num_timesteps + warmup_steps
+    model._last_obs = None
+
+
 def restored_learner_summary(model):
     """Fingerprint restored weights and optimizer tensors without serial IDs."""
     import torch

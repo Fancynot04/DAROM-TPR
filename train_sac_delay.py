@@ -210,10 +210,11 @@ def load_model(path: str, env: gym.Env) -> SAC:
 def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
              ablation='full', task='legacy_o3_d1', potential_gamma=None,
              nav_features=False, exit_reward_profile=None,
-             curriculum_stages=None, curriculum_route_dir=None):
+             curriculum_stages=None, curriculum_route_dir=None, e09_pending_mode=None):
     env = DelayWrapper(
         Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
-                potential_gamma=potential_gamma, exit_reward_profile=exit_reward_profile),
+                potential_gamma=potential_gamma, exit_reward_profile=exit_reward_profile,
+                e09_pending_mode=e09_pending_mode),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation, nav_features=nav_features,
     )
@@ -303,7 +304,10 @@ def parse_args():
         args.gamma = 0.99
         args.nav_features = False
         args.exit_reward_profile = None
-    if args.exit_phase and bool(args.load_path) != bool(args.replay_buffer_path):
+    e09 = bool(args.exit_phase and args.exit_phase.startswith('e09_pending_'))
+    if e09 and (not args.load_path or args.replay_buffer_path):
+        parser.error('E09 requires the frozen parent model and an empty new replay buffer')
+    if args.exit_phase and not e09 and bool(args.load_path) != bool(args.replay_buffer_path):
         parser.error('E76-to-D3 continuation requires both model and replay-buffer paths')
     if args.exit_phase in ('nav_200k', 'control_134_200k',
                            'urgency_134_200k', 'urgency_134_300k',
@@ -327,7 +331,13 @@ def ensure_dirs(path: str):
 def main():
     args = parse_args()
     curriculum_branch = args.exit_phase in exit_config.CURRICULUM_BRANCH_PHASES
+    e09 = bool(args.exit_phase and args.exit_phase.startswith('e09_pending_'))
     parent_hashes = None
+    if e09:
+        from src.curriculum_branch import sha256_file
+        parent_hashes = {'parent_model_sha256': sha256_file(args.load_path)}
+        if parent_hashes['parent_model_sha256'] != exit_config.CURRICULUM_BRANCH_MODEL_SHA256:
+            raise ValueError('E09 requires the frozen seed43 100k parent model')
     if curriculum_branch:
         from src.curriculum_branch import validate_parent_files
         parent_hashes = validate_parent_files(args.load_path, args.replay_buffer_path)
@@ -409,7 +419,14 @@ def main():
                         else None),
         curriculum_stages=(exit_config.PHASES[args.exit_phase].get('curriculum_stages')
                            if args.exit_phase else None),
+        e09_pending_mode=(exit_config.PHASES[args.exit_phase].get('e09_pending_mode')
+                          if args.exit_phase else None),
     )
+    if e09:
+        config.update(parent_hashes, resume_start_step=100_000,
+                      continuation_budget=150_000, empty_replay=True,
+                      relative_warmup_steps=100,
+                      reset_protocol='fresh_episode_common_seed43_rng_v1')
     if curriculum_branch:
         config.update(parent_hashes, resume_start_step=100_000,
                       continuation_budget=50_000,
@@ -433,7 +450,8 @@ def main():
                         config['curriculum_stages'],
                         (os.path.join('tmp', 'ai', 'e76-d3', args.exit_phase,
                                       args.run_name, 'routes')
-                         if config['curriculum_stages'] is not None else None))
+                         if config['curriculum_stages'] is not None else None),
+                        config['e09_pending_mode'])
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -530,7 +548,11 @@ def main():
                     raise ValueError('Loaded model has a different E76-to-D3 discount factor')
                 if args.exit_phase == 'nav_300k' and loaded_model.num_timesteps != 200_000:
                     raise ValueError('NAV136 300k continuation requires a 200k checkpoint')
-                loaded_model.load_replay_buffer(args.replay_buffer_path)
+                if not e09:
+                    loaded_model.load_replay_buffer(args.replay_buffer_path)
+                else:
+                    from src.curriculum_branch import prepare_empty_replay_branch
+                    prepare_empty_replay_branch(loaded_model, vec_env)
                 if curriculum_branch:
                     from src.curriculum_branch import prepare_branch
                     prepare_branch(loaded_model, vec_env)
@@ -554,6 +576,8 @@ def main():
         model.exit_potential_gamma = args.gamma
         model.exit_reward_profile = args.exit_reward_profile
         model.exit_control_profile = exit_config.CONTROL_PROFILE
+        if e09:
+            model.e09_pending_mode = config['e09_pending_mode']
 
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
                      mode=args.wandb_mode, dir=args.log_dir,
@@ -589,6 +613,14 @@ def main():
                                  'env_steps': 100_000, **parent_hashes,
                                  'reset_protocol': config['reset_protocol'],
                                  **restored_learner_summary(model)})
+    if e09:
+        from src.curriculum_branch import restored_learner_summary
+        episode_callback.starting_timesteps = 100_000
+        episode_callback._write({'event': 'e09_resume', 'steps': 100_000,
+                                 'env_steps': 100_000, **parent_hashes,
+                                 'relative_warmup_steps': 100,
+                                 'absolute_learning_starts': model.learning_starts,
+                                 **restored_learner_summary(model)})
     wandb_callback = WandbCallback(
         gradient_save_freq=0 if args.exit_phase else 1000,
         verbose=2,
@@ -599,7 +631,7 @@ def main():
 
     # Train and save before closing the single active TraCI connection.
     try:
-        if curriculum_branch:
+        if curriculum_branch or e09:
             # Reset Python/NumPy/Torch RNGs identically AFTER logger setup.
             # Optimizers, entropy, target critics and replay remain loaded.
             model.set_random_seed(args.seed)

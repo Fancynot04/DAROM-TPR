@@ -31,16 +31,19 @@ REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout
 
 
 def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1',
-             potential_gamma=None, nav_features=False, exit_reward_profile=None):
+             potential_gamma=None, nav_features=False, exit_reward_profile=None,
+             e09_pending_mode=None):
     env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
                                potential_gamma=potential_gamma,
-                               exit_reward_profile=exit_reward_profile),
+                               exit_reward_profile=exit_reward_profile,
+                               e09_pending_mode=e09_pending_mode),
                        max_delay=20, mode='all', delay_mode=delay_mode,
                        seed=seed, ablation=ablation, nav_features=nav_features)
     return SafetyWrapper(env) if safety else env
 
 
-def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
+def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
+                              e09_pending_mode=None):
     """Validate policy compatibility; evaluation safety is an intervention.
 
     Training safety remains checkpoint provenance, not a restriction on which
@@ -55,6 +58,11 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
     checkpoint_task = getattr(model, 'antwerp_task', 'legacy_o3_d1')
     if checkpoint_task != task:
         raise ValueError(f'Checkpoint task={checkpoint_task!r}, requested {task!r}')
+    trained_e09 = getattr(model, 'e09_pending_mode', None)
+    if trained_e09 is not None and e09_pending_mode not in ('on', 'off'):
+        raise ValueError('E09 checkpoints require an explicit pending evaluation mode')
+    if e09_pending_mode is not None and (e09_pending_mode not in ('on', 'off') or safety):
+        raise ValueError('E09 evaluation requires a valid mode and custom safety off')
     reward_profile = getattr(model, 'exit_reward_profile', None)
     if task == exit_config.TASK_ID:
         try:

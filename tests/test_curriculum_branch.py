@@ -10,7 +10,7 @@ import gymnasium as gym
 import numpy as np
 
 from src import exit_e76_d3_config as config
-from src.curriculum_branch import (AbsoluteCheckpointCallback, prepare_branch,
+from src.curriculum_branch import (AbsoluteCheckpointCallback, prepare_branch, prepare_empty_replay_branch,
                                    sha256_file, validate_parent_files)
 from src.sync_exit_wandb import expected_run_name, validate_run
 from src.wrapper import ExitStartLaneCurriculum
@@ -29,6 +29,22 @@ class FakeEnv(gym.Env):
 
 
 class CurriculumBranchTests(unittest.TestCase):
+    def test_e09_empty_replay_warmup_and_absolute_curriculum(self):
+        curriculum = ExitStartLaneCurriculum(FakeEnv(), config.URGENCY_CURRICULUM_STAGES, 43, 'unused')
+        replay = SimpleNamespace(size=Mock(return_value=0), buffer_size=1000000,
+                                 n_envs=1, observation_space=FakeEnv.observation_space)
+        model = SimpleNamespace(num_timesteps=100000, seed=43, gamma=.99, batch_size=512,
+                                learning_rate=3e-5, replay_buffer=replay,
+                                observation_space=FakeEnv.observation_space, _last_obs='old')
+        prepare_empty_replay_branch(model, SimpleNamespace(envs=[curriculum]))
+        self.assertEqual(model.learning_starts, 100100)
+        self.assertEqual(curriculum.env_steps, 100000)
+        self.assertEqual(curriculum.reset()[1]['curriculum_allowed_lanes'], [1, 2, 3])
+        self.assertIsNone(model._last_obs)
+        replay.size.return_value = 1
+        with self.assertRaises(ValueError):
+            prepare_empty_replay_branch(model, SimpleNamespace(envs=[curriculum]))
+
     @classmethod
     def setUpClass(cls):
         cls.fixture_root = (Path(__file__).resolve().parents[1]

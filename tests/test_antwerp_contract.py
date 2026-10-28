@@ -28,6 +28,20 @@ from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper, ExitStartLa
 
 
 class ExitCurriculumContractTests(unittest.TestCase):
+    def test_e09_contract_requires_model_and_rejects_old_replay(self):
+        import sys
+        from train_sac_delay import parse_args
+        for mode in ('on', 'off'):
+            base = ['train_sac_delay.py', '--exit_phase', f'e09_pending_{mode}',
+                    '--seed', '43', '--encoder_mode', 'GRU', '--load_path', 'parent.zip']
+            with patch.object(sys, 'argv', base):
+                args = parse_args()
+            self.assertEqual(args.total_timesteps, 250_000)
+            self.assertIsNone(args.replay_buffer_path)
+            self.assertEqual(args.exit_reward_profile, exit_config.URGENCY_REWARD_PROFILE)
+            with patch.object(sys, 'argv', base + ['--replay_buffer_path', 'old.pkl']):
+                with self.assertRaises(SystemExit):
+                    parse_args()
     def test_curriculum_forge_config_matches_training_profile(self):
         for seed in (42, 43):
             run_name = expected_run_name('urgency_134_curriculum_500k', seed)
@@ -514,6 +528,34 @@ class SeparateEgoTaskTests(unittest.TestCase):
             fake.vehicle.getLanePosition.return_value = 140.0
             env._apply_lane_change(-1)
             fake.vehicle.changeLane.assert_not_called()
+
+    def test_e09_pending_ablation_only_changes_request_lock(self):
+        for mode in ('on', 'off'):
+            with self.subTest(mode=mode):
+                env = Merging(seed=1, task=exit_config.TASK_ID, e09_pending_mode=mode)
+                env.ego_id, env.lane_name, env.lane_idx = 'ego', 'E77', 2
+                fake = Mock()
+                fake.edge.getLaneNumber.return_value = 6
+                fake.simulation.getTime.return_value = 100.0
+                with patch('src.merging.traci', fake):
+                    env._exit_change_has_room = Mock(side_effect=AssertionError('distance gate used'))
+                    env._apply_lane_change(-1)
+                    first = env.exit_maneuver
+                    env._apply_lane_change(-1)
+                    self.assertEqual(fake.vehicle.changeLane.call_count, 1 if mode == 'on' else 2)
+                    self.assertIs(env.exit_maneuver, first)
+                    fake.vehicle.changeLane.assert_called_with('ego', 1, 4.0)
+                    env.lane_idx = 0
+                    before = fake.vehicle.changeLane.call_count
+                    env._apply_lane_change(-1)
+                    self.assertEqual(fake.vehicle.changeLane.call_count, before)
+
+    def test_e09_rejects_other_task_and_custom_safety(self):
+        with self.assertRaises(ValueError):
+            Merging(seed=1, e09_pending_mode='off')
+        with self.assertRaises(ValueError):
+            Merging(seed=1, task=exit_config.TASK_ID, e09_pending_mode='on',
+                    runSafetyCheck=True)
 
     def test_exit_maneuver_stays_latched_across_j105_until_stable(self):
         env = Merging(seed=1, task=exit_config.TASK_ID)

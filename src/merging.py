@@ -45,6 +45,33 @@ def curriculum_route_file(source, lane, output_dir):
     return target
 
 
+def e09_evaluation_route_file(source, origin, lane, output_dir):
+    """Change only ego origin and lane in the existing easy traffic route."""
+    lane_counts = {'E76': 5, 'E77': 6, 'O1': 3}
+    if origin not in lane_counts or type(lane) is not int or not 0 <= lane < lane_counts[origin]:
+        raise ValueError('Invalid E09 evaluation origin or departure lane')
+    source, output_dir = Path(source), Path(output_dir)
+    original = source.read_bytes()
+    matches = list(re.finditer(rb'<trip\s+id="ego"(?=\s)[^>]*/>', original))
+    if len(matches) != 1:
+        raise ValueError('Expected exactly one ego trip')
+    ego = matches[0]
+    trip = ego.group()
+    if trip.count(b'from="E76"') != 1 or trip.count(b'departLane="random"') != 1:
+        raise ValueError('Unexpected ego trip contract')
+    selected = trip.replace(b'from="E76"', f'from="{origin}"'.encode('ascii'))
+    selected = selected.replace(b'departLane="random"', f'departLane="{lane}"'.encode('ascii'))
+    variant = original[:ego.start()] + selected + original[ego.end():]
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target = output_dir / f'{source.stem}_e09_{origin}_{lane}.rou.xml'
+    if target.exists():
+        if target.read_bytes() != variant:
+            raise FileExistsError(f'Existing E09 evaluation route differs: {target}')
+    else:
+        target.write_bytes(variant)
+    return target
+
+
 ANTWERP_TASKS = {
     'legacy_o3_d1': ('O3', 'D1', 'merge'),
     'entry': ('O3', 'E76', 'merge'),
@@ -87,11 +114,16 @@ class Merging(gym.Env):
     metadata = {"render_modes": ["human", "none"], "render_fps": 10}
     def __init__(self, seed, mode='all', radius = 50, render_mode= None, runSafetyCheck=False,
                  scenario='medium', task='legacy_o3_d1', potential_gamma=None,
-                 exit_reward_profile=None):
+                 exit_reward_profile=None, e09_pending_mode=None):
         if scenario not in ('easy', 'medium', 'hard'):
             raise ValueError(f'Unknown Antwerp scenario: {scenario}')
         if task not in ANTWERP_TASKS:
             raise ValueError(f'Unknown Antwerp task: {task}')
+        if e09_pending_mode not in (None, 'on', 'off'):
+            raise ValueError('Invalid E09 pending mode')
+        if e09_pending_mode is not None and (task != exit_config.TASK_ID or runSafetyCheck):
+            raise ValueError('E09 requires the E76-D3 task with custom safety disabled')
+        self.e09_pending_mode = e09_pending_mode
         self.scenario = scenario
         self.task = task
         self.exit_reward_profile = (exit_config.REWARD_PROFILE if exit_reward_profile is None
@@ -136,6 +168,9 @@ class Merging(gym.Env):
         self.ego_start_lane = None
         self.curriculum_depart_lane = None
         self.curriculum_route_dir = None
+        self.e09_evaluation_origin = None
+        self.e09_evaluation_lane = None
+        self.e09_evaluation_route_dir = None
         self.potential_distance_scale = None
         self.potential_previous = 0.0
         self.initial_potential = 0.0
@@ -381,7 +416,14 @@ class Merging(gym.Env):
         # Load the Antwerp network and one scenario route without detector output files.
         route_suffix = '' if self.task == 'legacy_o3_d1' else f'_{self.task}'
         source_routes = ANTWERP_DIR / f'Antwerp_{self.scenario}{route_suffix}.rou.xml'
-        if self.curriculum_depart_lane is not None:
+        if self.e09_evaluation_origin is not None:
+            if self.e09_pending_mode is None or self.e09_evaluation_route_dir is None:
+                raise ValueError('E09 evaluation origin requires an explicit E09 mode and route directory')
+            self.origin = self.e09_evaluation_origin
+            routes = e09_evaluation_route_file(source_routes, self.origin,
+                                                self.e09_evaluation_lane,
+                                                self.e09_evaluation_route_dir)
+        elif self.curriculum_depart_lane is not None:
             if self.task != exit_config.TASK_ID or self.curriculum_route_dir is None:
                 raise ValueError('Curriculum departure requires E76-to-D3 and a route output directory')
             routes = curriculum_route_file(source_routes, self.curriculum_depart_lane,
@@ -638,19 +680,26 @@ class Merging(gym.Env):
 
     def _apply_lane_change(self, direction):
         if direction and self.lane_name in LANE_CHANGE_EDGES:
-            if self.task == exit_config.TASK_ID and self.exit_maneuver is not None:
+            if (self.task == exit_config.TASK_ID and self.exit_maneuver is not None
+                    and self.e09_pending_mode != 'off'):
                 return
             target = self.lane_idx + direction
             if 0 <= target < self.traci.edge.getLaneNumber(self.lane_name):
                 if self.task == exit_config.TASK_ID and self.lane_name in ('E76', 'E77'):
-                    if not self._exit_change_has_room():
+                    if self.e09_pending_mode is None and not self._exit_change_has_room():
                         return
                     now = self.traci.simulation.getTime()
                     self.traci.vehicle.changeLane(
                         self.ego_id, target, exit_config.LANE_CHANGE_TIME_SECONDS)
-                    self.exit_maneuver = {'edge': self.lane_name, 'target': target,
-                                          'start_time': now, 'last_progress_time': now,
-                                          'stable_steps': 0}
+                    # In E09 off mode this is non-blocking bookkeeping, retained
+                    # for the existing urgency and exit-terminal contracts. Do
+                    # not restart its clock on a repeated identical request.
+                    current = self.exit_maneuver
+                    if (current is None or current['edge'] != self.lane_name
+                            or current['target'] != target):
+                        self.exit_maneuver = {'edge': self.lane_name, 'target': target,
+                                              'start_time': now, 'last_progress_time': now,
+                                              'stable_steps': 0}
                     return
                 self.target_lane_idx = target
                 self.traci.vehicle.changeLane(self.ego_id, target, 0)
