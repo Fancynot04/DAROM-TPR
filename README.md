@@ -530,7 +530,7 @@ the Forge `train/ego_start_lane` metric. No uniform departure distribution is
 assumed. Only E77_0 connects to D3, so other starting lanes require a lane
 change before the E77→D3 junction.
 
-Only this task adds potential shaping to the existing scaled reward:
+The `easy_pilot` and `easy_1m` profiles add potential shaping to the existing scaled reward:
 `F(s,s') = 0.99 Φ(s') − Φ(s)`, where
 `Φ(s) = 10 · clip(1 − d/D, 0, 1) · (1 − min(n,5)/5)`.
 Here `d` is SUMO driving distance to the **D3 entrance**, `n` is the current
@@ -578,6 +578,40 @@ and replay paths with `--load_path` and `--replay_buffer_path` to
 SUMO episode. This resume is not bitwise identical to an uninterrupted run.
 Forge upload and remote code transfer require the repository's explicit
 dangerous-operation confirmation before execution.
+
+#### Basic reward factorial (A0–A3)
+
+`--exit_phase basic_reward_200k --reward_profile A0|A1|A2|A3` runs a separate
+200,000-step E76→D3 experiment for seed 42 or 43. These profiles disable
+potential shaping completely and keep the original lane command API and 134
+dimensional delayed observation. In final SAC reward units, A0/A1 give +0.15
+per travelled meter; A2/A3 give +0.0375. A0/A2 deduct 0.5 for a nonzero lane
+command only when no higher-priority event is paid; A1/A3 deduct zero. All
+other reward terms are common. Exit terminal priority is collision, teleport,
+missed exit (ego on E78/E82/D1/D2 before D3), emergency stop, arrival, timeout,
+then the stage and lane-command events. Teleport and missed exit each deduct
+100 and end the episode. `reward_components` records every term and sums to
+the step reward. Checkpoints store the profile, full training config and Git
+SHA; evaluation validates these and requires an exact 200,000-step model.
+
+The serial runner uses one TraCI connection at a time. Each run has its own
+ignored directory under `models_experiments/basic_reward_ablation/`, including
+checkpoint, Replay Buffer, train log and evaluation report. It evaluates all
+eight final checkpoints on seeds 200001–200050, then writes per-seed and
+two-training-seed summaries. Run it from this branch after the tests and
+fixed-action SUMO smoke test pass:
+
+```bash
+python3 -m unittest discover -s tests -q
+python3 -B -m src.basic_reward_ablation --stage all
+```
+
+The runner refuses to overwrite an incomplete run. Recovery from a saved
+model and matching Replay Buffer requires an explicit run-specific review;
+continuation starts a fresh SUMO episode and is not bitwise identical to an
+uninterrupted 200,000-step run. Outputs are ignored by Git. The existing
+`easy_pilot` and `easy_1m` profile retains its previous potential reward and
+checkpoint contract.
 
 Running the two independent training processes at once lets each policy learn
 and finish at its own pace. For these separate models, a simultaneous start

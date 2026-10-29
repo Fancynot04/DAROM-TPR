@@ -16,23 +16,27 @@ from src import exit_e76_d3_config as exit_config
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
-OUTCOMES = ('Arrived', 'Collision', 'Max Steps', 'Emergency Stopping')
+OUTCOMES = ('Arrived', 'Collision', 'Max Steps', 'Emergency Stopping',
+            'Ego Teleported', 'Missed Exit')
 TIMEOUT_DETAILS = ('No Merge Timeout', 'Merged Timeout')
 EXIT_TIMEOUT_DETAILS = ('No Exit Timeout', 'Exit Reached Timeout')
 ARRIVAL_DETAILS = ('Uninterrupted Arrived', 'Teleported Arrived', 'Ego Teleported')
 REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout_rate',
                   'no_merge_rate', 'emergency_stopping_rate', 'ego_teleport_rate',
-                  'mean_return')
+                  'missed_exit_rate', 'mean_return')
 
 
-def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1'):
-    env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task),
+def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1',
+             reward_profile=None):
+    env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
+                               reward_profile=reward_profile),
                        max_delay=20, mode='all', delay_mode=delay_mode,
                        seed=seed, ablation=ablation)
     return SafetyWrapper(env) if safety else env
 
 
-def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
+def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
+                              reward_profile=None):
     """Validate policy compatibility; evaluation safety is an intervention.
 
     Training safety remains checkpoint provenance, not a restriction on which
@@ -47,10 +51,36 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1'):
     checkpoint_task = getattr(model, 'antwerp_task', 'legacy_o3_d1')
     if checkpoint_task != task:
         raise ValueError(f'Checkpoint task={checkpoint_task!r}, requested {task!r}')
-    if task == exit_config.TASK_ID and getattr(model, 'exit_potential_beta', None) != exit_config.POTENTIAL_BETA:
+    expected_beta = 0.0 if reward_profile else exit_config.POTENTIAL_BETA
+    expected_profile = reward_profile or exit_config.REWARD_PROFILE
+    if task == exit_config.TASK_ID and getattr(model, 'exit_potential_beta', None) != expected_beta:
         raise ValueError('Checkpoint E76-to-D3 potential configuration does not match')
-    if task == exit_config.TASK_ID and getattr(model, 'exit_reward_profile', None) != exit_config.REWARD_PROFILE:
+    if task == exit_config.TASK_ID and getattr(model, 'exit_reward_profile', None) != expected_profile:
         raise ValueError('Checkpoint E76-to-D3 reward profile does not match')
+    if reward_profile:
+        if reward_profile not in exit_config.ABLATION_PROFILES:
+            raise ValueError('Unknown reward profile')
+        cfg = getattr(model, 'exit_training_config', None)
+        expected = {'seed': (42, 43), 'total_timesteps': 200_000,
+                    'task': exit_config.TASK_ID, 'scenario': 'easy',
+                    'delay_mode': 'uniform', 'max_delay': 20,
+                    'use_safety': False, 'encoder_mode': 'GRU',
+                    'gru_input_mode': 'paper_raw', 'ablation': 'full',
+                    'reward_profile': reward_profile, 'potential_beta': 0.0}
+        if not isinstance(cfg, dict) or any(
+                cfg.get(key) not in value if isinstance(value, tuple) else cfg.get(key) != value
+                for key, value in expected.items()):
+            raise ValueError('Checkpoint basic reward training configuration does not match')
+        if getattr(model, 'num_timesteps', None) != 200_000:
+            raise ValueError('Checkpoint has not completed 200k steps')
+        sac = cfg.get('sac', {})
+        required_sac = {'learning_rate': 3e-5, 'batch_size': 512,
+                        'buffer_size': 1_000_000, 'learning_starts': 100,
+                        'gamma': 0.99}
+        if any(sac.get(key) != value for key, value in required_sac.items()):
+            raise ValueError('Checkpoint SAC configuration does not match')
+        if getattr(model, 'observation_space', None) is None or model.observation_space.shape != (134,):
+            raise ValueError('Checkpoint observation contract must be 134 dimensions')
     return {'training_safety': getattr(model, 'training_safety', None),
             'evaluation_safety': bool(safety)}
 
@@ -74,18 +104,47 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
         observation, reset_info = env.reset(seed=seed + episode)
         episode_return = 0.0
         steps = 0
+        reward_totals = Counter()
+        lane_commands = toward_exit = completed_changes = reverse_changes = hard_brakes = 0
+        first_toward_position = first_exit_lane_distance = entry_e77_lane = None
+        speeds, accelerations, action_changes = [], [], []
+        previous_command_acceleration = 0.0
         while True:
             action, _ = model.predict(observation, deterministic=True)
             observation, reward, terminated, truncated, info = env.step(action)
             episode_return += float(reward)
             steps += 1
+            for key, value in info.get('reward_components', {}).items():
+                reward_totals[key] += float(value)
+            direction = int(info.get('command_direction', 0))
+            lane_commands += int(direction != 0)
+            toward_exit += int(direction < 0)
+            reverse_changes += int(info.get('lane_change_delta', 0) > 0)
+            completed_changes += int(info.get('lane_change_completed', False))
+            if direction < 0 and first_toward_position is None:
+                first_toward_position = info.get('ego_distance')
+            if info.get('road') == 'E77' and entry_e77_lane is None:
+                entry_e77_lane = info.get('lane_index')
+            if (info.get('road') in ('E76', 'E77') and info.get('lane_index') == 0
+                    and first_exit_lane_distance is None):
+                first_exit_lane_distance = info.get('distance_to_d3')
+            if info.get('ego_speed') is not None:
+                speeds.append(float(info['ego_speed']))
+            if info.get('ego_acceleration') is not None:
+                acceleration = float(info['ego_acceleration'])
+                accelerations.append(acceleration)
+                hard_brakes += int(acceleration < -4.5)
+            parsed_acceleration = float(np.clip(action[0], -5, 5))
+            action_changes.append(abs(parsed_acceleration - previous_command_acceleration))
+            previous_command_acceleration = parsed_acceleration
             if terminated or truncated:
                 outcome = info.get('message', 'Unknown')
                 if outcome not in OUTCOMES:
                     raise ValueError(f'Unexpected episode outcome: {outcome!r}')
                 counts[outcome] += 1
                 teleported = bool(info['ego_teleported'])
-                counts['Ego Teleported'] += int(teleported)
+                if outcome != 'Ego Teleported':
+                    counts['Ego Teleported'] += int(teleported)
                 if outcome == 'Arrived':
                     counts['Teleported Arrived' if teleported else 'Uninterrupted Arrived'] += 1
                 if outcome == 'Max Steps':
@@ -101,7 +160,19 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
                                 'stage_reached': bool(info.get('stage_reached', info.get('merged'))),
                                 'stage_reward_paid': bool(info.get('stage_reward_paid', False)),
                                 'success': outcome == 'Arrived' and not teleported,
-                                'return': episode_return, 'reset_info': reset_info})
+                                'return': episode_return, 'reset_info': reset_info,
+                                'lane_commands': lane_commands,
+                                'toward_exit_requests': toward_exit,
+                                'completed_lane_changes': completed_changes,
+                                'reverse_lane_changes': reverse_changes,
+                                'first_toward_position': first_toward_position,
+                                'entry_e77_lane': entry_e77_lane,
+                                'first_exit_lane_remaining_distance': first_exit_lane_distance,
+                                'mean_speed': float(np.mean(speeds)) if speeds else None,
+                                'mean_acceleration': float(np.mean(accelerations)) if accelerations else None,
+                                'mean_action_change': float(np.mean(action_changes)),
+                                'hard_brakes': hard_brakes,
+                                'reward_components': dict(reward_totals)})
                 break
     timeout_details = EXIT_TIMEOUT_DETAILS if ANTWERP_TASKS[task][2] == 'exit' else TIMEOUT_DETAILS
     result = {**{outcome: counts[outcome] for outcome in OUTCOMES},
@@ -113,6 +184,7 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
             'collision_rate': 100 * counts['Collision'] / episodes,
             'timeout_rate': 100 * counts['Max Steps'] / episodes,
             'emergency_stopping_rate': 100 * counts['Emergency Stopping'] / episodes,
+            'missed_exit_rate': 100 * counts['Missed Exit'] / episodes,
             'mean_return': float(np.mean(returns)), 'episode_results': records}
     if ANTWERP_TASKS[task][2] != 'exit':
         result['no_merge_rate'] = result['timeout_rate']  # historical report field
@@ -141,13 +213,17 @@ def summarize_runs(runs, metrics=REPORT_METRICS):
 
 
 def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds,
-                  task='legacy_o3_d1'):
+                  task='legacy_o3_d1', reward_profile=None):
     """Repeat evaluation of ONE checkpoint; this is not training-seed variance."""
     validate_seed_ranges(episodes, seeds)
-    setup = validate_checkpoint_setup(model, ablation, safety, task)
+    setup = validate_checkpoint_setup(model, ablation, safety, task, reward_profile)
+    if reward_profile and (scenario != 'easy' or delay_mode != 'uniform' or safety or
+                           episodes != 50 or seeds != [200001]):
+        raise ValueError('Basic reward evaluation requires Easy, uniform, safety off and seeds 200001-200050')
     runs = []
     for seed in seeds:
-        env = make_env(seed, scenario, delay_mode, safety, ablation, task=task)
+        env = make_env(seed, scenario, delay_mode, safety, ablation, task=task,
+                       reward_profile=reward_profile)
         try:
             runs.append({'seed': seed, 'episodes': episodes,
                          **evaluate(model, env, episodes, seed, task=task)})
@@ -174,6 +250,8 @@ def parse_args(argv=None):
     parser.add_argument('checkpoint', help='Antwerp SAC checkpoint (.zip)')
     parser.add_argument('--scenario', choices=('easy', 'medium', 'hard'), default='medium')
     parser.add_argument('--task', choices=tuple(ANTWERP_TASKS), default='legacy_o3_d1')
+    parser.add_argument('--reward-profile', choices=tuple(exit_config.ABLATION_PROFILES),
+                        default=None)
     parser.add_argument('--delay-mode', choices=('uniform', 'exponential', 'triangular', 'bursty', 'bimodal'), default='uniform')
     parser.add_argument('--episodes', type=int, default=51)
     seed_options = parser.add_mutually_exclusive_group()
@@ -211,7 +289,8 @@ def main():
     checkpoint_hash = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
     model = SAC.load(checkpoint, device=args.device)
     report = evaluate_runs(model, args.scenario, args.delay_mode, args.safety,
-                           args.ablation, args.episodes, args.seeds, task=args.task)
+                           args.ablation, args.episodes, args.seeds, task=args.task,
+                           reward_profile=args.reward_profile)
     report.update(checkpoint=str(checkpoint), checkpoint_sha256=checkpoint_hash,
                   device=args.device, torch_threads=args.torch_threads)
     print(f"{args.scenario} | {args.delay_mode} | task={args.task} | ablation={args.ablation} | "

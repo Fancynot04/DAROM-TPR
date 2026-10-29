@@ -3,6 +3,7 @@ import os
 import time
 import argparse
 import json
+import subprocess
 import torch
 from typing import Optional
 from src.wrapper import SafetyWrapper
@@ -153,6 +154,26 @@ class StepLoggingCallback(EpisodeRewardCallback):
         pass
         # return super()._on_step()
 
+
+class ExitMilestoneCallback(BaseCallback):
+    """Save the three prescribed model and Replay milestones only."""
+
+    def __init__(self, directory, run_name):
+        super().__init__()
+        self.directory = directory
+        self.run_name = run_name
+
+    def _on_step(self):
+        if self.num_timesteps in (50_000, 100_000, 200_000):
+            os.makedirs(self.directory, exist_ok=True)
+            stem = os.path.join(self.directory,
+                                f'{self.run_name}_{self.num_timesteps}_steps')
+            if os.path.exists(stem + '.zip') or os.path.exists(stem + '_replay_buffer.pkl'):
+                raise FileExistsError(f'Milestone output already exists: {stem}')
+            self.model.save(stem)
+            self.model.save_replay_buffer(stem + '_replay_buffer.pkl')
+        return True
+
 def save_model(model: SAC, path: str) -> str:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     model.save(path)
@@ -162,9 +183,10 @@ def load_model(path: str, env: gym.Env) -> SAC:
     return SAC.load(path, env=env)
 
 def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
-             ablation='full', task='legacy_o3_d1'):
+             ablation='full', task='legacy_o3_d1', reward_profile=None):
     env = DelayWrapper(
-        Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task),
+        Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
+                reward_profile=reward_profile),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation,
     )
@@ -195,6 +217,8 @@ def parse_args():
                         help='Single-ego task; legacy default preserves existing O3-to-D1 runs')
     parser.add_argument('--exit_phase', choices=tuple(exit_config.PHASES), default=None,
                         help='Dedicated E76-to-D3 Easy pilot or Easy 1M configuration')
+    parser.add_argument('--reward_profile', choices=tuple(exit_config.ABLATION_PROFILES),
+                        default=None)
     parser.add_argument('--safety', dest='use_safety', action='store_true')
     parser.add_argument('--save_dir', type=str, default='models_experiments')
     parser.add_argument('--load_path', type=str, default=None)
@@ -209,9 +233,13 @@ def parse_args():
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
     if args.exit_phase:
+        ablation_phase = args.exit_phase == exit_config.ABLATION_PHASE
+        if ablation_phase != (args.reward_profile is not None):
+            parser.error('The basic reward phase requires exactly one A0-A3 reward profile')
         if args.task not in ('legacy_o3_d1', exit_config.TASK_ID):
             parser.error('--exit_phase cannot be combined with another task')
-        if (args.seed != 42 or args.radius != 50 or args.use_safety
+        if (args.seed not in ((42, 43) if ablation_phase else (42,))
+                or args.radius != 50 or args.use_safety
                 or args.encoder_mode != 'GRU' or args.gru_input_mode != 'paper_raw'
                 or args.ablation != 'full' or args.delay_mode != 'uniform'):
             parser.error('E76-to-D3 phase requires the D-group seed, radius, '
@@ -229,20 +257,26 @@ def parse_args():
         args.project = exit_config.WANDB_PROJECT
         args.entity = exit_config.WANDB_ENTITY
         if args.device == 'auto':
-            args.device = 'cuda'
+            args.device = 'cpu' if ablation_phase else 'cuda'
         if args.torch_threads is None:
             args.torch_threads = 2
         if args.log_dir == 'runs':
-            args.log_dir = f'tmp/ai/e76-d3/{args.exit_phase}/tensorboard'
+            args.log_dir = (f'models_experiments/basic_reward_ablation/{args.reward_profile}_seed{args.seed}/tensorboard'
+                            if ablation_phase else f'tmp/ai/e76-d3/{args.exit_phase}/tensorboard')
         if args.save_dir == 'models_experiments':
-            args.save_dir = 'models_experiments/e76-d3'
+            args.save_dir = (f'models_experiments/basic_reward_ablation/{args.reward_profile}_seed{args.seed}'
+                             if ablation_phase else 'models_experiments/e76-d3')
         if args.run_name is None:
-            args.run_name = f'e76-d3-{args.exit_phase}-{time.strftime("%Y%m%d-%H%M%S")}'
+            args.run_name = (f'{args.reward_profile}_seed{args.seed}' if ablation_phase else
+                             f'e76-d3-{args.exit_phase}-{time.strftime("%Y%m%d-%H%M%S")}')
         if args.episode_log is None:
-            args.episode_log = f'tmp/ai/e76-d3/{args.exit_phase}/{args.run_name}.jsonl'
+            args.episode_log = (f'{args.save_dir}/episodes.jsonl' if ablation_phase else
+                                f'tmp/ai/e76-d3/{args.exit_phase}/{args.run_name}.jsonl')
     elif args.task == exit_config.TASK_ID:
         parser.error('Use --exit_phase for the E76-to-D3 task')
     else:
+        if args.reward_profile is not None:
+            parser.error('--reward_profile requires the basic reward exit phase')
         args.project = args.project or 'merging-SAC_experiments'
     if args.exit_phase and bool(args.load_path) != bool(args.replay_buffer_path):
         parser.error('E76-to-D3 continuation requires both model and replay-buffer paths')
@@ -300,9 +334,12 @@ def main():
         task=args.task,
         exit_phase=args.exit_phase,
         ego_depart_lane=(exit_config.DEPART_LANE if args.exit_phase else None),
-        potential_beta=(exit_config.POTENTIAL_BETA if args.exit_phase else None),
-        potential_gamma=(exit_config.POTENTIAL_GAMMA if args.exit_phase else None),
-        reward_profile=(exit_config.REWARD_PROFILE if args.exit_phase else None),
+        potential_beta=(exit_config.POTENTIAL_BETA if args.exit_phase and not args.reward_profile else 0.0),
+        potential_gamma=(exit_config.POTENTIAL_GAMMA if args.exit_phase and not args.reward_profile else None),
+        reward_profile=(args.reward_profile or (exit_config.REWARD_PROFILE if args.exit_phase else None)),
+        git_sha=(subprocess.check_output(['git', 'rev-parse', 'HEAD'],
+                                         cwd=os.path.dirname(__file__), text=True).strip()
+                 if args.reward_profile else None),
         metric_schema=('env_steps_v2' if args.exit_phase else None),
         wandb_project=args.project,
         wandb_entity=args.entity,
@@ -318,7 +355,8 @@ def main():
     # Create env
     def _fn():
         return make_env(args.seed, args.scenario, args.delay_mode, max_delay,
-                        args.use_safety, args.render_mode, args.ablation, args.task)
+                        args.use_safety, args.render_mode, args.ablation, args.task,
+                        args.reward_profile)
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -390,10 +428,10 @@ def main():
                                      f'requested {args.gru_input_mode!r}')
             if args.exit_phase:
                 if (getattr(loaded_model, 'exit_potential_beta', None)
-                        != exit_config.POTENTIAL_BETA):
+                        != (0.0 if args.reward_profile else exit_config.POTENTIAL_BETA)):
                     raise ValueError('Loaded model has a different E76-to-D3 potential profile')
                 if (getattr(loaded_model, 'exit_reward_profile', None)
-                        != exit_config.REWARD_PROFILE):
+                        != (args.reward_profile or exit_config.REWARD_PROFILE)):
                     raise ValueError('Loaded model has a different E76-to-D3 reward profile')
                 loaded_model.load_replay_buffer(args.replay_buffer_path)
                 if loaded_model.num_timesteps >= args.total_timesteps:
@@ -409,18 +447,19 @@ def main():
     model.gru_input_mode = args.gru_input_mode if args.encoder_mode == 'GRU' else None
     model.experiment_id = args.run_name
     if args.exit_phase:
-        model.exit_potential_beta = exit_config.POTENTIAL_BETA
-        model.exit_reward_profile = exit_config.REWARD_PROFILE
+        model.exit_potential_beta = 0.0 if args.reward_profile else exit_config.POTENTIAL_BETA
+        model.exit_reward_profile = args.reward_profile or exit_config.REWARD_PROFILE
+        model.exit_training_config = config if args.reward_profile else None
 
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
                      mode=args.wandb_mode, dir=args.log_dir,
                      sync_tensorboard=not args.exit_phase,
                      save_code=not args.exit_phase, resume=args.resume, id=args.run_id,
-                     group=f'e76-d3-{args.exit_phase}-{exit_config.REWARD_PROFILE}'
+                     group=f'e76-d3-{args.exit_phase}-{args.reward_profile or exit_config.REWARD_PROFILE}'
                      if args.exit_phase else None,
                      job_type=args.exit_phase,
-                     tags=['E76-D3', 'single-ego', 'potential-beta10', 'metric-schema-v2',
-                           exit_config.REWARD_PROFILE]
+                     tags=['E76-D3', 'single-ego', 'metric-schema-v2',
+                           args.reward_profile or exit_config.REWARD_PROFILE]
                      if args.exit_phase else None)
     if not args.exit_phase:
         run.log_code('src')
@@ -432,11 +471,11 @@ def main():
 
     # Create callbacks
     episode_callback = EpisodeRewardCallback(log_path=args.episode_log)
-    checkpoint_callback = CheckpointCallback(
-        save_freq=args.checkpoint_freq, save_path=checkpoint_dir,
-        name_prefix=args.run_name, verbose=2,
-        save_replay_buffer=args.save_replay_buffer,
-    )
+    checkpoint_callback = (ExitMilestoneCallback(checkpoint_dir, args.run_name)
+                           if args.reward_profile else CheckpointCallback(
+                               save_freq=args.checkpoint_freq, save_path=checkpoint_dir,
+                               name_prefix=args.run_name, verbose=2,
+                               save_replay_buffer=args.save_replay_buffer))
     wandb_callback = WandbCallback(
         gradient_save_freq=0 if args.exit_phase else 1000,
         verbose=2,

@@ -59,13 +59,17 @@ def set_ego_lane_mode(vehicle_name):
 class Merging(gym.Env):
     metadata = {"render_modes": ["human", "none"], "render_fps": 10}
     def __init__(self, seed, mode='all', radius = 50, render_mode= None, runSafetyCheck=False,
-                 scenario='medium', task='legacy_o3_d1'):
+                 scenario='medium', task='legacy_o3_d1', reward_profile=None):
         if scenario not in ('easy', 'medium', 'hard'):
             raise ValueError(f'Unknown Antwerp scenario: {scenario}')
         if task not in ANTWERP_TASKS:
             raise ValueError(f'Unknown Antwerp task: {task}')
         self.scenario = scenario
         self.task = task
+        if reward_profile is not None and (task != exit_config.TASK_ID or
+                reward_profile not in exit_config.ABLATION_PROFILES):
+            raise ValueError(f'Unsupported reward profile: {reward_profile!r}')
+        self.reward_profile = reward_profile
         self.origin, self.destination, self.stage_name = ANTWERP_TASKS[task]
         self.ego_id = None
         self.ego_depart_time = None
@@ -95,6 +99,10 @@ class Merging(gym.Env):
         self.potential_distance_scale = None
         self.potential_previous = 0.0
         self.initial_potential = 0.0
+        self.terminal_reason = ''
+        self.previous_lane_idx = None
+        self.previous_road = ''
+        self.command_direction = 0
         self.action = None
         self.runSafetyCheck = runSafetyCheck
         self.last_acc = 0
@@ -161,6 +169,10 @@ class Merging(gym.Env):
         self.potential_distance_scale = None
         self.potential_previous = 0.0
         self.initial_potential = 0.0
+        self.terminal_reason = ''
+        self.previous_lane_idx = None
+        self.previous_road = ''
+        self.command_direction = 0
 
     def _exit_potential(self):
         if self.task != exit_config.TASK_ID or not self.ego_on_road or self.ego_teleported:
@@ -229,11 +241,12 @@ class Merging(gym.Env):
                     self.ego_on_road = True
                     if self.task == exit_config.TASK_ID:
                         self.ego_start_lane = self.traci.vehicle.getLaneIndex(self.ego_id)
-                        self.potential_distance_scale = sum(
-                            self.traci.lane.getLength(f'{edge}_0')
-                            for edge in exit_config.DISTANCE_SCALE_EDGES)
-                        self.potential_previous = self._exit_potential()
-                        self.initial_potential = self.potential_previous
+                        if self.reward_profile is None:
+                            self.potential_distance_scale = sum(
+                                self.traci.lane.getLength(f'{edge}_0')
+                                for edge in exit_config.DISTANCE_SCALE_EDGES)
+                            self.potential_previous = self._exit_potential()
+                            self.initial_potential = self.potential_previous
                     self.observation = np.asarray(self._get_obs(), dtype=np.float32)
         if not self.ego_inserted:
             self.traci.close()
@@ -270,6 +283,8 @@ class Merging(gym.Env):
         if self.teleport_transition or not self.ego_on_road:
             distance_traveled = 0.0
         # print(distance_traveled)
+        profile = (exit_config.ABLATION_PROFILES[self.reward_profile]
+                   if self.reward_profile else None)
         r = -0.30
         base_penalty = -0.30
 
@@ -278,7 +293,7 @@ class Merging(gym.Env):
         r -= jerk_penalty
         # r = 0
         try:
-            progress_reward = 1.5 * distance_traveled
+            progress_reward = (profile['progress_per_meter'] * 10 if profile else 1.5) * distance_traveled
             r += progress_reward
         except Exception:
             progress_reward = 0.0
@@ -307,8 +322,28 @@ class Merging(gym.Env):
         merge_reward = 0.0
         lane_command_penalty = 0.0
         max_steps_penalty = 0.0
+        teleport_penalty = 0.0
+        missed_exit_penalty = 0.0
 
-        if self.ego_id in self.traci.simulation.getCollidingVehiclesIDList():
+        if profile and self.terminal_reason == 'Collision':
+            collision_penalty = 1000
+            r -= collision_penalty
+        elif profile and self.terminal_reason == 'Ego Teleported':
+            teleport_penalty = 1000
+            r -= teleport_penalty
+        elif profile and self.terminal_reason == 'Missed Exit':
+            missed_exit_penalty = 1000
+            r -= missed_exit_penalty
+        elif profile and self.terminal_reason == 'Emergency Stopping':
+            emergency_stopping_penalty = 1000
+            r -= emergency_stopping_penalty
+        elif profile and self.terminal_reason == 'Arrived':
+            arrived_reward = 500
+            r += arrived_reward
+        elif profile and self.terminal_reason == 'Max Steps':
+            max_steps_penalty = 1000
+            r -= max_steps_penalty
+        elif not profile and self.ego_id in self.traci.simulation.getCollidingVehiclesIDList():
             print("Colliding")
             collision_penalty = 1000
             r -= collision_penalty
@@ -325,12 +360,12 @@ class Merging(gym.Env):
             self.given_merge_reward = True
             merge_reward = 500
             r += merge_reward
-        elif self.counter >= maxSteps:
+        elif not profile and self.counter >= maxSteps:
             print("Max Steps")
             max_steps_penalty = 1000
             r -= max_steps_penalty
-        elif self.task != exit_config.TASK_ID and self.parsed_action[1] != 0:
-            lane_command_penalty = 5
+        elif self.parsed_action[1] != 0 and (profile or self.task != exit_config.TASK_ID):
+            lane_command_penalty = (-profile['lane_command'] * 10 if profile else 5)
             r -= lane_command_penalty
 
         # print(f"Reward components:"
@@ -356,6 +391,7 @@ class Merging(gym.Env):
             'collision': -collision_penalty * 0.1, 'arrival': arrived_reward * 0.1,
             'emergency': -emergency_stopping_penalty * 0.1, 'stage': merge_reward * 0.1,
             'timeout': -max_steps_penalty * 0.1, 'lane_command': -lane_command_penalty * 0.1,
+            'teleport': -teleport_penalty * 0.1, 'missed_exit': -missed_exit_penalty * 0.1,
         }
         self.reward_components = {key: float(value) for key, value in self.reward_components.items()}
         return 0.1*r    
@@ -446,6 +482,8 @@ class Merging(gym.Env):
             self.lane_id = self.traci.vehicle.getLaneID(self.ego_id)
             self.lane_name = self.traci.vehicle.getRoadID(self.ego_id)
             self.lane_idx = self.traci.vehicle.getLaneIndex(self.ego_id)
+            self.previous_lane_idx = self.lane_idx
+            self.previous_road = self.lane_name
         parsed_action = parseAction(action)
         self.action = action
         if self.runSafetyCheck and was_on_road:
@@ -461,6 +499,7 @@ class Merging(gym.Env):
                 self.traci.vehicle.setSpeed(self.ego_id, 32)
         self.counter += 1
         self.parsed_action = parsed_action
+        self.command_direction = parsed_action[1]
         return was_on_road
 
     def collect_step(self, was_on_road, close_on_done=True):
@@ -492,8 +531,20 @@ class Merging(gym.Env):
         else:
             self._ahead_state = self._behind_state = [0.0, 0.0, 0.0]
 
+        missed_exit = (self.reward_profile is not None and self.lane_name in
+                       ('E78', 'E82', 'D1', 'D2') and self.ego_on_road and
+                       not self.stage_reached)
         if self.ego_id in self.traci.simulation.getCollidingVehiclesIDList():
             info['message'] = 'Collision'
+            terminated = True
+        elif self.reward_profile and (started or ended or self.ego_teleported):
+            info['message'] = 'Ego Teleported'
+            terminated = True
+        elif missed_exit:
+            info['message'] = 'Missed Exit'
+            terminated = True
+        elif self.reward_profile and self.ego_id in self.traci.simulation.getEmergencyStoppingVehiclesIDList():
+            info['message'] = 'Emergency Stopping'
             terminated = True
         elif self.ego_id in self.traci.simulation.getArrivedIDList():
             info['message'] = 'Arrived'
@@ -505,6 +556,21 @@ class Merging(gym.Env):
             info['message'] = 'Emergency Stopping'
             terminated = True
         self.done = terminated or truncated
+        self.terminal_reason = info['message'] if self.done else ''
+        lane_completed = (self.ego_on_road and self.previous_road == self.lane_name
+                          and self.previous_lane_idx is not None and
+                          self.lane_idx != self.previous_lane_idx)
+        lane_change_delta = (self.lane_idx - self.previous_lane_idx
+                             if lane_completed else 0)
+        diagnostic_on_road = self.reward_profile is not None and self.ego_on_road
+        ego_distance = (float(self.traci.vehicle.getDistance(self.ego_id))
+                        if diagnostic_on_road else None)
+        ego_speed = (float(self.traci.vehicle.getSpeed(self.ego_id))
+                     if diagnostic_on_road else None)
+        ego_acceleration = (float(self.traci.vehicle.getAcceleration(self.ego_id))
+                            if diagnostic_on_road else None)
+        distance_to_d3 = (float(self.traci.vehicle.getDrivingDistance(self.ego_id, 'D3', 0.0))
+                          if diagnostic_on_road else None)
         if self.ego_on_road and info['message'] != 'Collision':
             self.observation = self._get_obs()
         else:
@@ -513,7 +579,7 @@ class Merging(gym.Env):
             self.observation_snapshot = None
         self.reward = self.getReward()
         potential_reward = 0.0
-        if self.task == exit_config.TASK_ID:
+        if self.task == exit_config.TASK_ID and self.reward_profile is None:
             next_potential = 0.0 if self.done else self._exit_potential()
             potential_reward = (exit_config.POTENTIAL_GAMMA * next_potential
                                 - self.potential_previous)
@@ -541,6 +607,13 @@ class Merging(gym.Env):
                      'potential': self.potential_previous,
                      'potential_reward': potential_reward,
                      'teleport_started': started, 'teleport_ended': ended,
+                     'road': self.lane_name, 'lane_index': self.lane_idx,
+                     'lane_change_completed': bool(lane_completed),
+                     'lane_change_delta': lane_change_delta,
+                     'command_direction': self.command_direction,
+                     'ego_distance': ego_distance, 'ego_speed': ego_speed,
+                     'ego_acceleration': ego_acceleration,
+                     'distance_to_d3': distance_to_d3,
                      'is_success': info['message'] == 'Arrived' and not self.ego_teleported})
         return self.observation, float(self.reward), terminated, truncated, info
 

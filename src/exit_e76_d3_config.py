@@ -7,6 +7,13 @@ DEPART_LANE = 'random'
 POTENTIAL_BETA = 10.0
 POTENTIAL_GAMMA = 0.99
 REWARD_PROFILE = 'no_lane_command_penalty_v1'
+ABLATION_PROFILES = {
+    'A0': {'lane_command': -0.5, 'progress_per_meter': 0.15},
+    'A1': {'lane_command': 0.0, 'progress_per_meter': 0.15},
+    'A2': {'lane_command': -0.5, 'progress_per_meter': 0.0375},
+    'A3': {'lane_command': 0.0, 'progress_per_meter': 0.0375},
+}
+ABLATION_PHASE = 'basic_reward_200k'
 DISTANCE_SCALE_EDGES = ('E76', 'E77', 'D3')
 
 WANDB_ENTITY = 'arlikache-anhui-university'
@@ -17,6 +24,8 @@ PHASES = {
                    'checkpoint_freq': 10_000},
     'easy_1m': {'scenario': 'easy', 'total_timesteps': 1_000_000,
                 'checkpoint_freq': 250_000},
+    ABLATION_PHASE: {'scenario': 'easy', 'total_timesteps': 200_000,
+                     'checkpoint_freq': 50_000},
 }
 
 
