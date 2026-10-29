@@ -603,7 +603,7 @@ fixed-action SUMO smoke test pass:
 
 ```bash
 python3 -m unittest discover -s tests -q
-python3 -B -m src.basic_reward_ablation --stage all
+python3 -B -m src.basic_reward_ablation --stage all --device cuda
 ```
 
 The runner refuses to overwrite an incomplete run. Recovery from a saved
@@ -612,6 +612,9 @@ continuation starts a fresh SUMO episode and is not bitwise identical to an
 uninterrupted 200,000-step run. Outputs are ignored by Git. The existing
 `easy_pilot` and `easy_1m` profile retains its previous potential reward and
 checkpoint contract.
+The full matrix must run in an isolated remote checkout. Local runs are limited
+to short verification; use `--device cpu` only for such checks. Verify the
+remote SUMO action smoke test and paired trajectories before starting training.
 
 Running the two independent training processes at once lets each policy learn
 and finish at its own pace. For these separate models, a simultaneous start

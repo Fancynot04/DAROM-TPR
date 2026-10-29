@@ -82,7 +82,7 @@ def write_manifest(records):
         writer.writerows(rows)
 
 
-def train_all():
+def train_all(device):
     records = []
     for profile in PROFILES:
         for seed in SEEDS:
@@ -97,7 +97,7 @@ def train_all():
             directory.mkdir(parents=True)
             command = [sys.executable, '-B', 'train_sac_delay.py', '--exit_phase',
                        cfg.ABLATION_PHASE, '--reward_profile', profile,
-                       '--seed', str(seed), '--wandb_mode', 'disabled', '--device', 'cpu']
+                       '--seed', str(seed), '--wandb_mode', 'disabled', '--device', device]
             with (directory / 'train.log').open('x') as log:
                 subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                                check=True)
@@ -106,7 +106,7 @@ def train_all():
     return records
 
 
-def evaluate_all():
+def evaluate_all(device):
     for profile in PROFILES:
         for seed in SEEDS:
             verified_model(profile, seed)
@@ -124,7 +124,7 @@ def evaluate_all():
                        str(model_path(profile, seed)), '--task', cfg.TASK_ID,
                        '--reward-profile', profile, '--scenario', 'easy',
                        '--delay-mode', 'uniform', '--no-safety', '--episodes', '50',
-                       '--seed', '200001', '--device', 'cpu', '--output', str(report)]
+                       '--seed', '200001', '--device', device, '--output', str(report)]
             with (directory / 'evaluation.log').open('x') as log:
                 subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                                check=True)
@@ -193,11 +193,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stage', choices=('train', 'evaluate', 'summarize', 'all'),
                         default='all')
+    parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
     args = parser.parse_args()
     if args.stage in ('train', 'all'):
-        train_all()
+        train_all(args.device)
     if args.stage in ('evaluate', 'all'):
-        evaluate_all()
+        evaluate_all(args.device)
     if args.stage in ('summarize', 'all'):
         summarize()
 
