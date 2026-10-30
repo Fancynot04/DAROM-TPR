@@ -616,6 +616,30 @@ The full matrix must run in an isolated remote checkout. Local runs are limited
 to short verification; use `--device cpu` only for such checks. Verify the
 remote SUMO action smoke test and paired trajectories before starting training.
 
+#### A1 single-component ablation (B1–B3)
+
+B1, B2 and B3 each retain the A1 configuration and respectively set only
+`behind_gap`, `action_change` or `stage` to zero. B3 still processes the
+first D3 entry event at its original priority; `stage_event_processed` records
+that event while `stage_reward_paid` remains false. Arrival reward and all
+terminal rules are unchanged. Each group trains from scratch with seeds 42 and
+43 for 200,000 steps and evaluates each final checkpoint on the same 50 seeds
+200001–200050. The six runs use the ignored
+`models_experiments/a1_component_ablation/` directory.
+
+After verification and explicit authorization, run on the remote server:
+
+```bash
+python -B -m src.component_reward_ablation --stage all --device cuda \
+    --baseline-dir /home/cyl/project/DAROM-TPR-basic-reward-ablation/source/models_experiments/basic_reward_ablation
+```
+
+The runner verifies both A1 checkpoint hashes, training metadata and evaluation
+seeds before training. Comparison CSVs include A1 and B1–B3 by training seed;
+group standard deviations use the two independent training seeds. Remote
+testing and a CUDA smoke test precede formal training. The original A1 models
+and reports remain read-only.
+
 Running the two independent training processes at once lets each policy learn
 and finish at its own pace. For these separate models, a simultaneous start
 and joint final report are experiment scheduling, while independent starts

@@ -13,6 +13,12 @@ ABLATION_PROFILES = {
     'A2': {'lane_command': -0.5, 'progress_per_meter': 0.0375},
     'A3': {'lane_command': 0.0, 'progress_per_meter': 0.0375},
 }
+COMPONENT_PROFILES = {
+    'B1': {'lane_command': 0.0, 'progress_per_meter': 0.15, 'removed': 'behind_gap'},
+    'B2': {'lane_command': 0.0, 'progress_per_meter': 0.15, 'removed': 'action_change'},
+    'B3': {'lane_command': 0.0, 'progress_per_meter': 0.15, 'removed': 'stage'},
+}
+ALL_REWARD_PROFILES = {**ABLATION_PROFILES, **COMPONENT_PROFILES}
 ABLATION_PHASE = 'basic_reward_200k'
 DISTANCE_SCALE_EDGES = ('E76', 'E77', 'D3')
 

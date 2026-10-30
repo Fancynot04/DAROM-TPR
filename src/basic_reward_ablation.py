@@ -19,6 +19,7 @@ OUTPUT = ROOT / 'models_experiments' / 'basic_reward_ablation'
 PROFILES = tuple(cfg.ABLATION_PROFILES)
 SEEDS = (42, 43)
 EVAL_SEEDS = list(range(200001, 200051))
+SOURCE_BRANCH_SHA = '8c2eb705ef12f97edd3d46c58d54518b42eac4ce'
 
 
 def sha256(path):
@@ -67,7 +68,7 @@ def write_manifest(records):
     OUTPUT.mkdir(parents=True, exist_ok=True)
     path = OUTPUT / 'experiment_manifest.json'
     with path.open('w') as stream:
-        json.dump({'source_branch_sha': '8c2eb705ef12f97edd3d46c58d54518b42eac4ce',
+        json.dump({'source_branch_sha': SOURCE_BRANCH_SHA,
                    'experiment_sha': source_sha(), 'runs': records}, stream, indent=2)
         stream.write('\n')
     rows = [{'profile': item['profile'], 'seed': item['seed'],

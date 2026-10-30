@@ -67,7 +67,7 @@ class Merging(gym.Env):
         self.scenario = scenario
         self.task = task
         if reward_profile is not None and (task != exit_config.TASK_ID or
-                reward_profile not in exit_config.ABLATION_PROFILES):
+                reward_profile not in exit_config.ALL_REWARD_PROFILES):
             raise ValueError(f'Unsupported reward profile: {reward_profile!r}')
         self.reward_profile = reward_profile
         self.origin, self.destination, self.stage_name = ANTWERP_TASKS[task]
@@ -283,13 +283,15 @@ class Merging(gym.Env):
         if self.teleport_transition or not self.ego_on_road:
             distance_traveled = 0.0
         # print(distance_traveled)
-        profile = (exit_config.ABLATION_PROFILES[self.reward_profile]
+        profile = (exit_config.ALL_REWARD_PROFILES[self.reward_profile]
                    if self.reward_profile else None)
         r = -0.30
         base_penalty = -0.30
 
         jerk = np.abs(self.parsed_action[0] - self.last_acc)
         jerk_penalty = 1.5 * jerk
+        if profile and profile.get('removed') == 'action_change':
+            jerk_penalty = 0.0
         r -= jerk_penalty
         # r = 0
         try:
@@ -308,6 +310,8 @@ class Merging(gym.Env):
             # Use tanh penalty for behind; use distance to behind vehicle
             behind_dist = abs(self._behind_state[0])
             penalty_behind = 10 * np.tanh(1.0 / (behind_dist + 1e-3))  # strong penalty for small gaps, saturates at 10
+            if profile and profile.get('removed') == 'behind_gap':
+                penalty_behind = 0.0
             r -= penalty_behind
 
         if not is_safe[1]:
@@ -356,9 +360,9 @@ class Merging(gym.Env):
             emergency_stopping_penalty = 1000
             r -= emergency_stopping_penalty
         elif self.stage_reached and not self.given_merge_reward and not self.ego_teleported:
-            print(f"{self.stage_name} reward given.")
+            print(f"{self.stage_name} stage reached.")
             self.given_merge_reward = True
-            merge_reward = 500
+            merge_reward = 0 if profile and profile.get('removed') == 'stage' else 500
             r += merge_reward
         elif not profile and self.counter >= maxSteps:
             print("Max Steps")
@@ -598,7 +602,8 @@ class Merging(gym.Env):
                      'reward_components': self.reward_components.copy(),
                      'stage_reached': bool(self.stage_reached), 'stage_name': self.stage_name,
                      'stage_reward': self.last_stage_reward,
-                     'stage_reward_paid': bool(self.given_merge_reward),
+                     'stage_reward_paid': bool(self.given_merge_reward and self.reward_profile != 'B3'),
+                     'stage_event_processed': bool(self.given_merge_reward),
                      'ego_teleported': bool(self.ego_teleported),
                      'ego_teleporting': bool(self.ego_teleporting),
                      'ego_on_road': bool(self.ego_on_road),

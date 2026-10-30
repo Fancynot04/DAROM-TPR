@@ -58,7 +58,7 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
     if task == exit_config.TASK_ID and getattr(model, 'exit_reward_profile', None) != expected_profile:
         raise ValueError('Checkpoint E76-to-D3 reward profile does not match')
     if reward_profile:
-        if reward_profile not in exit_config.ABLATION_PROFILES:
+        if reward_profile not in exit_config.ALL_REWARD_PROFILES:
             raise ValueError('Unknown reward profile')
         cfg = getattr(model, 'exit_training_config', None)
         expected = {'seed': (42, 43), 'total_timesteps': 200_000,
@@ -250,7 +250,7 @@ def parse_args(argv=None):
     parser.add_argument('checkpoint', help='Antwerp SAC checkpoint (.zip)')
     parser.add_argument('--scenario', choices=('easy', 'medium', 'hard'), default='medium')
     parser.add_argument('--task', choices=tuple(ANTWERP_TASKS), default='legacy_o3_d1')
-    parser.add_argument('--reward-profile', choices=tuple(exit_config.ABLATION_PROFILES),
+    parser.add_argument('--reward-profile', choices=tuple(exit_config.ALL_REWARD_PROFILES),
                         default=None)
     parser.add_argument('--delay-mode', choices=('uniform', 'exponential', 'triangular', 'bursty', 'bimodal'), default='uniform')
     parser.add_argument('--episodes', type=int, default=51)

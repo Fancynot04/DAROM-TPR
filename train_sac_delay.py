@@ -217,7 +217,7 @@ def parse_args():
                         help='Single-ego task; legacy default preserves existing O3-to-D1 runs')
     parser.add_argument('--exit_phase', choices=tuple(exit_config.PHASES), default=None,
                         help='Dedicated E76-to-D3 Easy pilot or Easy 1M configuration')
-    parser.add_argument('--reward_profile', choices=tuple(exit_config.ABLATION_PROFILES),
+    parser.add_argument('--reward_profile', choices=tuple(exit_config.ALL_REWARD_PROFILES),
                         default=None)
     parser.add_argument('--safety', dest='use_safety', action='store_true')
     parser.add_argument('--save_dir', type=str, default='models_experiments')
@@ -260,11 +260,13 @@ def parse_args():
             args.device = 'cpu' if ablation_phase else 'cuda'
         if args.torch_threads is None:
             args.torch_threads = 2
+        output_family = ('a1_component_ablation' if args.reward_profile in exit_config.COMPONENT_PROFILES
+                         else 'basic_reward_ablation')
         if args.log_dir == 'runs':
-            args.log_dir = (f'models_experiments/basic_reward_ablation/{args.reward_profile}_seed{args.seed}/tensorboard'
+            args.log_dir = (f'models_experiments/{output_family}/{args.reward_profile}_seed{args.seed}/tensorboard'
                             if ablation_phase else f'tmp/ai/e76-d3/{args.exit_phase}/tensorboard')
         if args.save_dir == 'models_experiments':
-            args.save_dir = (f'models_experiments/basic_reward_ablation/{args.reward_profile}_seed{args.seed}'
+            args.save_dir = (f'models_experiments/{output_family}/{args.reward_profile}_seed{args.seed}'
                              if ablation_phase else 'models_experiments/e76-d3')
         if args.run_name is None:
             args.run_name = (f'{args.reward_profile}_seed{args.seed}' if ablation_phase else
