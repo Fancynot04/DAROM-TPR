@@ -108,7 +108,26 @@ def route_urgency(network: RouteNetwork, route, edge_index, lane_index,
     if edge_index == len(route) - 1:
         return {'status': 'at_destination', 'urgency': 0.0,
                 'minimum_lane_changes': 0, 'selected_lane_changes': 0,
+                'zero_change_route_exists': True,
+                'all_route_connections_zero_change': True,
+                'next_connection_lanes': [],
                 'bottleneck_edge': None, 'plan': []}
+
+    @lru_cache(maxsize=None)
+    def all_connections_reach_destination(index, lane):
+        """All route-following connectors work if no more lane changes occur."""
+        if index == len(route) - 1:
+            return True
+        next_lanes = [target for target, _ in network.connections.get(
+            (route[index], route[index + 1], lane), ())
+            if target in network.lanes[route[index + 1]]]
+        return bool(next_lanes) and all(
+            all_connections_reach_destination(index + 1, target)
+            for target in next_lanes)
+
+    next_connection_lanes = sorted({target for target, _ in network.connections.get(
+        (route[edge_index], route[edge_index + 1], lane_index), ())
+        if target in network.lanes[route[edge_index + 1]]})
 
     # One best peak-load path per lane is sufficient for the urgency minimum.
     # A second DP tracks the fewest changes independently of that path.
@@ -136,6 +155,9 @@ def route_urgency(network: RouteNetwork, route, edge_index, lane_index,
         if not following:
             return {'status': 'unreachable', 'urgency': None,
                     'minimum_lane_changes': None, 'selected_lane_changes': None,
+                    'zero_change_route_exists': None,
+                    'all_route_connections_zero_change': None,
+                    'next_connection_lanes': next_connection_lanes,
                     'bottleneck_edge': None, 'plan': []}
         states, fewest = following, following_fewest
 
@@ -144,6 +166,10 @@ def route_urgency(network: RouteNetwork, route, edge_index, lane_index,
     return {'status': 'ok', 'urgency': peak,
             'minimum_lane_changes': min(fewest.values()),
             'selected_lane_changes': total_changes,
+            'zero_change_route_exists': min(fewest.values()) == 0,
+            'all_route_connections_zero_change': all_connections_reach_destination(
+                edge_index, lane_index),
+            'next_connection_lanes': next_connection_lanes,
             'bottleneck_edge': bottleneck['edge'] if peak > 0 else None,
             'plan': list(plan)}
 
@@ -158,6 +184,7 @@ def observe_route_urgency(base, network: RouteNetwork, lane_change_edges,
     route = tuple(vehicle.getRoute(ego))
     road = vehicle.getRoadID(ego)
     lane_id = vehicle.getLaneID(ego)
+    physical_lane_index = int(vehicle.getLaneIndex(ego))
     route_index = int(vehicle.getRouteIndex(ego))
     connector = road.startswith(':')
     if connector:
@@ -188,20 +215,32 @@ def observe_route_urgency(base, network: RouteNetwork, lane_change_edges,
                 return {'status': 'off_route', 'urgency': None,
                         'pending': False, 'lane_id': lane_id}
             edge_index = matches[0]
-        lane_index = int(vehicle.getLaneIndex(ego))
+        lane_index = physical_lane_index
         position = float(vehicle.getLanePosition(ego))
     lateral_speed = abs(float(vehicle.getLateralSpeed(ego)))
     clearance = ((base.traci.lane.getWidth(lane_id) - vehicle.getWidth(ego)) / 2.0)
     settled = (clearance >= 0
                and abs(float(vehicle.getLateralLanePosition(ego))) <= clearance + 0.001
                and lateral_speed <= 0.05)
-    pending = not settled or getattr(base, 'exit_maneuver', None) is not None
+    lateral_unsettled = not settled
+    controller_pending = getattr(base, 'exit_maneuver', None) is not None
+    pending = lateral_unsettled or controller_pending
     result = route_urgency(network, route, edge_index, lane_index, position,
                            float(vehicle.getSpeed(ego)), float(vehicle.getLength(ego)),
                            lane_change_edges, lane_change_seconds=lane_change_seconds)
-    result.update(pending=pending, provisional=pending or connector,
-                  valid_for_threshold=(not pending and not connector
-                                       and result['status'] == 'ok'),
+    valid_for_threshold = (not pending and not connector
+                           and result['status'] == 'ok')
+    result.update(pending=pending, lateral_unsettled=lateral_unsettled,
+                  controller_pending=controller_pending,
+                  provisional=pending or connector,
+                  valid_for_threshold=valid_for_threshold,
+                  settled_minimum_lane_changes=(result['minimum_lane_changes']
+                                                if valid_for_threshold else None),
+                  settled_urgency=(result['urgency'] if valid_for_threshold else None),
                   road=road, lane_id=lane_id, projected_edge=route[edge_index],
-                  projected_lane=lane_index, speed_mps=float(vehicle.getSpeed(ego)))
+                  physical_lane_index=physical_lane_index,
+                  projected_lane=lane_index,
+                  planning_lane_source=('connector_via_projection' if connector
+                                        else 'physical_lane'),
+                  speed_mps=float(vehicle.getSpeed(ego)))
     return result

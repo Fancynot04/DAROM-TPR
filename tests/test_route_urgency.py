@@ -72,6 +72,18 @@ class RouteUrgencyTests(unittest.TestCase):
         self.assertEqual(result['selected_lane_changes'],
                          sum(segment['lane_changes'] for segment in result['plan']))
 
+    def test_zero_changes_means_a_route_exists_not_every_connector_works(self):
+        before_junction = self.estimate(('E76', 'E77', 'D3'), 0)
+        self.assertEqual(before_junction['minimum_lane_changes'], 0)
+        self.assertTrue(before_junction['zero_change_route_exists'])
+        self.assertEqual(before_junction['next_connection_lanes'], [0, 1])
+        self.assertFalse(before_junction['all_route_connections_zero_change'])
+        correct_e77_lane = self.estimate(('E77', 'D3'), 0)
+        wrong_e77_lane = self.estimate(('E77', 'D3'), 1)
+        self.assertTrue(correct_e77_lane['all_route_connections_zero_change'])
+        self.assertFalse(wrong_e77_lane['zero_change_route_exists'])
+        self.assertEqual(wrong_e77_lane['minimum_lane_changes'], 1)
+
     def test_e77_distance_and_speed_change_urgency_without_nan(self):
         route = ('E77', 'D3')
         far = self.estimate(route, 2)
@@ -98,6 +110,7 @@ class RouteUrgencyTests(unittest.TestCase):
         vehicle.getRoadID.return_value = ':J105_0'
         vehicle.getLaneID.return_value = ':J105_0_2'
         vehicle.getRouteIndex.return_value = 0
+        vehicle.getLaneIndex.return_value = 2
         vehicle.getLateralSpeed.return_value = 0.0
         vehicle.getLateralLanePosition.return_value = 0.0
         vehicle.getWidth.return_value = 1.8
@@ -114,6 +127,37 @@ class RouteUrgencyTests(unittest.TestCase):
         self.assertEqual(result['minimum_lane_changes'], 2)
         self.assertTrue(result['provisional'])
         self.assertFalse(result['valid_for_threshold'])
+        self.assertEqual(result['physical_lane_index'], 2)
+        self.assertEqual(result['planning_lane_source'], 'connector_via_projection')
+        self.assertIsNone(result['settled_minimum_lane_changes'])
+
+    def test_unsettled_physical_lane_does_not_produce_settled_n(self):
+        vehicle = Mock()
+        vehicle.getRoute.return_value = ('E77', 'D3')
+        vehicle.getRoadID.return_value = 'E77'
+        vehicle.getLaneID.return_value = 'E77_0'
+        vehicle.getRouteIndex.return_value = 0
+        vehicle.getLaneIndex.return_value = 0
+        vehicle.getLanePosition.return_value = 20.0
+        vehicle.getLateralSpeed.return_value = 1.0
+        vehicle.getLateralLanePosition.return_value = 0.0
+        vehicle.getWidth.return_value = 1.8
+        vehicle.getLength.return_value = 4.5
+        vehicle.getSpeed.return_value = 13.89
+        lane = Mock()
+        lane.getWidth.return_value = 3.2
+        base = SimpleNamespace(ego_on_road=True, ego_id='ego',
+                               traci=SimpleNamespace(vehicle=vehicle, lane=lane),
+                               exit_maneuver=None)
+        result = observe_route_urgency(base, self.network, LANE_CHANGE_EDGES)
+        self.assertEqual(result['physical_lane_index'], 0)
+        self.assertEqual(result['projected_lane'], 0)
+        self.assertEqual(result['planning_lane_source'], 'physical_lane')
+        self.assertEqual(result['minimum_lane_changes'], 0)
+        self.assertTrue(result['pending'])
+        self.assertTrue(result['lateral_unsettled'])
+        self.assertIsNone(result['settled_minimum_lane_changes'])
+        self.assertIsNone(result['settled_urgency'])
 
     def test_invalid_inputs_do_not_silently_become_safe(self):
         with self.assertRaises(ValueError):

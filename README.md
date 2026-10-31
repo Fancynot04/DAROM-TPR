@@ -2644,6 +2644,19 @@ connection graph, remaining changeable-edge distance along the selected plan,
 estimated usable distance and urgency, lateral motion, actions, actual
 within-edge lane transitions and terminal events.
 
+`minimum_lane_changes == 0` is an **existence** statement about the route
+graph, not a prediction that SUMO will take a particular connector or that the
+vehicle will arrive. In this network, `E76_0` can connect to either `E77_0`
+or `E77_1`, while only `E77_0` connects directly to `D3`. The observer also
+reports `next_connection_lanes` and `all_route_connections_zero_change` to
+keep these meanings separate. `physical_lane_index` is the lane reported by
+TraCI; `projected_lane` on an internal connector comes from its `via` mapping.
+No future target lane is inferred from an action command. Raw counts and
+urgency remain visible during lateral movement, but `settled_minimum_lane_changes`
+and `settled_urgency` are null until the vehicle is settled on an ordinary
+edge. A later stateful reward must retain its last settled value while pending
+instead of interpreting null as zero.
+
 Urgency is the minimum achievable peak required/available lane-change time
 ratio over valid route plans. Defaults are 4 seconds per lane change, a speed
 floor of 70% of the limit and a 5 m end buffer plus vehicle length. Traffic
