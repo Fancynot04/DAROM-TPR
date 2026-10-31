@@ -2634,6 +2634,27 @@ If you use this code, please cite:
 }
 ```
 
+### Frozen B3 route diagnostics
+
+`python -B -m src.b3_route_diagnostics --device cuda` replays both existing
+B3 final checkpoints on their original 50 seeds each (100 episodes, no training).
+Step traces are gzip JSONL in the ignored `tmp/ai/b3-route-diagnostics/`.
+The diagnostic records pre-action minimum lane-change count from the lane
+connection graph, remaining changeable-edge distance along the selected plan,
+estimated usable distance and urgency, lateral motion, actions, actual
+within-edge lane transitions and terminal events.
+
+Urgency is the minimum achievable peak required/available lane-change time
+ratio over valid route plans. Defaults are 4 seconds per lane change, a speed
+floor of 70% of the limit and a 5 m end buffer plus vehicle length. Traffic
+gaps are ignored; connector projections and unsettled lateral motion are
+marked provisional. The selected urgency-minimizing plan may use more changes
+than the minimum-count plan; both counts and the full plan are recorded.
+No diagnostic value affects actions, observations, rewards or SUMO control.
+Reset scene/version provenance and each episode's terminal outcome, length,
+return and reward components must match the original report, or the replay
+stops. Model and network hashes and estimator parameters are saved.
+
 ## Acknowledgements
 
 This work is supported by the National Science Foundation Award #2229885. Traffic demand and vehicle speed data are derived from the [NGSIM US Highway 101 dataset](https://www.fhwa.dot.gov/publications/research/operations/07030/).
