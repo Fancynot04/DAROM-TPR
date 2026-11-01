@@ -77,6 +77,20 @@ class C2NavigationRewardTests(unittest.TestCase):
         finally:
             env.close()
 
+    def test_real_reset_discards_prior_episode_demand(self):
+        env = self.make_base(C2Merging)
+        try:
+            _, first = env.reset(seed=42)
+            self.assertTrue(first['navigation_valid'])
+            env._navigation_n = 999
+            env.navigation_reward_total = -123.0
+            _, second = env.reset(seed=43)
+            self.assertEqual(env._navigation_n, second['navigation_n'])
+            self.assertLessEqual(second['navigation_n'], 5)
+            self.assertEqual(env.navigation_reward_total, 0.0)
+        finally:
+            env.close()
+
     def test_fixed_action_matches_b3_except_navigation(self):
         traces = []
         for env_type in (Merging, C2Merging):
