@@ -650,6 +650,26 @@ learner would be a separate algorithm decision. Concurrent runs need separate
 output names and enough compute and memory for two SUMO/SAC processes; the
 smoke runs above were sequential and do not benchmark concurrent throughput.
 
+#### B3 long training (seed 42 and 43)
+
+`--exit_phase b3_long_1m --reward_profile B3` runs one fresh 1,000,000-step
+training per seed. It retains the 200k B3 reward, observation, Easy traffic,
+SAC settings, uniform delay and safety-off protocol. The phase accepts seeds
+42 and 43, defaults to CUDA, and writes to separate ignored directories under
+`models_experiments/b3_long_1m/B3_seed<seed>/`. It never loads the existing
+200k model or Replay Buffer. The 200k, 500k and 1M milestones save both model
+and Replay Buffer; evaluation accepts these milestones with the original B3
+50-case deterministic protocol (traffic seeds 200001–200050). The original
+`basic_reward_200k` phase and its 50k/100k/200k checkpoint schedule remain
+unchanged.
+
+These two runs are planned in local exp archives `416a24` and `bec2d4`.
+Before remote launch, freeze the actual full commit and source snapshot, check
+available GPU and disk space, and verify the output directories are unused.
+Record actual start and finish evidence in the corresponding archives. Compare
+strict arrival and safety outcomes at all three milestones; training curves
+alone do not establish convergence.
+
 New Antwerp GRU runs default to `paper_raw`: the 93 state values, 20 two-value
 actions (newest first as emitted by `DelayWrapper`), and delay scalar reach the
 encoder without fixed scaling or action reversal. This matches the corrected

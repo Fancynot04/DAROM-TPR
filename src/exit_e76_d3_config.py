@@ -20,6 +20,7 @@ COMPONENT_PROFILES = {
 }
 ALL_REWARD_PROFILES = {**ABLATION_PROFILES, **COMPONENT_PROFILES}
 ABLATION_PHASE = 'basic_reward_200k'
+B3_LONG_PHASE = 'b3_long_1m'
 DISTANCE_SCALE_EDGES = ('E76', 'E77', 'D3')
 
 WANDB_ENTITY = 'arlikache-anhui-university'
@@ -32,6 +33,8 @@ PHASES = {
                 'checkpoint_freq': 250_000},
     ABLATION_PHASE: {'scenario': 'easy', 'total_timesteps': 200_000,
                      'checkpoint_freq': 50_000},
+    B3_LONG_PHASE: {'scenario': 'easy', 'total_timesteps': 1_000_000,
+                    'checkpoint_freq': 200_000},
 }
 
 
