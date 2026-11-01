@@ -64,7 +64,11 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
         if reward_profile not in exit_config.ALL_REWARD_PROFILES:
             raise ValueError('Unknown reward profile')
         cfg = getattr(model, 'exit_training_config', None)
-        expected = {'seed': (42, 43), 'total_timesteps': 200_000,
+        long_b3 = (reward_profile == 'B3' and isinstance(cfg, dict) and
+                   cfg.get('exit_phase') == exit_config.B3_LONG_PHASE)
+        expected_budget = 1_000_000 if long_b3 else 200_000
+        valid_steps = ((200_000, 500_000, 1_000_000) if long_b3 else (200_000,))
+        expected = {'seed': (42, 43), 'total_timesteps': expected_budget,
                     'task': exit_config.TASK_ID, 'scenario': 'easy',
                     'delay_mode': 'uniform', 'max_delay': 20,
                     'use_safety': False, 'encoder_mode': 'GRU',
@@ -74,8 +78,8 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
                 cfg.get(key) not in value if isinstance(value, tuple) else cfg.get(key) != value
                 for key, value in expected.items()):
             raise ValueError('Checkpoint basic reward training configuration does not match')
-        if getattr(model, 'num_timesteps', None) != 200_000:
-            raise ValueError('Checkpoint has not completed 200k steps')
+        if getattr(model, 'num_timesteps', None) not in valid_steps:
+            raise ValueError('Checkpoint is not an approved evaluation milestone')
         sac = cfg.get('sac', {})
         required_sac = {'learning_rate': 3e-5, 'batch_size': 512,
                         'buffer_size': 1_000_000, 'learning_starts': 100,

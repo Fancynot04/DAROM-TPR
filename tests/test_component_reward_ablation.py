@@ -8,7 +8,7 @@ import numpy as np
 
 from src import exit_e76_d3_config as cfg
 from src.merging import Merging
-from train_sac_delay import parse_args
+from train_sac_delay import ExitMilestoneCallback, parse_args
 from evaluate_sac_delay import validate_checkpoint_setup
 
 
@@ -93,6 +93,55 @@ class ComponentRewardTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_checkpoint_setup(model, 'full', False, cfg.TASK_ID, 'A1')
         self.assertEqual(len(paths), 6)
+
+    def test_b3_long_phase_budget_and_paths_are_isolated(self):
+        paths = set()
+        for seed in (42, 43):
+            with patch.object(sys, 'argv', ['train_sac_delay.py', '--exit_phase',
+                                           cfg.B3_LONG_PHASE, '--reward_profile', 'B3',
+                                           '--seed', str(seed), '--wandb_mode', 'disabled']):
+                args = parse_args()
+            self.assertEqual(args.total_timesteps, 1_000_000)
+            self.assertEqual(args.run_name, f'B3_seed{seed}_1m')
+            self.assertEqual(args.device, 'cuda')
+            self.assertEqual(args.save_dir,
+                             f'models_experiments/b3_long_1m/B3_seed{seed}')
+            self.assertTrue(args.save_replay_buffer)
+            self.assertIsNone(args.load_path)
+            self.assertIsNone(args.replay_buffer_path)
+            paths.add(args.save_dir)
+        self.assertEqual(len(paths), 2)
+        callback = ExitMilestoneCallback('unused', 'B3_seed42_1m',
+                                         (200_000, 500_000, 1_000_000))
+        self.assertEqual(callback.milestones, {200_000, 500_000, 1_000_000})
+
+    def test_b3_long_checkpoint_validation_rejects_wrong_budget(self):
+        model = Mock()
+        model.antwerp_env_version = 2
+        model.antwerp_task = cfg.TASK_ID
+        model.ablation = 'full'
+        model.exit_potential_beta = 0.0
+        model.exit_reward_profile = 'B3'
+        model.observation_space.shape = (134,)
+        model.exit_training_config = {
+            'seed': 42, 'total_timesteps': 1_000_000,
+            'exit_phase': cfg.B3_LONG_PHASE, 'task': cfg.TASK_ID,
+            'scenario': 'easy', 'delay_mode': 'uniform', 'max_delay': 20,
+            'use_safety': False, 'encoder_mode': 'GRU',
+            'gru_input_mode': 'paper_raw', 'ablation': 'full',
+            'reward_profile': 'B3', 'potential_beta': 0.0,
+            'sac': {'learning_rate': 3e-5, 'batch_size': 512,
+                    'buffer_size': 1_000_000, 'learning_starts': 100, 'gamma': 0.99}}
+        for steps in (200_000, 500_000, 1_000_000):
+            model.num_timesteps = steps
+            validate_checkpoint_setup(model, 'full', False, cfg.TASK_ID, 'B3')
+        model.num_timesteps = 750_000
+        with self.assertRaises(ValueError):
+            validate_checkpoint_setup(model, 'full', False, cfg.TASK_ID, 'B3')
+        model.num_timesteps = 1_000_000
+        model.exit_training_config['reward_profile'] = 'A1'
+        with self.assertRaises(ValueError):
+            validate_checkpoint_setup(model, 'full', False, cfg.TASK_ID, 'B3')
 
     def test_same_sumo_actions_produce_same_trajectories(self):
         traces = {}

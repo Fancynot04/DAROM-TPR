@@ -675,6 +675,11 @@ the trace records navigation validity, cached demand, actual lane changes and
 distance to D3 for each step. The original B3 evaluator and checkpoints do
 not use the C2 switch.
 
+For the matched long-budget comparison, `--exit_phase b3_long_1m
+--reward_profile B3 --c2-nav-reward` trains C2 from scratch for 1M steps and
+stores separate milestones at 200k, 500k and 1M under `c2_long_1m`. The
+navigation reward and the policy inputs remain the same as C2 200k.
+
 ```bash
 python -B train_sac_delay.py --exit_phase basic_reward_200k \
     --reward_profile B3 --c2-nav-reward --seed 42 --device cuda --wandb_mode disabled
@@ -689,6 +694,26 @@ Run seed 43 with the same command and its own output directory only after
 the experiment plan, resource estimate and risks have been approved. The
 fixed B3 trajectory audit and any C2 results must keep training seeds
 separate from the 50 evaluation traffic seeds.
+
+#### B3 long training (seed 42 and 43)
+
+`--exit_phase b3_long_1m --reward_profile B3` runs one fresh 1,000,000-step
+training per seed. It retains the 200k B3 reward, observation, Easy traffic,
+SAC settings, uniform delay and safety-off protocol. The phase accepts seeds
+42 and 43, defaults to CUDA, and writes to separate ignored directories under
+`models_experiments/b3_long_1m/B3_seed<seed>/`. It never loads the existing
+200k model or Replay Buffer. The 200k, 500k and 1M milestones save both model
+and Replay Buffer; evaluation accepts these milestones with the original B3
+50-case deterministic protocol (traffic seeds 200001–200050). The original
+`basic_reward_200k` phase and its 50k/100k/200k checkpoint schedule remain
+unchanged.
+
+These two runs are planned in local exp archives `416a24` and `bec2d4`.
+Before remote launch, freeze the actual full commit and source snapshot, check
+available GPU and disk space, and verify the output directories are unused.
+Record actual start and finish evidence in the corresponding archives. Compare
+strict arrival and safety outcomes at all three milestones; training curves
+alone do not establish convergence.
 
 New Antwerp GRU runs default to `paper_raw`: the 93 state values, 20 two-value
 actions (newest first as emitted by `DelayWrapper`), and delay scalar reach the

@@ -164,6 +164,18 @@ class C2NavigationRewardTests(unittest.TestCase):
         model.c2_navigation_contract = json.loads(json.dumps(navigation_contract()))
         validate_checkpoint_setup(model, 'full', False, 'exit_e76_d3', 'B3',
                                   c2_nav_reward=True)
+        for seed in (42, 43):
+            with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', 'b3_long_1m',
+                                    '--reward_profile', 'B3', '--c2-nav-reward',
+                                    '--seed', str(seed), '--wandb_mode', 'disabled']):
+                long_args = parse_args()
+            self.assertEqual(long_args.total_timesteps, 1_000_000)
+            self.assertEqual(long_args.save_dir, f'models_experiments/c2_long_1m/C2_seed{seed}')
+        model.exit_training_config.update(exit_phase='b3_long_1m', total_timesteps=1_000_000)
+        for step in (200_000, 500_000, 1_000_000):
+            model.num_timesteps = step
+            validate_checkpoint_setup(model, 'full', False, 'exit_e76_d3', 'B3',
+                                      c2_nav_reward=True)
         with self.assertRaises(ValueError):
             validate_checkpoint_setup(model, 'full', False, 'exit_e76_d3', 'B3')
         model.c2_navigation_contract['penalty_per_change'] = 0.02

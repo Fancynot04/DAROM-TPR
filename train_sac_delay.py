@@ -159,15 +159,16 @@ class StepLoggingCallback(EpisodeRewardCallback):
 
 
 class ExitMilestoneCallback(BaseCallback):
-    """Save the three prescribed model and Replay milestones only."""
+    """Save the prescribed model and Replay milestones only."""
 
-    def __init__(self, directory, run_name):
+    def __init__(self, directory, run_name, milestones=(50_000, 100_000, 200_000)):
         super().__init__()
         self.directory = directory
         self.run_name = run_name
+        self.milestones = frozenset(milestones)
 
     def _on_step(self):
-        if self.num_timesteps in (50_000, 100_000, 200_000):
+        if self.num_timesteps in self.milestones:
             os.makedirs(self.directory, exist_ok=True)
             stem = os.path.join(self.directory,
                                 f'{self.run_name}_{self.num_timesteps}_steps')
@@ -239,17 +240,21 @@ def parse_args():
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
-    if args.c2_nav_reward and (args.exit_phase != exit_config.ABLATION_PHASE
+    if args.c2_nav_reward and (args.exit_phase not in (exit_config.ABLATION_PHASE, exit_config.B3_LONG_PHASE)
                                or args.reward_profile != 'B3' or args.load_path
                                or args.replay_buffer_path or args.device not in ('auto', 'cuda')):
-        parser.error('C2 requires fresh B3 basic_reward_200k training on CUDA without a checkpoint')
+        parser.error('C2 requires fresh B3 reward training on CUDA without a checkpoint')
     if args.exit_phase:
         ablation_phase = args.exit_phase == exit_config.ABLATION_PHASE
-        if ablation_phase != (args.reward_profile is not None):
-            parser.error('The basic reward phase requires exactly one A0-A3 reward profile')
+        b3_long_phase = args.exit_phase == exit_config.B3_LONG_PHASE
+        reward_phase = ablation_phase or b3_long_phase
+        if reward_phase != (args.reward_profile is not None):
+            parser.error('The basic reward and B3 long phases require a reward profile')
+        if b3_long_phase and args.reward_profile != 'B3':
+            parser.error('The B3 long phase requires the B3 reward profile')
         if args.task not in ('legacy_o3_d1', exit_config.TASK_ID):
             parser.error('--exit_phase cannot be combined with another task')
-        if (args.seed not in ((42, 43) if ablation_phase else (42,))
+        if (args.seed not in ((42, 43) if reward_phase else (42,))
                 or args.radius != 50 or args.use_safety
                 or args.encoder_mode != 'GRU' or args.gru_input_mode != 'paper_raw'
                 or args.ablation != 'full' or args.delay_mode != 'uniform'):
@@ -271,21 +276,24 @@ def parse_args():
             args.device = 'cuda' if args.c2_nav_reward or not ablation_phase else 'cpu'
         if args.torch_threads is None:
             args.torch_threads = 2
-        output_family = ('c2_nav_reward' if args.c2_nav_reward else
+        output_family = ('c2_long_1m' if args.c2_nav_reward and b3_long_phase else
+                         'c2_nav_reward' if args.c2_nav_reward else
+                         'b3_long_1m' if b3_long_phase else
                          'a1_component_ablation' if args.reward_profile in exit_config.COMPONENT_PROFILES
                          else 'basic_reward_ablation')
-        run_label = f'C2_seed{args.seed}' if args.c2_nav_reward else f'{args.reward_profile}_seed{args.seed}'
+        output_run = f'C2_seed{args.seed}' if args.c2_nav_reward else f'{args.reward_profile}_seed{args.seed}'
         if args.log_dir == 'runs':
-            args.log_dir = (f'models_experiments/{output_family}/{run_label}/tensorboard'
-                            if ablation_phase else f'tmp/ai/e76-d3/{args.exit_phase}/tensorboard')
+            args.log_dir = (f'models_experiments/{output_family}/{output_run}/tensorboard'
+                            if reward_phase else f'tmp/ai/e76-d3/{args.exit_phase}/tensorboard')
         if args.save_dir == 'models_experiments':
-            args.save_dir = (f'models_experiments/{output_family}/{run_label}'
-                             if ablation_phase else 'models_experiments/e76-d3')
+            args.save_dir = (f'models_experiments/{output_family}/{output_run}'
+                             if reward_phase else 'models_experiments/e76-d3')
         if args.run_name is None:
-            args.run_name = (run_label if ablation_phase else
+            args.run_name = (f'{output_run}_1m' if b3_long_phase else
+                             output_run if ablation_phase else
                              f'e76-d3-{args.exit_phase}-{time.strftime("%Y%m%d-%H%M%S")}')
         if args.episode_log is None:
-            args.episode_log = (f'{args.save_dir}/episodes.jsonl' if ablation_phase else
+            args.episode_log = (f'{args.save_dir}/episodes.jsonl' if reward_phase else
                                 f'tmp/ai/e76-d3/{args.exit_phase}/{args.run_name}.jsonl')
     elif args.task == exit_config.TASK_ID:
         parser.error('Use --exit_phase for the E76-to-D3 task')
@@ -490,7 +498,10 @@ def main():
 
     # Create callbacks
     episode_callback = EpisodeRewardCallback(log_path=args.episode_log)
-    checkpoint_callback = (ExitMilestoneCallback(checkpoint_dir, args.run_name)
+    milestones = ((200_000, 500_000, 1_000_000)
+                  if args.exit_phase == exit_config.B3_LONG_PHASE else
+                  (50_000, 100_000, 200_000))
+    checkpoint_callback = (ExitMilestoneCallback(checkpoint_dir, args.run_name, milestones)
                            if args.reward_profile else CheckpointCallback(
                                save_freq=args.checkpoint_freq, save_path=checkpoint_dir,
                                name_prefix=args.run_name, verbose=2,
