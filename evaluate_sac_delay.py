@@ -3,6 +3,7 @@
 import argparse
 from collections import Counter
 import hashlib
+import gzip
 import json
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from stable_baselines3 import SAC
 
 from src.delay_encoder import DelayAwareGRUEncoder
 from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
+from src.c2_navigation_reward import C2Merging, navigation_contract
 from src import exit_e76_d3_config as exit_config
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
@@ -27,16 +29,17 @@ REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout
 
 
 def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1',
-             reward_profile=None):
-    env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
-                               reward_profile=reward_profile),
+             reward_profile=None, c2_nav_reward=False):
+    env_type = C2Merging if c2_nav_reward else Merging
+    env = DelayWrapper(env_type(seed=seed, scenario=scenario, task=task,
+                                reward_profile=reward_profile),
                        max_delay=20, mode='all', delay_mode=delay_mode,
                        seed=seed, ablation=ablation)
     return SafetyWrapper(env) if safety else env
 
 
 def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
-                              reward_profile=None):
+                              reward_profile=None, c2_nav_reward=False):
     """Validate policy compatibility; evaluation safety is an intervention.
 
     Training safety remains checkpoint provenance, not a restriction on which
@@ -81,6 +84,16 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
             raise ValueError('Checkpoint SAC configuration does not match')
         if getattr(model, 'observation_space', None) is None or model.observation_space.shape != (134,):
             raise ValueError('Checkpoint observation contract must be 134 dimensions')
+    if c2_nav_reward:
+        if task != exit_config.TASK_ID or reward_profile != 'B3':
+            raise ValueError('C2 evaluation requires the B3 E76-to-D3 task')
+        if (getattr(model, 'c2_navigation_contract', None) != navigation_contract()
+                or not getattr(model, 'exit_training_config', {}).get('c2_nav_reward')
+                or (getattr(model, 'policy_kwargs', {}) or {}).get('features_extractor_class')
+                is not DelayAwareGRUEncoder):
+            raise ValueError('C2 checkpoint navigation-reward contract does not match')
+    elif isinstance(getattr(model, 'c2_navigation_contract', None), dict):
+        raise ValueError('C2 checkpoint requires --c2-nav-reward')
     return {'training_safety': getattr(model, 'training_safety', None),
             'evaluation_safety': bool(safety)}
 
@@ -94,7 +107,8 @@ def checkpoint_gru_input_mode(model):
         'input_mode', 'antwerp_scaled_reversed')
 
 
-def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
+def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
+             c2_nav_reward=False, trace_sink=None):
     if episodes < 1:
         raise ValueError('episodes must be positive')
     counts = Counter()
@@ -107,6 +121,10 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
         reward_totals = Counter()
         lane_commands = toward_exit = completed_changes = reverse_changes = hard_brakes = 0
         first_toward_position = first_exit_lane_distance = entry_e77_lane = None
+        entry_e77_n = entry_e77_valid = first_stable_e77_n = None
+        last_required_change_distance = None
+        last_stable_n = reset_info.get('navigation_n') if c2_nav_reward else None
+        changed_since_positive = False
         speeds, accelerations, action_changes = [], [], []
         previous_command_acceleration = 0.0
         while True:
@@ -125,6 +143,40 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
                 first_toward_position = info.get('ego_distance')
             if info.get('road') == 'E77' and entry_e77_lane is None:
                 entry_e77_lane = info.get('lane_index')
+                if c2_nav_reward:
+                    entry_e77_n = info['navigation_n']
+                    entry_e77_valid = info['navigation_valid']
+            if c2_nav_reward:
+                if (info.get('road') == 'E77' and info['navigation_valid']
+                        and first_stable_e77_n is None):
+                    first_stable_e77_n = info['navigation_n']
+                if info.get('lane_change_completed') and last_stable_n is not None and last_stable_n > 0:
+                    changed_since_positive = True
+                if info['navigation_valid']:
+                    n = info['navigation_n']
+                    if (n == 0 and info['navigation_source'] == 'settled'
+                            and info.get('road') in ('E76', 'E77')
+                            and last_stable_n is not None and last_stable_n > 0):
+                        if changed_since_positive:
+                            last_required_change_distance = info.get('distance_to_d3')
+                        changed_since_positive = False
+                    last_stable_n = n
+                if trace_sink is not None:
+                    trace_sink.write(json.dumps({
+                        'evaluation_seed': seed + episode, 'step': steps,
+                        'road': info.get('road'), 'lane_index': info.get('lane_index'),
+                        'navigation_n': info['navigation_n'],
+                        'navigation_valid': info['navigation_valid'],
+                        'navigation_source': info['navigation_source'],
+                        'navigation_reward': info['reward_components']['navigation'],
+                        'navigation_reward_total': info['navigation_reward_total'],
+                        'lane_change_completed': info.get('lane_change_completed'),
+                        'lane_change_delta': info.get('lane_change_delta'),
+                        'distance_to_d3': info.get('distance_to_d3'),
+                        'ego_speed': info.get('ego_speed'),
+                        'terminated': terminated, 'truncated': truncated,
+                        'outcome': info.get('message'),
+                    }, allow_nan=False) + '\n')
             if (info.get('road') in ('E76', 'E77') and info.get('lane_index') == 0
                     and first_exit_lane_distance is None):
                 first_exit_lane_distance = info.get('distance_to_d3')
@@ -167,6 +219,12 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1'):
                                 'reverse_lane_changes': reverse_changes,
                                 'first_toward_position': first_toward_position,
                                 'entry_e77_lane': entry_e77_lane,
+                                **({'entry_e77_n': entry_e77_n,
+                                    'entry_e77_n_valid': entry_e77_valid,
+                                    'first_stable_e77_n': first_stable_e77_n,
+                                    'last_required_change_distance': last_required_change_distance,
+                                    'navigation_reward_total': info['navigation_reward_total']}
+                                   if c2_nav_reward else {}),
                                 'first_exit_lane_remaining_distance': first_exit_lane_distance,
                                 'mean_speed': float(np.mean(speeds)) if speeds else None,
                                 'mean_acceleration': float(np.mean(accelerations)) if accelerations else None,
@@ -213,20 +271,24 @@ def summarize_runs(runs, metrics=REPORT_METRICS):
 
 
 def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds,
-                  task='legacy_o3_d1', reward_profile=None):
+                  task='legacy_o3_d1', reward_profile=None,
+                  c2_nav_reward=False, trace_sink=None):
     """Repeat evaluation of ONE checkpoint; this is not training-seed variance."""
     validate_seed_ranges(episodes, seeds)
-    setup = validate_checkpoint_setup(model, ablation, safety, task, reward_profile)
+    setup = validate_checkpoint_setup(model, ablation, safety, task, reward_profile,
+                                      c2_nav_reward)
     if reward_profile and (scenario != 'easy' or delay_mode != 'uniform' or safety or
                            episodes != 50 or seeds != [200001]):
         raise ValueError('Basic reward evaluation requires Easy, uniform, safety off and seeds 200001-200050')
     runs = []
     for seed in seeds:
         env = make_env(seed, scenario, delay_mode, safety, ablation, task=task,
-                       reward_profile=reward_profile)
+                       reward_profile=reward_profile, c2_nav_reward=c2_nav_reward)
         try:
             runs.append({'seed': seed, 'episodes': episodes,
-                         **evaluate(model, env, episodes, seed, task=task)})
+                         **evaluate(model, env, episodes, seed, task=task,
+                                    c2_nav_reward=c2_nav_reward,
+                                    trace_sink=trace_sink)})
         finally:
             env.close()
     return {'protocol': 'antwerp-v2-evaluation-v1', 'scenario': scenario,
@@ -236,6 +298,12 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
             'antwerp_env_version': ANTWERP_ENV_VERSION,
             'training_seed': getattr(model, 'seed', None),
             'training_timesteps': getattr(model, 'num_timesteps', None),
+            **({'c2_navigation_contract': model.c2_navigation_contract,
+                'last_required_change_distance_definition':
+                    'Distance to D3 at last E76/E77 settled n>0 to n=0 transition '
+                    'with an actual completed lane change since the positive settled n; '
+                    'zero only means a route exists'}
+               if c2_nav_reward else {}),
             'deterministic': True, 'evaluation_seeds': list(seeds),
             'episodes_per_seed': episodes, 'total_episodes': episodes * len(seeds),
             'std_ddof': 1, 'ci_method': '1.96 * sample_std / sqrt(evaluation_runs)',
@@ -252,6 +320,8 @@ def parse_args(argv=None):
     parser.add_argument('--task', choices=tuple(ANTWERP_TASKS), default='legacy_o3_d1')
     parser.add_argument('--reward-profile', choices=tuple(exit_config.ALL_REWARD_PROFILES),
                         default=None)
+    parser.add_argument('--c2-nav-reward', action='store_true',
+                        help='Evaluate a C2 checkpoint with its route-topology reward')
     parser.add_argument('--delay-mode', choices=('uniform', 'exponential', 'triangular', 'bursty', 'bimodal'), default='uniform')
     parser.add_argument('--episodes', type=int, default=51)
     seed_options = parser.add_mutually_exclusive_group()
@@ -267,6 +337,8 @@ def parse_args(argv=None):
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--torch-threads', type=int, default=1)
     parser.add_argument('--output', type=Path, help='Save a new JSON report; never overwrite')
+    parser.add_argument('--trace-output', type=Path,
+                        help='Save a new C2 stepwise gzip JSONL trace; never overwrite')
     args = parser.parse_args(argv)
     args.seeds = args.seeds if args.seeds is not None else [args.seed]
     try:
@@ -277,6 +349,12 @@ def parse_args(argv=None):
         parser.error('--torch-threads must be positive')
     if args.output and args.output.exists():
         parser.error(f'Output already exists: {args.output}')
+    if args.c2_nav_reward and (args.task != exit_config.TASK_ID
+                               or args.reward_profile != 'B3'
+                               or args.output is None or args.trace_output is None):
+        parser.error('C2 evaluation requires B3 E76-to-D3 and both output paths')
+    if args.trace_output and (not args.c2_nav_reward or args.trace_output.exists()):
+        parser.error('--trace-output requires C2 and a new path')
     return args
 
 
@@ -288,9 +366,20 @@ def main():
         checkpoint = Path(str(checkpoint) + '.zip')
     checkpoint_hash = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
     model = SAC.load(checkpoint, device=args.device)
-    report = evaluate_runs(model, args.scenario, args.delay_mode, args.safety,
-                           args.ablation, args.episodes, args.seeds, task=args.task,
-                           reward_profile=args.reward_profile)
+    validate_checkpoint_setup(model, args.ablation, args.safety, args.task,
+                              args.reward_profile, args.c2_nav_reward)
+    if args.trace_output:
+        args.trace_output.parent.mkdir(parents=True, exist_ok=True)
+    trace_sink = gzip.open(args.trace_output, 'xt') if args.trace_output else None
+    try:
+        report = evaluate_runs(model, args.scenario, args.delay_mode, args.safety,
+                               args.ablation, args.episodes, args.seeds, task=args.task,
+                               reward_profile=args.reward_profile,
+                               c2_nav_reward=args.c2_nav_reward,
+                               trace_sink=trace_sink)
+    finally:
+        if trace_sink is not None:
+            trace_sink.close()
     report.update(checkpoint=str(checkpoint), checkpoint_sha256=checkpoint_hash,
                   device=args.device, torch_threads=args.torch_threads)
     print(f"{args.scenario} | {args.delay_mode} | task={args.task} | ablation={args.ablation} | "

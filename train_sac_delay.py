@@ -20,6 +20,7 @@ import wandb
 from wandb.integration.sb3 import WandbCallback
 
 from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
+from src.c2_navigation_reward import C2Merging, navigation_contract
 from src import exit_e76_d3_config as exit_config
 from src.wrapper import ABLATION_MODES, DelayWrapper
 
@@ -84,6 +85,8 @@ class EpisodeRewardCallback(BaseCallback):
             if not exit_task:
                 metrics['train/no_merge_timeout'] = int(outcome == 'Max Steps' and not merged)
                 metrics['train/merged_timeout'] = int(outcome == 'Max Steps' and merged)
+            if 'navigation_reward_total' in info:
+                metrics['train/episode_navigation_reward'] = float(info['navigation_reward_total'])
             if info.get('ego_start_lane') is not None:
                 start_lane = int(info['ego_start_lane'])
                 metrics['env_steps'] = self.num_timesteps
@@ -183,10 +186,12 @@ def load_model(path: str, env: gym.Env) -> SAC:
     return SAC.load(path, env=env)
 
 def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
-             ablation='full', task='legacy_o3_d1', reward_profile=None):
+             ablation='full', task='legacy_o3_d1', reward_profile=None,
+             c2_nav_reward=False):
+    env_type = C2Merging if c2_nav_reward else Merging
     env = DelayWrapper(
-        Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
-                reward_profile=reward_profile),
+        env_type(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
+                 reward_profile=reward_profile),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation,
     )
@@ -219,6 +224,8 @@ def parse_args():
                         help='Dedicated E76-to-D3 Easy pilot or Easy 1M configuration')
     parser.add_argument('--reward_profile', choices=tuple(exit_config.ALL_REWARD_PROFILES),
                         default=None)
+    parser.add_argument('--c2-nav-reward', action='store_true',
+                        help='Add only the C2 route-topology reward to B3')
     parser.add_argument('--safety', dest='use_safety', action='store_true')
     parser.add_argument('--save_dir', type=str, default='models_experiments')
     parser.add_argument('--load_path', type=str, default=None)
@@ -232,6 +239,10 @@ def parse_args():
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
+    if args.c2_nav_reward and (args.exit_phase != exit_config.ABLATION_PHASE
+                               or args.reward_profile != 'B3' or args.load_path
+                               or args.replay_buffer_path or args.device not in ('auto', 'cuda')):
+        parser.error('C2 requires fresh B3 basic_reward_200k training on CUDA without a checkpoint')
     if args.exit_phase:
         ablation_phase = args.exit_phase == exit_config.ABLATION_PHASE
         if ablation_phase != (args.reward_profile is not None):
@@ -257,19 +268,21 @@ def parse_args():
         args.project = exit_config.WANDB_PROJECT
         args.entity = exit_config.WANDB_ENTITY
         if args.device == 'auto':
-            args.device = 'cpu' if ablation_phase else 'cuda'
+            args.device = 'cuda' if args.c2_nav_reward or not ablation_phase else 'cpu'
         if args.torch_threads is None:
             args.torch_threads = 2
-        output_family = ('a1_component_ablation' if args.reward_profile in exit_config.COMPONENT_PROFILES
+        output_family = ('c2_nav_reward' if args.c2_nav_reward else
+                         'a1_component_ablation' if args.reward_profile in exit_config.COMPONENT_PROFILES
                          else 'basic_reward_ablation')
+        run_label = f'C2_seed{args.seed}' if args.c2_nav_reward else f'{args.reward_profile}_seed{args.seed}'
         if args.log_dir == 'runs':
-            args.log_dir = (f'models_experiments/{output_family}/{args.reward_profile}_seed{args.seed}/tensorboard'
+            args.log_dir = (f'models_experiments/{output_family}/{run_label}/tensorboard'
                             if ablation_phase else f'tmp/ai/e76-d3/{args.exit_phase}/tensorboard')
         if args.save_dir == 'models_experiments':
-            args.save_dir = (f'models_experiments/{output_family}/{args.reward_profile}_seed{args.seed}'
+            args.save_dir = (f'models_experiments/{output_family}/{run_label}'
                              if ablation_phase else 'models_experiments/e76-d3')
         if args.run_name is None:
-            args.run_name = (f'{args.reward_profile}_seed{args.seed}' if ablation_phase else
+            args.run_name = (run_label if ablation_phase else
                              f'e76-d3-{args.exit_phase}-{time.strftime("%Y%m%d-%H%M%S")}')
         if args.episode_log is None:
             args.episode_log = (f'{args.save_dir}/episodes.jsonl' if ablation_phase else
@@ -353,12 +366,14 @@ def main():
         checkpoint_freq=args.checkpoint_freq,
         save_replay_buffer=args.save_replay_buffer,
         replay_buffer_path=args.replay_buffer_path,
+        c2_nav_reward=args.c2_nav_reward,
+        c2_navigation_contract=navigation_contract() if args.c2_nav_reward else None,
     )
     # Create env
     def _fn():
         return make_env(args.seed, args.scenario, args.delay_mode, max_delay,
                         args.use_safety, args.render_mode, args.ablation, args.task,
-                        args.reward_profile)
+                        args.reward_profile, args.c2_nav_reward)
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -452,6 +467,8 @@ def main():
         model.exit_potential_beta = 0.0 if args.reward_profile else exit_config.POTENTIAL_BETA
         model.exit_reward_profile = args.reward_profile or exit_config.REWARD_PROFILE
         model.exit_training_config = config if args.reward_profile else None
+        if args.c2_nav_reward:
+            model.c2_navigation_contract = config['c2_navigation_contract']
 
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
                      mode=args.wandb_mode, dir=args.log_dir,

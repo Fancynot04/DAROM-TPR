@@ -650,6 +650,46 @@ learner would be a separate algorithm decision. Concurrent runs need separate
 output names and enough compute and memory for two SUMO/SAC processes; the
 smoke runs above were sequential and do not benchmark concurrent throughput.
 
+#### C2 necessary lane-change reward (B3 base)
+
+`--c2-nav-reward` is an opt-in B3-only ablation. The policy keeps the original
+134-value delayed observation and `DelayAwareGRUEncoder`; the environment adds
+`navigation = -0.01 * n` in final reward units on each nonterminal step, after
+the unchanged B3 reward is calculated. `n` is the minimum number of lane
+changes on an existing E76→E77→D3 connection path, not a lane index. Zero
+means such a path exists, not that SUMO must select it. Pending movement and
+internal connectors use the last settled `n`; missing cache or an invalid
+stable route estimate stops the run rather than treating it as zero. Terminal
+steps add zero navigation reward. `reward_components.navigation` and
+`navigation_reward_total` expose the step and episode totals. No potential,
+urgency reward or D3 stage bonus is added.
+
+The C2 switch requires fresh `basic_reward_200k` training with B3, seeds 42
+and 43, Easy traffic, uniform 0–20-step delay, safety off and the original
+SAC/GRU settings, including CUDA and two Torch threads. It rejects
+checkpoint/replay continuation and writes under
+the ignored `models_experiments/c2_nav_reward/C2_seed{seed}/` directories.
+Use `--wandb_mode disabled` for the approved remote run. Evaluation requires
+`--c2-nav-reward`, a new JSON report path and a new gzip JSONL step trace path;
+the trace records navigation validity, cached demand, actual lane changes and
+distance to D3 for each step. The original B3 evaluator and checkpoints do
+not use the C2 switch.
+
+```bash
+python -B train_sac_delay.py --exit_phase basic_reward_200k \
+    --reward_profile B3 --c2-nav-reward --seed 42 --device cuda --wandb_mode disabled
+python -B evaluate_sac_delay.py models_experiments/c2_nav_reward/C2_seed42/C2_seed42.zip \
+    --task exit_e76_d3 --reward-profile B3 --c2-nav-reward \
+    --scenario easy --delay-mode uniform --episodes 50 --seed 200001 \
+    --output models_experiments/c2_nav_reward/C2_seed42/evaluation.json \
+    --trace-output models_experiments/c2_nav_reward/C2_seed42/steps.jsonl.gz
+```
+
+Run seed 43 with the same command and its own output directory only after
+the experiment plan, resource estimate and risks have been approved. The
+fixed B3 trajectory audit and any C2 results must keep training seeds
+separate from the 50 evaluation traffic seeds.
+
 New Antwerp GRU runs default to `paper_raw`: the 93 state values, 20 two-value
 actions (newest first as emitted by `DelayWrapper`), and delay scalar reach the
 encoder without fixed scaling or action reversal. This matches the corrected
