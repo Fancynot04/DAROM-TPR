@@ -276,12 +276,15 @@ def summarize_runs(runs, metrics=REPORT_METRICS):
 
 def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds,
                   task='legacy_o3_d1', reward_profile=None,
-                  c2_nav_reward=False, trace_sink=None):
+                  c2_nav_reward=False, trace_sink=None, cross_scenario=False):
     """Repeat evaluation of ONE checkpoint; this is not training-seed variance."""
     validate_seed_ranges(episodes, seeds)
     setup = validate_checkpoint_setup(model, ablation, safety, task, reward_profile,
                                       c2_nav_reward)
-    if reward_profile and (scenario != 'easy' or delay_mode != 'uniform' or safety or
+    if cross_scenario and (reward_profile != 'B3' or task != exit_config.TASK_ID or
+                           scenario not in ('medium', 'hard')):
+        raise ValueError('Cross-scenario evaluation requires B3 exit task and medium or hard')
+    if reward_profile and ((scenario != 'easy' and not cross_scenario) or delay_mode != 'uniform' or safety or
                            episodes != 50 or seeds != [200001]):
         raise ValueError('Basic reward evaluation requires Easy, uniform, safety off and seeds 200001-200050')
     runs = []
@@ -296,6 +299,7 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
         finally:
             env.close()
     return {'protocol': 'antwerp-v2-evaluation-v1', 'scenario': scenario,
+            'cross_scenario': cross_scenario,
             'task': task, 'stage_name': ANTWERP_TASKS[task][2],
             'delay_mode': delay_mode, 'ablation': ablation, **setup,
             'gru_input_mode': checkpoint_gru_input_mode(model),
@@ -326,6 +330,8 @@ def parse_args(argv=None):
                         default=None)
     parser.add_argument('--c2-nav-reward', action='store_true',
                         help='Evaluate a C2 checkpoint with its route-topology reward')
+    parser.add_argument('--cross-scenario', action='store_true',
+                        help='Evaluate a frozen B3/C2 checkpoint in medium or hard traffic')
     parser.add_argument('--delay-mode', choices=('uniform', 'exponential', 'triangular', 'bursty', 'bimodal'), default='uniform')
     parser.add_argument('--episodes', type=int, default=51)
     seed_options = parser.add_mutually_exclusive_group()
@@ -380,7 +386,7 @@ def main():
                                args.ablation, args.episodes, args.seeds, task=args.task,
                                reward_profile=args.reward_profile,
                                c2_nav_reward=args.c2_nav_reward,
-                               trace_sink=trace_sink)
+                               trace_sink=trace_sink, cross_scenario=args.cross_scenario)
     finally:
         if trace_sink is not None:
             trace_sink.close()

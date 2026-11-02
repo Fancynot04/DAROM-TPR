@@ -652,6 +652,11 @@ smoke runs above were sequential and do not benchmark concurrent throughput.
 
 #### C2 necessary lane-change reward (B3 base)
 
+Frozen B3/C2 checkpoints can be evaluated on `medium` or `hard` traffic with
+`--cross-scenario --scenario medium` (or `hard`). This explicit option keeps
+the original 50 evaluation seeds, uniform delay and safety-off requirements;
+training metadata still records Easy. The default evaluator remains Easy-only.
+
 `--c2-nav-reward` is an opt-in B3-only ablation. The policy keeps the original
 134-value delayed observation and `DelayAwareGRUEncoder`; the environment adds
 `navigation = -0.01 * n` in final reward units on each nonterminal step, after

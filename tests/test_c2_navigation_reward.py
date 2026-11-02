@@ -12,10 +12,29 @@ from src.delay_encoder import DelayAwareGRUEncoder
 from src.merging import Merging
 from src.wrapper import DelayWrapper
 from train_sac_delay import parse_args
-from evaluate_sac_delay import evaluate, validate_checkpoint_setup
+from evaluate_sac_delay import evaluate, evaluate_runs, validate_checkpoint_setup
 
 
 class C2NavigationRewardTests(unittest.TestCase):
+    def test_cross_scenario_requires_opt_in_and_fixed_protocol(self):
+        model = Mock()
+        with patch('evaluate_sac_delay.validate_checkpoint_setup', return_value={}), \
+             patch('evaluate_sac_delay.make_env') as make_env, \
+             patch('evaluate_sac_delay.evaluate', return_value={}), \
+             patch('evaluate_sac_delay.summarize_runs', return_value={}):
+            with self.assertRaises(ValueError):
+                evaluate_runs(model, 'medium', 'uniform', False, 'full', 50, [200001],
+                              task='exit_e76_d3', reward_profile='B3')
+            for scenario in ('medium', 'hard'):
+                report = evaluate_runs(model, scenario, 'uniform', False, 'full', 50, [200001],
+                                       task='exit_e76_d3', reward_profile='B3', cross_scenario=True)
+                self.assertTrue(report['cross_scenario'])
+                self.assertEqual(report['scenario'], scenario)
+                self.assertEqual(make_env.call_args.args[1], scenario)
+            with self.assertRaises(ValueError):
+                evaluate_runs(model, 'hard', 'uniform', False, 'full', 49, [200001],
+                              task='exit_e76_d3', reward_profile='B3', cross_scenario=True)
+
     def make_base(self, cls=Merging):
         return cls(seed=42, scenario='easy', task='exit_e76_d3', reward_profile='B3')
 
