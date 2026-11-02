@@ -10,6 +10,7 @@ from gymnasium import spaces
 from .utils import *
 from .geometry import TrafficSnapshot, driving_axes, world_velocity
 from . import exit_e76_d3_config as exit_config
+from . import exit_progress_reward
 from .route_urgency import load_route_network, observe_route_urgency, route_urgency
 
 
@@ -114,7 +115,8 @@ class Merging(gym.Env):
     metadata = {"render_modes": ["human", "none"], "render_fps": 10}
     def __init__(self, seed, mode='all', radius = 50, render_mode= None, runSafetyCheck=False,
                  scenario='medium', task='legacy_o3_d1', potential_gamma=None,
-                 exit_reward_profile=None, e09_pending_mode=None):
+                 exit_reward_profile=None, e09_pending_mode=None,
+                 progress_experiment=None):
         if scenario not in ('easy', 'medium', 'hard'):
             raise ValueError(f'Unknown Antwerp scenario: {scenario}')
         if task not in ANTWERP_TASKS:
@@ -128,6 +130,21 @@ class Merging(gym.Env):
         self.task = task
         self.exit_reward_profile = (exit_config.REWARD_PROFILE if exit_reward_profile is None
                                     else exit_reward_profile)
+        self.progress_experiment = (exit_progress_reward.validate_experiment(progress_experiment)
+                                    if progress_experiment is not None else None)
+        if self.exit_reward_profile == exit_config.PROGRESS_REWARD_PROFILE:
+            if task != exit_config.TASK_ID or self.progress_experiment is None:
+                raise ValueError('Progress reward requires an E76-D3 experiment configuration')
+        elif self.progress_experiment is not None:
+            raise ValueError('Progress experiment configuration requires its reward profile')
+        self.episode_limit_steps = (int(round(self.progress_experiment['timeout_seconds']
+                                               / SUMO_STEP_LENGTH))
+                                    if self.progress_experiment is not None else maxSteps)
+        if (self.progress_experiment is not None and
+                (self.episode_limit_steps < 1 or
+                 not math.isclose(self.episode_limit_steps * SUMO_STEP_LENGTH,
+                                  self.progress_experiment['timeout_seconds'], abs_tol=1e-9))):
+            raise ValueError('Progress timeout must be a multiple of the SUMO step length')
         if task == exit_config.TASK_ID:
             exit_config.potential_beta_for_profile(self.exit_reward_profile)
         elif exit_reward_profile is not None:
@@ -174,6 +191,12 @@ class Merging(gym.Env):
         self.potential_distance_scale = None
         self.potential_previous = 0.0
         self.initial_potential = 0.0
+        self.progress_initial_remaining = None
+        self.progress_before_remaining = None
+        self.progress_before_odometer = None
+        self.progress_after_remaining = None
+        self.progress_after_odometer = None
+        self.terminal_reason = ''
         self.last_valid_urgency = None
         self.last_settled_urgency_edge = None
         self.last_settled_urgency_lane = None
@@ -245,9 +268,27 @@ class Merging(gym.Env):
         self.potential_distance_scale = None
         self.potential_previous = 0.0
         self.initial_potential = 0.0
+        self.progress_initial_remaining = None
+        self.progress_before_remaining = None
+        self.progress_before_odometer = None
+        self.progress_after_remaining = None
+        self.progress_after_odometer = None
+        self.terminal_reason = ''
         self.last_valid_urgency = None
         self.last_settled_urgency_edge = None
         self.last_settled_urgency_lane = None
+
+    def _remaining_to_d3_end(self):
+        """Physical route distance to the end of D3, including travel on D3."""
+        if not self.ego_on_road:
+            return None
+        destination_position = float(self.traci.lane.getLength('D3_0'))
+        if self.traci.vehicle.getRoadID(self.ego_id) == 'D3':
+            distance = destination_position - float(self.traci.vehicle.getLanePosition(self.ego_id))
+        else:
+            distance = float(self.traci.vehicle.getDrivingDistance(
+                self.ego_id, 'D3', destination_position))
+        return distance if math.isfinite(distance) and distance >= 0 else None
 
     def _reward_urgency(self):
         """Use only settled lane-route estimates for the opt-in reward."""
@@ -474,8 +515,12 @@ class Merging(gym.Env):
                         if self.exit_reward_profile == exit_config.REWARD_PROFILE:
                             self.potential_previous = self._exit_potential()
                             self.initial_potential = self.potential_previous
-                        else:
+                        elif self.exit_reward_profile == exit_config.URGENCY_REWARD_PROFILE:
                             self._reward_urgency()
+                        else:
+                            self.progress_initial_remaining = self._remaining_to_d3_end()
+                            if self.progress_initial_remaining is None or self.progress_initial_remaining <= 0:
+                                raise ValueError('Invalid initial route distance to the D3 endpoint')
                     self.observation = np.asarray(self._get_obs(), dtype=np.float32)
         if not self.ego_inserted:
             self.traci.close()
@@ -493,7 +538,8 @@ class Merging(gym.Env):
             'sumo_version': list(self.traci.getVersion()), 'sumo_seed': sumo_seed,
             'sumo_command': sumo_cmd, 'scene_files': scene_files,
             'step_length': self.traci.simulation.getDeltaT(),
-            'episode_limit_steps': maxSteps, 'episode_clock': 'steps_since_takeover',
+            'episode_limit_steps': self.episode_limit_steps,
+            'episode_clock': 'steps_since_takeover',
             'ego_route': list(self.traci.vehicle.getRoute(self.ego_id)),
             'ego_speed_mode': self.traci.vehicle.getSpeedMode(self.ego_id),
             'ego_lane_change_mode': self.traci.vehicle.getLaneChangeMode(self.ego_id),
@@ -503,6 +549,21 @@ class Merging(gym.Env):
         }
 
     def getReward(self):
+
+        if self.exit_reward_profile == exit_config.PROGRESS_REWARD_PROFILE and self.task == exit_config.TASK_ID:
+            reward = self.progress_experiment['reward']
+            progress = (0.0 if self.teleport_transition or self.ego_teleported
+                        else exit_progress_reward.progress_reward(
+                            self.progress_before_remaining, self.progress_after_remaining,
+                            self.progress_before_odometer, self.progress_after_odometer,
+                            self.progress_initial_remaining, reward))
+            event_name, event_value = exit_progress_reward.event_reward(self.terminal_reason, reward)
+            self.reward_components = {'progress': float(progress),
+                                      **{name: (event_value if name == event_name else 0.0)
+                                         for name in exit_progress_reward.DEFAULT_EXPERIMENT['reward']
+                                         if name not in ('progress_per_meter', 'proximity_gain')}}
+            self.last_stage_reward = 0.0
+            return float(progress + event_value)
 
         # print(self.egoIdx)
         # print('action', action, 'safe_action', safe_action)
@@ -709,6 +770,12 @@ class Merging(gym.Env):
         if self.done:
             raise RuntimeError('Call reset() before stepping a finished episode')
         was_on_road = self.ego_on_road
+        if self.progress_experiment is not None:
+            self.progress_before_remaining = self._remaining_to_d3_end() if was_on_road else None
+            self.progress_before_odometer = (float(self.traci.vehicle.getDistance(self.ego_id))
+                                             if was_on_road else None)
+            self.progress_after_remaining = None
+            self.progress_after_odometer = None
         if was_on_road:
             self.lane_id = self.traci.vehicle.getLaneID(self.ego_id)
             self.lane_name = self.traci.vehicle.getRoadID(self.ego_id)
@@ -781,19 +848,27 @@ class Merging(gym.Env):
         if self.ego_id in self.traci.simulation.getCollidingVehiclesIDList():
             info['message'] = 'Collision'
             terminated = True
+        elif self.progress_experiment is not None and (started or ended or self.ego_teleported):
+            info['message'] = 'Ego Teleported'
+            terminated = True
         elif self.missed_exit:
             info['message'] = 'Missed Exit'
             terminated = True
         elif self.ego_id in self.traci.simulation.getArrivedIDList():
             info['message'] = 'Arrived'
             terminated = True
-        elif self.counter >= maxSteps:
+        elif self.counter >= self.episode_limit_steps:
             info['message'] = 'Max Steps'
             truncated = True
         elif self.ego_id in self.traci.simulation.getEmergencyStoppingVehiclesIDList():
             info['message'] = 'Emergency Stopping'
             terminated = True
         self.done = terminated or truncated
+        self.terminal_reason = info['message'] if self.done else ''
+        if (self.progress_experiment is not None and self.ego_on_road
+                and not self.teleport_transition and info['message'] != 'Collision'):
+            self.progress_after_remaining = self._remaining_to_d3_end()
+            self.progress_after_odometer = float(self.traci.vehicle.getDistance(self.ego_id))
         if self.ego_on_road and info['message'] != 'Collision':
             self.observation = self._get_obs()
         else:
@@ -812,7 +887,7 @@ class Merging(gym.Env):
                                     - self.potential_previous)
                 self.potential_previous = next_potential
                 self.reward += potential_reward
-            else:
+            elif self.exit_reward_profile == exit_config.URGENCY_REWARD_PROFILE:
                 urgency_value, urgency_provisional = self._reward_urgency()
                 urgency_reward = (0.0 if self.done else
                                   exit_config.urgency_penalty(urgency_value))

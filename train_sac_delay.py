@@ -23,6 +23,7 @@ from wandb.integration.sb3 import WandbCallback
 
 from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
 from src import exit_e76_d3_config as exit_config
+from src import exit_progress_reward
 from src.wrapper import ABLATION_MODES, DelayWrapper, ExitStartLaneCurriculum
 
 class EpisodeRewardCallback(BaseCallback):
@@ -92,6 +93,7 @@ class EpisodeRewardCallback(BaseCallback):
                 'train/collision': int(outcome == 'Collision'),
                 'train/emergency_stopping': int(outcome == 'Emergency Stopping'),
                 'train/missed_exit': int(outcome == 'Missed Exit'),
+                'train/teleport_failure': int(outcome == 'Ego Teleported'),
                 'train/no_stage_timeout': int(outcome == 'Max Steps' and not stage_reached),
                 'train/stage_reached_timeout': int(outcome == 'Max Steps' and stage_reached),
                 'train/stage_reached': int(stage_reached),
@@ -210,11 +212,13 @@ def load_model(path: str, env: gym.Env) -> SAC:
 def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
              ablation='full', task='legacy_o3_d1', potential_gamma=None,
              nav_features=False, exit_reward_profile=None,
-             curriculum_stages=None, curriculum_route_dir=None, e09_pending_mode=None):
+             curriculum_stages=None, curriculum_route_dir=None, e09_pending_mode=None,
+             progress_experiment=None):
     env = DelayWrapper(
         Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
                 potential_gamma=potential_gamma, exit_reward_profile=exit_reward_profile,
-                e09_pending_mode=e09_pending_mode),
+                e09_pending_mode=e09_pending_mode,
+                progress_experiment=progress_experiment),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation, nav_features=nav_features,
     )
@@ -248,6 +252,8 @@ def parse_args():
                         help='Single-ego task; legacy default preserves existing O3-to-D1 runs')
     parser.add_argument('--exit_phase', choices=tuple(exit_config.PHASES), default=None,
                         help='Dedicated E76-to-D3 Easy pilot or Easy 1M configuration')
+    parser.add_argument('--exit_config', default=None,
+                        help='JSON run/reward configuration for --exit_phase progress_events')
     parser.add_argument('--safety', dest='use_safety', action='store_true')
     parser.add_argument('--save_dir', type=str, default='models_experiments')
     parser.add_argument('--load_path', type=str, default=None)
@@ -261,9 +267,18 @@ def parse_args():
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
+    if args.exit_config and args.exit_phase != 'progress_events':
+        parser.error('--exit_config is only for --exit_phase progress_events')
+    args.progress_experiment = None
+    if args.exit_phase == 'progress_events':
+        try:
+            args.progress_experiment = exit_progress_reward.load_experiment(args.exit_config)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            parser.error(f'Invalid progress experiment configuration: {error}')
+        args.seed = args.progress_experiment['seed']
     if args.exit_phase:
         phase = exit_config.PHASES[args.exit_phase]
-        allowed_seeds = tuple(phase.get('allowed_seeds', (42,)))
+        allowed_seeds = tuple(phase.get('allowed_seeds', (args.seed,) if args.progress_experiment else (42,)))
         if args.task not in ('legacy_o3_d1', exit_config.TASK_ID):
             parser.error('--exit_phase cannot be combined with another task')
         if (args.seed not in allowed_seeds or args.radius != 50 or args.use_safety
@@ -278,6 +293,10 @@ def parse_args():
         args.gamma = phase['gamma']
         args.nav_features = phase.get('nav_features', False)
         args.exit_reward_profile = phase.get('reward_profile', exit_config.REWARD_PROFILE)
+        if args.progress_experiment is not None:
+            args.scenario = args.progress_experiment['scenario']
+            args.total_timesteps = args.progress_experiment['total_timesteps']
+            args.checkpoint_freq = args.progress_experiment['checkpoint_freq']
         args.save_replay_buffer = True
         if args.project not in (None, exit_config.WANDB_PROJECT):
             parser.error('E76-to-D3 profile uses the designated DAROM-OUT Forge project')
@@ -395,6 +414,11 @@ def main():
                         if args.exit_phase else None),
         potential_gamma=(args.gamma if args.exit_phase else None),
         reward_profile=args.exit_reward_profile,
+        progress_experiment=args.progress_experiment,
+        progress_reward_identity=(exit_progress_reward.reward_identity(args.progress_experiment['reward'])
+                                  if args.progress_experiment is not None else None),
+        progress_experiment_identity=(exit_progress_reward.experiment_identity(args.progress_experiment)
+                                      if args.progress_experiment is not None else None),
         exit_control_profile=(exit_config.CONTROL_PROFILE if args.exit_phase else None),
         exit_observation_profile=(exit_config.NAV_OBSERVATION_PROFILE
                                   if args.nav_features else None),
@@ -451,7 +475,7 @@ def main():
                         (os.path.join('tmp', 'ai', 'e76-d3', args.exit_phase,
                                       args.run_name, 'routes')
                          if config['curriculum_stages'] is not None else None),
-                        config['e09_pending_mode'])
+                        config['e09_pending_mode'], args.progress_experiment)
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -537,6 +561,16 @@ def main():
                 if (getattr(loaded_model, 'exit_reward_profile', None)
                         != args.exit_reward_profile):
                     raise ValueError('Loaded model has a different E76-to-D3 reward profile')
+                if args.progress_experiment is not None:
+                    saved_experiment = getattr(loaded_model, 'exit_progress_experiment', None)
+                    if saved_experiment is None:
+                        raise ValueError('Loaded model has no progress reward configuration')
+                    for field in ('seed', 'scenario', 'timeout_seconds', 'reward'):
+                        if saved_experiment[field] != args.progress_experiment[field]:
+                            raise ValueError(f'Loaded progress experiment differs in {field}')
+                    if (getattr(loaded_model, 'exit_progress_reward_identity', None)
+                            != exit_progress_reward.reward_identity(args.progress_experiment['reward'])):
+                        raise ValueError('Loaded model has a different progress reward identity')
                 if (getattr(loaded_model, 'exit_control_profile', None)
                         != exit_config.CONTROL_PROFILE):
                     raise ValueError('Loaded model has a different E76-to-D3 control profile')
@@ -575,6 +609,12 @@ def main():
         model.exit_potential_beta = exit_config.potential_beta_for_profile(args.exit_reward_profile)
         model.exit_potential_gamma = args.gamma
         model.exit_reward_profile = args.exit_reward_profile
+        if args.progress_experiment is not None:
+            model.exit_progress_experiment = args.progress_experiment
+            model.exit_progress_reward_identity = exit_progress_reward.reward_identity(
+                args.progress_experiment['reward'])
+            model.exit_progress_experiment_identity = exit_progress_reward.experiment_identity(
+                args.progress_experiment)
         model.exit_control_profile = exit_config.CONTROL_PROFILE
         if e09:
             model.e09_pending_mode = config['e09_pending_mode']

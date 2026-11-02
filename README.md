@@ -525,6 +525,71 @@ different lengths.
 
 ### E76 → D3 single-ego exit experiment
 
+#### Configurable route-end progress and event reward
+
+The `codex/e76-d3-progress-events` development branch starts from committed
+baseline `b9c5820463d4e9ace65d7b2cddfb81c391377006`. Its opt-in
+`--exit_phase progress_events` keeps the D-group `paper_raw` GRU/SAC and
+E76→D3 task. The reward is **only** route-end progress plus one terminal
+event. It does not use the existing time, jerk, gap, lane-command, D3-entry,
+potential or urgency rewards. D3 entry remains a diagnostic, not completion.
+
+Progress uses route distance to the **end of D3_0**, including the 205.79 m
+traveled on D3. For each valid physical transition, earned meters are the
+minimum of the positive reduction in route-end distance and positive SUMO
+odometer change. Teleport transitions earn no progress. With `d0` the departure
+distance and `d` the distance before the step, the final reward units are
+`progress_per_meter × earned_meters × [1 + proximity_gain × clip(1 − d/d0, 0, 1)]`.
+The arrival event requires the ordinary SUMO `Arrived` outcome without any ego
+teleport. Terminal events are exclusive: collision, teleport, missed exit,
+arrival, timeout; emergency stopping retains its termination but has no extra
+event reward. The default event values are `+50` for arrival and `−100` each
+for collision, timeout, missed exit and first teleport. First teleport ends
+the episode immediately, with no later arrival credit.
+
+The default progress profile uses seed 42, Easy, 200k training steps, 50k
+checkpoint interval, `progress_per_meter=0.15`, `proximity_gain=1`, and a
+400-second post-takeover limit (4,000 steps at 0.1 s). These are configuration
+defaults, not fixed reward or runtime constants. To vary them, pass a JSON
+file with exactly the `seed`, `scenario`, `total_timesteps`, `checkpoint_freq`,
+`timeout_seconds`, and `reward` fields shown here:
+
+```json
+{
+  "seed": 42,
+  "scenario": "easy",
+  "total_timesteps": 200000,
+  "checkpoint_freq": 50000,
+  "timeout_seconds": 400.0,
+  "reward": {
+    "progress_per_meter": 0.15,
+    "proximity_gain": 1.0,
+    "arrival": 50.0,
+    "collision": -100.0,
+    "timeout": -100.0,
+    "missed_exit": -100.0,
+    "teleport": -100.0
+  }
+}
+```
+
+Save the selected JSON under an ignored `tmp/ai/e76-d3/` path before a run:
+
+```bash
+python3 -B train_sac_delay.py --exit_phase progress_events \
+  --exit_config tmp/ai/e76-d3/progress-config.json --wandb_mode disabled
+```
+
+The training manifest and each model checkpoint store the complete experiment
+configuration, reward profile, reward SHA-256 identity and full experiment
+SHA-256 identity. Resume requires the
+same seed, scenario, timeout and reward values; a changed reward starts a new
+experiment and output directory. Evaluation reads the saved reward and timeout
+configuration from the checkpoint, so the 400-second limit also applies there.
+The existing E76→D3 and other Antwerp profiles retain their 600-second limit.
+This branch does not authorize a long run; record and confirm the remote
+experiment's actual parameters and fixed source commit before launch.
+
 `--exit_phase easy_pilot` and `--exit_phase easy_1m` select a separate
 `exit_e76_d3` task on the single-ego DAROM GRU/SAC training entry. Its route
 files preserve each scenario's background traffic. The ego trip is `E76 → D3`

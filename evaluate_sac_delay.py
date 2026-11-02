@@ -17,11 +17,13 @@ from src.delay_encoder import DelayAwareGRUEncoder
 from src.merging import (ANTWERP_DIR, ANTWERP_ENV_VERSION, ANTWERP_TASKS,
                          LANE_CHANGE_EDGES, Merging, parseAction)
 from src import exit_e76_d3_config as exit_config
+from src import exit_progress_reward
 from src.route_urgency import load_route_network, observe_route_urgency
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
-OUTCOMES = ('Arrived', 'Collision', 'Max Steps', 'Emergency Stopping', 'Missed Exit')
+OUTCOMES = ('Arrived', 'Collision', 'Max Steps', 'Emergency Stopping',
+            'Missed Exit', 'Ego Teleported')
 TIMEOUT_DETAILS = ('No Merge Timeout', 'Merged Timeout')
 EXIT_TIMEOUT_DETAILS = ('No Exit Timeout', 'Exit Reached Timeout')
 ARRIVAL_DETAILS = ('Uninterrupted Arrived', 'Teleported Arrived', 'Ego Teleported')
@@ -32,11 +34,12 @@ REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout
 
 def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1',
              potential_gamma=None, nav_features=False, exit_reward_profile=None,
-             e09_pending_mode=None):
+             e09_pending_mode=None, progress_experiment=None):
     env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
                                potential_gamma=potential_gamma,
                                exit_reward_profile=exit_reward_profile,
-                               e09_pending_mode=e09_pending_mode),
+                               e09_pending_mode=e09_pending_mode,
+                               progress_experiment=progress_experiment),
                        max_delay=20, mode='all', delay_mode=delay_mode,
                        seed=seed, ablation=ablation, nav_features=nav_features)
     return SafetyWrapper(env) if safety else env
@@ -64,6 +67,16 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
     if e09_pending_mode is not None and (e09_pending_mode not in ('on', 'off') or safety):
         raise ValueError('E09 evaluation requires a valid mode and custom safety off')
     reward_profile = getattr(model, 'exit_reward_profile', None)
+    progress_experiment = None
+    if task == exit_config.TASK_ID and reward_profile == exit_config.PROGRESS_REWARD_PROFILE:
+        progress_experiment = exit_progress_reward.validate_experiment(
+            getattr(model, 'exit_progress_experiment', None))
+        if (getattr(model, 'exit_progress_reward_identity', None)
+                != exit_progress_reward.reward_identity(progress_experiment['reward'])):
+            raise ValueError('Checkpoint progress reward identity does not match its configuration')
+        if (getattr(model, 'exit_progress_experiment_identity', None)
+                != exit_progress_reward.experiment_identity(progress_experiment)):
+            raise ValueError('Checkpoint progress experiment identity does not match its configuration')
     if task == exit_config.TASK_ID:
         try:
             expected_beta = exit_config.potential_beta_for_profile(reward_profile)
@@ -99,6 +112,12 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
         setup['exit_observation_profile'] = getattr(model, 'exit_observation_profile', None)
         setup['nav_features'] = nav_features
         setup['exit_reward_profile'] = reward_profile
+        if progress_experiment is not None:
+            setup['progress_experiment'] = progress_experiment
+            setup['progress_reward_identity'] = exit_progress_reward.reward_identity(
+                progress_experiment['reward'])
+            setup['progress_experiment_identity'] = exit_progress_reward.experiment_identity(
+                progress_experiment)
     return setup
 
 
@@ -188,7 +207,8 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                     raise ValueError(f'Unexpected episode outcome: {outcome!r}')
                 counts[outcome] += 1
                 teleported = bool(info['ego_teleported'])
-                counts['Ego Teleported'] += int(teleported)
+                if outcome != 'Ego Teleported':
+                    counts['Ego Teleported'] += int(teleported)
                 if outcome == 'Arrived':
                     counts['Teleported Arrived' if teleported else 'Uninterrupted Arrived'] += 1
                 if outcome == 'Max Steps':
@@ -278,7 +298,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
             env = make_env(seed, scenario, delay_mode, safety, ablation, task=task,
                            potential_gamma=setup.get('potential_gamma'),
                            nav_features=setup.get('nav_features', False),
-                           exit_reward_profile=setup.get('exit_reward_profile'))
+                           exit_reward_profile=setup.get('exit_reward_profile'),
+                           progress_experiment=setup.get('progress_experiment'))
             try:
                 runs.append({'seed': seed, 'episodes': episodes,
                              **evaluate(model, env, episodes, seed, task=task,
@@ -370,7 +391,7 @@ def main():
         print(f"Seed {run['seed']} | episodes={args.episodes}")
         timeout_details = (EXIT_TIMEOUT_DETAILS if ANTWERP_TASKS[args.task][2] == 'exit'
                            else TIMEOUT_DETAILS)
-        for outcome in (*OUTCOMES, *timeout_details, *ARRIVAL_DETAILS):
+        for outcome in dict.fromkeys((*OUTCOMES, *timeout_details, *ARRIVAL_DETAILS)):
             print(f"  {outcome}: {run[outcome]}/{args.episodes}")
     print('Across evaluation runs of this checkpoint (std and upstream-style CI are separate):')
     for key, values in report['aggregate'].items():

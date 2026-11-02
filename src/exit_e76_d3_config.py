@@ -1,6 +1,7 @@
 """Single-ego E76-to-D3 experiment profile."""
 
 import math
+from .exit_progress_reward import PROFILE as PROGRESS_REWARD_PROFILE
 
 TASK_ID = 'exit_e76_d3'
 ORIGIN = 'E76'
@@ -60,6 +61,11 @@ CURRICULUM_BRANCH_PHASES = {
 }
 
 PHASES = {
+    'progress_events': {
+        'scenario': 'easy', 'total_timesteps': 200_000,
+        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': PROGRESS_REWARD_PROFILE,
+    },
     **{f'e09_pending_{mode}': {
         'scenario': 'easy', 'total_timesteps': 250_000,
         'checkpoint_freq': 150_000, 'gamma': POTENTIAL_GAMMA,
@@ -117,7 +123,7 @@ PHASES = {
 def potential_beta_for_profile(profile):
     if profile == REWARD_PROFILE:
         return POTENTIAL_BETA
-    if profile == URGENCY_REWARD_PROFILE:
+    if profile in (URGENCY_REWARD_PROFILE, PROGRESS_REWARD_PROFILE):
         return 0.0
     raise ValueError(f'Unknown E76-to-D3 reward profile: {profile!r}')
 
