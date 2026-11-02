@@ -132,9 +132,12 @@ class Merging(gym.Env):
                                     else exit_reward_profile)
         self.progress_experiment = (exit_progress_reward.validate_experiment(progress_experiment)
                                     if progress_experiment is not None else None)
-        if self.exit_reward_profile == exit_config.PROGRESS_REWARD_PROFILE:
+        if self.exit_reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
+                                        exit_config.DIRECTIONAL_REWARD_PROFILE):
             if task != exit_config.TASK_ID or self.progress_experiment is None:
                 raise ValueError('Progress reward requires an E76-D3 experiment configuration')
+            if exit_progress_reward.reward_profile(self.progress_experiment) != self.exit_reward_profile:
+                raise ValueError('Progress configuration and reward profile disagree')
         elif self.progress_experiment is not None:
             raise ValueError('Progress experiment configuration requires its reward profile')
         self.episode_limit_steps = (int(round(self.progress_experiment['timeout_seconds']
@@ -150,7 +153,8 @@ class Merging(gym.Env):
         elif exit_reward_profile is not None:
             raise ValueError('An E76-to-D3 reward profile requires the E76-to-D3 task')
         self.route_network = (load_route_network(ANTWERP_DIR / 'Antwerp.net.xml')
-                              if self.exit_reward_profile == exit_config.URGENCY_REWARD_PROFILE
+                              if self.exit_reward_profile in (exit_config.URGENCY_REWARD_PROFILE,
+                                                              exit_config.DIRECTIONAL_REWARD_PROFILE)
                               and task == exit_config.TASK_ID else None)
         self.potential_gamma = (exit_config.POTENTIAL_GAMMA
                                 if potential_gamma is None else float(potential_gamma))
@@ -197,6 +201,11 @@ class Merging(gym.Env):
         self.progress_after_remaining = None
         self.progress_after_odometer = None
         self.terminal_reason = ''
+        self.directional_settled_lane = None
+        self.directional_pending_request = None
+        self.directional_seen_lateral_motion = False
+        self.directional_lane_event = None
+        self.directional_lane_reward = 0.0
         self.last_valid_urgency = None
         self.last_settled_urgency_edge = None
         self.last_settled_urgency_lane = None
@@ -274,6 +283,11 @@ class Merging(gym.Env):
         self.progress_after_remaining = None
         self.progress_after_odometer = None
         self.terminal_reason = ''
+        self.directional_settled_lane = None
+        self.directional_pending_request = None
+        self.directional_seen_lateral_motion = False
+        self.directional_lane_event = None
+        self.directional_lane_reward = 0.0
         self.last_valid_urgency = None
         self.last_settled_urgency_edge = None
         self.last_settled_urgency_lane = None
@@ -431,6 +445,57 @@ class Merging(gym.Env):
             # remains locked until it settles or the exit is missed.
             self.exit_maneuver = None
 
+    def _update_directional_lane_reward(self):
+        """Settle a physical same-edge change once; ignore junction remapping."""
+        self.directional_lane_reward = 0.0
+        self.directional_lane_event = None
+        if self.exit_reward_profile != exit_config.DIRECTIONAL_REWARD_PROFILE:
+            return
+        if (not self.ego_on_road or self.ego_teleported or self.teleport_transition
+                or self.terminal_reason in ('Collision', 'Ego Teleported')
+                or self.lane_name not in LANE_CHANGE_EDGES):
+            self.directional_settled_lane = None
+            self.directional_pending_request = None
+            self.directional_seen_lateral_motion = False
+            return
+        if (self.directional_pending_request is not None
+                and abs(float(self.traci.vehicle.getLateralSpeed(self.ego_id)))
+                > exit_config.LATERAL_SETTLED_SPEED_MPS):
+            self.directional_seen_lateral_motion = True
+        estimate = observe_route_urgency(
+            self, self.route_network, LANE_CHANGE_EDGES,
+            lane_change_seconds=exit_config.LANE_CHANGE_TIME_SECONDS)
+        if not estimate.get('valid_for_threshold', False):
+            previous = self.directional_settled_lane
+            if (estimate.get('status') != 'ok' or not estimate.get('pending')
+                    or (previous is not None and estimate.get('road') != previous['road'])):
+                self.directional_settled_lane = None
+                self.directional_pending_request = None
+                self.directional_seen_lateral_motion = False
+            return
+        current = {'road': estimate['road'], 'lane': estimate['projected_lane'],
+                   'minimum_lane_changes': estimate['minimum_lane_changes']}
+        previous = self.directional_settled_lane
+        self.directional_settled_lane = current
+        if previous is None or previous['road'] != current['road']:
+            self.directional_pending_request = None
+            self.directional_seen_lateral_motion = False
+            return
+        value, direction = exit_progress_reward.directional_lane_reward(
+            previous, current, self.progress_experiment['reward'])
+        if (direction is not None and self.directional_pending_request is not None
+                and self.directional_seen_lateral_motion):
+            self.directional_lane_reward = value
+            self.directional_lane_event = {
+                'before': previous, 'after': current,
+                'request_direction': self.directional_pending_request,
+                'actual_direction': current['lane'] - previous['lane'],
+                'route_direction': direction, 'reward': value,
+            }
+        if not estimate['pending']:
+            self.directional_pending_request = None
+            self.directional_seen_lateral_motion = False
+
     def _e77_maneuver_can_finish(self):
         maneuver = self.exit_maneuver
         if maneuver is None or maneuver['target'] != 0:
@@ -550,7 +615,9 @@ class Merging(gym.Env):
 
     def getReward(self):
 
-        if self.exit_reward_profile == exit_config.PROGRESS_REWARD_PROFILE and self.task == exit_config.TASK_ID:
+        if (self.exit_reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
+                                         exit_config.DIRECTIONAL_REWARD_PROFILE)
+                and self.task == exit_config.TASK_ID):
             reward = self.progress_experiment['reward']
             progress = (0.0 if self.teleport_transition or self.ego_teleported
                         else exit_progress_reward.progress_reward(
@@ -560,10 +627,12 @@ class Merging(gym.Env):
             event_name, event_value = exit_progress_reward.event_reward(self.terminal_reason, reward)
             self.reward_components = {'progress': float(progress),
                                       **{name: (event_value if name == event_name else 0.0)
-                                         for name in exit_progress_reward.DEFAULT_EXPERIMENT['reward']
+                                         for name in exit_progress_reward.EVENTS.values()
                                          if name not in ('progress_per_meter', 'proximity_gain')}}
             self.last_stage_reward = 0.0
-            return float(progress + event_value)
+            if self.exit_reward_profile == exit_config.DIRECTIONAL_REWARD_PROFILE:
+                self.reward_components['lane_change'] = float(self.directional_lane_reward)
+            return float(progress + event_value + self.directional_lane_reward)
 
         # print(self.egoIdx)
         # print('action', action, 'safe_action', safe_action)
@@ -761,6 +830,9 @@ class Merging(gym.Env):
                         self.exit_maneuver = {'edge': self.lane_name, 'target': target,
                                               'start_time': now, 'last_progress_time': now,
                                               'stable_steps': 0}
+                        if self.exit_reward_profile == exit_config.DIRECTIONAL_REWARD_PROFILE:
+                            self.directional_pending_request = int(direction)
+                            self.directional_seen_lateral_motion = False
                     return
                 self.target_lane_idx = target
                 self.traci.vehicle.changeLane(self.ego_id, target, 0)
@@ -780,6 +852,9 @@ class Merging(gym.Env):
             self.lane_id = self.traci.vehicle.getLaneID(self.ego_id)
             self.lane_name = self.traci.vehicle.getRoadID(self.ego_id)
             self.lane_idx = self.traci.vehicle.getLaneIndex(self.ego_id)
+            if (self.exit_reward_profile == exit_config.DIRECTIONAL_REWARD_PROFILE
+                    and self.directional_settled_lane is None):
+                self._update_directional_lane_reward()
         parsed_action = parseAction(action)
         self.exit_actor_request_direction = (
             int(parsed_action[1]) if was_on_road and self.task == exit_config.TASK_ID
@@ -865,6 +940,7 @@ class Merging(gym.Env):
             terminated = True
         self.done = terminated or truncated
         self.terminal_reason = info['message'] if self.done else ''
+        self._update_directional_lane_reward()
         if (self.progress_experiment is not None and self.ego_on_road
                 and not self.teleport_transition and info['message'] != 'Collision'):
             self.progress_after_remaining = self._remaining_to_d3_end()
@@ -922,6 +998,7 @@ class Merging(gym.Env):
                      'exit_reward_profile': (self.exit_reward_profile
                                              if self.task == exit_config.TASK_ID else None),
                      'exit_actor_request_direction': self.exit_actor_request_direction,
+                     'directional_lane_change_event': self.directional_lane_event,
                      'teleport_started': started, 'teleport_ended': ended,
                      'is_success': info['message'] == 'Arrived' and not self.ego_teleported})
         return self.observation, float(self.reward), terminated, truncated, info

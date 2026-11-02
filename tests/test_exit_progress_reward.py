@@ -16,6 +16,8 @@ from train_sac_delay import parse_args as parse_train_args
 from src import exit_e76_d3_config as exit_config
 from src import exit_progress_reward as progress
 from src.merging import Merging
+from src.merging import ANTWERP_DIR, LANE_CHANGE_EDGES
+from src.route_urgency import load_route_network, route_urgency
 
 
 class ProgressRewardTests(unittest.TestCase):
@@ -225,6 +227,127 @@ class ProgressRewardTests(unittest.TestCase):
         self.assertEqual(result['Ego Teleported'], 1)
         self.assertEqual(result['ego_teleport_rate'], 100)
         self.assertEqual(result['success_rate'], 0)
+
+    def test_directional_configuration_and_checkpoint_identity(self):
+        directional = progress.load_experiment(directional=True)
+        self.assertEqual(directional['total_timesteps'], 1_000_000)
+        self.assertEqual(directional['checkpoint_freq'], 200_000)
+        self.assertEqual((directional['reward']['alpha'], directional['reward']['beta']), (3.0, 6.0))
+        with patch.object(sys, 'argv', ['train_sac_delay.py', '--exit_phase',
+                                        'progress_events_directional_lc', '--wandb_mode', 'disabled']):
+            args = parse_train_args()
+        self.assertEqual((args.seed, args.scenario, args.total_timesteps,
+                          args.checkpoint_freq, args.exit_reward_profile),
+                         (42, 'easy', 1_000_000, 200_000, exit_config.DIRECTIONAL_REWARD_PROFILE))
+        self.assertTrue(args.save_replay_buffer)
+        self.assertIsNone(args.load_path)
+        self.assertNotEqual(progress.reward_identity(self.reward),
+                            progress.reward_identity(directional['reward']))
+        with self.assertRaises(ValueError):
+            progress.validate_experiment(
+                {**directional, 'reward': {**directional['reward'], 'alpha': -1}})
+        model = SimpleNamespace(
+            antwerp_env_version=3, antwerp_task=exit_config.TASK_ID,
+            exit_reward_profile=exit_config.DIRECTIONAL_REWARD_PROFILE,
+            exit_potential_beta=0.0, exit_control_profile=exit_config.CONTROL_PROFILE,
+            exit_observation_profile=None, exit_potential_gamma=0.99, gamma=0.99,
+            observation_space=SimpleNamespace(shape=(134,)),
+            policy_kwargs={'features_extractor_kwargs': {'nav_dim': 0}},
+            exit_progress_experiment=directional,
+            exit_progress_reward_identity=progress.reward_identity(directional['reward']),
+            exit_progress_experiment_identity=progress.experiment_identity(directional))
+        validate_checkpoint_setup(model, 'full', False, exit_config.TASK_ID)
+        model.exit_progress_experiment = copy.deepcopy(directional)
+        model.exit_progress_experiment['reward']['beta'] = 7.0
+        with self.assertRaises(ValueError):
+            validate_checkpoint_setup(model, 'full', False, exit_config.TASK_ID)
+
+    def test_direction_uses_lane_graph_and_same_edge_only(self):
+        network = load_route_network(ANTWERP_DIR / 'Antwerp.net.xml')
+        route = ('E76', 'E77', 'D3')
+        def state(road, lane):
+            index = route.index(road)
+            estimate = route_urgency(network, route, index, lane, 0.0, 12.0,
+                                     5.0, LANE_CHANGE_EDGES)
+            self.assertEqual(estimate['status'], 'ok')
+            return {'road': road, 'lane': lane,
+                    'minimum_lane_changes': estimate['minimum_lane_changes']}
+        reward = progress.load_experiment(directional=True)['reward']
+        self.assertEqual(progress.directional_lane_reward(
+            state('E76', 2), state('E76', 1), reward), (3.0, 'toward'))
+        self.assertEqual(progress.directional_lane_reward(
+            state('E77', 0), state('E77', 1), reward), (-6.0, 'away'))
+        self.assertEqual(progress.directional_lane_reward(
+            state('E76', 0), state('E77', 1), reward), (0.0, None))
+        self.assertEqual(progress.directional_lane_reward(
+            state('E76', 2), state('E76', 2), reward), (0.0, None))
+
+    def test_directional_tracker_requires_settled_physical_change(self):
+        config = progress.load_experiment(directional=True)
+        env = Merging(seed=42, task=exit_config.TASK_ID,
+                      exit_reward_profile=exit_config.DIRECTIONAL_REWARD_PROFILE,
+                      progress_experiment=config)
+        env.ego_on_road = True
+        env.lane_name = 'E77'
+        env._connection = Mock()
+        env._connection.vehicle.getLateralSpeed.return_value = 0.0
+        def estimate(lane, n, pending=False, road='E77'):
+            return {'status': 'ok', 'valid_for_threshold': not pending, 'pending': pending,
+                    'road': road, 'projected_lane': lane, 'minimum_lane_changes': n}
+        with patch('src.merging.observe_route_urgency') as observe:
+            observe.return_value = estimate(1, 1)
+            env._update_directional_lane_reward()
+            env.directional_pending_request = -1
+            observe.return_value = estimate(1, 1, pending=True)
+            env._update_directional_lane_reward()
+            observe.return_value = estimate(1, 1)
+            env._update_directional_lane_reward()
+            self.assertEqual(env.directional_lane_reward, 0.0)
+            self.assertIsNone(env.directional_pending_request)
+            env.directional_pending_request = -1
+            env.directional_seen_lateral_motion = True
+            observe.return_value = estimate(0, 0, pending=True)
+            env._update_directional_lane_reward()
+            self.assertEqual(env.directional_lane_reward, 0)
+            observe.return_value = estimate(0, 0)
+            env._update_directional_lane_reward()
+            self.assertEqual(env.directional_lane_reward, 3.0)
+            self.assertEqual(env.directional_lane_event['request_direction'], -1)
+            env._update_directional_lane_reward()
+            self.assertEqual(env.directional_lane_reward, 0.0)
+            self.assertIsNone(env.directional_lane_event)
+            observe.return_value = estimate(1, 1)
+            env.directional_pending_request = 1
+            env.directional_seen_lateral_motion = True
+            env._update_directional_lane_reward()
+            self.assertEqual(env.directional_lane_reward, -6.0)
+            observe.return_value = estimate(1, 1, road='E76')
+            env.lane_name = 'E76'
+            env._update_directional_lane_reward()
+            self.assertEqual(env.directional_lane_reward, 0.0)
+            env.teleport_transition = True
+            env._update_directional_lane_reward()
+            self.assertIsNone(env.directional_settled_lane)
+
+    def test_directional_reward_combines_once_with_progress_and_event(self):
+        config = progress.load_experiment(directional=True)
+        env = Merging(seed=42, task=exit_config.TASK_ID,
+                      exit_reward_profile=exit_config.DIRECTIONAL_REWARD_PROFILE,
+                      progress_experiment=config)
+        env.progress_initial_remaining = 1000.0
+        env.progress_before_remaining = 500.0
+        env.progress_after_remaining = 490.0
+        env.progress_before_odometer = 500.0
+        env.progress_after_odometer = 510.0
+        env.directional_lane_reward = 3.0
+        env.terminal_reason = 'Arrived'
+        earned = env.getReward()
+        self.assertAlmostEqual(earned, 0.15 * 10 * 1.5 + 3 + 50)
+        self.assertAlmostEqual(sum(env.reward_components.values()), earned)
+        self.assertEqual(env.reward_components['lane_change'], 3.0)
+        self.assertEqual(env.reward_components['arrival'], 50.0)
+        self.assertEqual(env.reward_components['collision'], 0.0)
+        self.assertTrue(np.isfinite(earned))
 
 
 if __name__ == '__main__':

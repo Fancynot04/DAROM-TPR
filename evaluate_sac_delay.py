@@ -68,9 +68,13 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
         raise ValueError('E09 evaluation requires a valid mode and custom safety off')
     reward_profile = getattr(model, 'exit_reward_profile', None)
     progress_experiment = None
-    if task == exit_config.TASK_ID and reward_profile == exit_config.PROGRESS_REWARD_PROFILE:
+    if (task == exit_config.TASK_ID and
+            reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
+                               exit_config.DIRECTIONAL_REWARD_PROFILE)):
         progress_experiment = exit_progress_reward.validate_experiment(
             getattr(model, 'exit_progress_experiment', None))
+        if exit_progress_reward.reward_profile(progress_experiment) != reward_profile:
+            raise ValueError('Checkpoint progress reward profile does not match its configuration')
         if (getattr(model, 'exit_progress_reward_identity', None)
                 != exit_progress_reward.reward_identity(progress_experiment['reward'])):
             raise ValueError('Checkpoint progress reward identity does not match its configuration')
@@ -165,6 +169,15 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
     records = []
     for episode in range(episodes):
         observation, reset_info = env.reset(seed=seed + episode)
+        base = env.unwrapped
+        directional = (getattr(base, 'exit_reward_profile', None)
+                       == exit_config.DIRECTIONAL_REWARD_PROFILE)
+        reward_totals = Counter()
+        lane_events = Counter()
+        first_direct_exit_lane_remaining = None
+        previous_lane_direction = None
+        reversals = 0
+        discounted_return = 0.0
         episode_return = 0.0
         unshaped_episode_return = 0.0
         steps = 0
@@ -172,6 +185,12 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
         previous_e77_lane = None
         e77_zero_departures = 0
         while True:
+            if directional and first_direct_exit_lane_remaining is None and base.ego_on_road:
+                road = base.traci.vehicle.getRoadID(base.ego_id)
+                lane = int(base.traci.vehicle.getLaneIndex(base.ego_id))
+                if (base.route_network.connections.get((road, exit_config.DESTINATION, lane))
+                        and base._exit_laterally_settled() and base.exit_maneuver is None):
+                    first_direct_exit_lane_remaining = base._remaining_to_d3_end()
             urgency_record = None
             if urgency_trace is not None:
                 urgency_record = observe_route_urgency(
@@ -179,6 +198,24 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                     lane_change_seconds=exit_config.LANE_CHANGE_TIME_SECONDS)
             action, _ = model.predict(observation, deterministic=True)
             observation, reward, terminated, truncated, info = env.step(action)
+            if directional:
+                discounted_return += model.gamma ** steps * float(reward)
+                for name, value in info['reward_components'].items():
+                    reward_totals[name] += float(value)
+                event = info.get('directional_lane_change_event')
+                if event is not None:
+                    lane_events[event['route_direction']] += 1
+                    if (previous_lane_direction is not None
+                            and previous_lane_direction != event['actual_direction']):
+                        reversals += 1
+                    previous_lane_direction = event['actual_direction']
+                    before, after = event['before'], event['after']
+                    if (base.route_network.connections.get(
+                            (before['road'], exit_config.DESTINATION, before['lane']))
+                            and not base.route_network.connections.get(
+                                (after['road'], exit_config.DESTINATION, after['lane']))
+                            and event['request_direction'] == event['actual_direction']):
+                        lane_events['left_direct_exit_lane'] += 1
             if urgency_record is not None:
                 potential, unshaped_reward = diagnostic_reward_without_potential(
                     reward, info, task)
@@ -230,6 +267,14 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                 if task == exit_config.TASK_ID:
                     record['e77_zero_departures'] = e77_zero_departures
                     record['left_e77_zero_after_entry'] = e77_zero_departures > 0
+                if directional:
+                    record.update(
+                        first_direct_exit_lane_remaining_m=first_direct_exit_lane_remaining,
+                        lane_change_counts=dict(lane_events),
+                        lane_change_direction_reversals=reversals,
+                        reward_totals=dict(reward_totals),
+                        event_reward_total=sum(reward_totals[name] for name in exit_progress_reward.EVENTS.values()),
+                        discounted_return=discounted_return)
                 if urgency_trace is not None:
                     record['return_without_potential'] = unshaped_episode_return
                 records.append(record)
@@ -254,6 +299,23 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
         if task == exit_config.TASK_ID:
             result['e77_zero_redeparture_episodes'] = sum(
                 item['left_e77_zero_after_entry'] for item in records)
+    if directional:
+        first_distances = [row['first_direct_exit_lane_remaining_m'] for row in records
+                           if row['first_direct_exit_lane_remaining_m'] is not None]
+        departures = sum(row['lane_change_counts'].get('left_direct_exit_lane', 0) > 0
+                         for row in records)
+        result['directional_behavior'] = {
+            'first_direct_exit_lane_n': len(first_distances),
+            'first_direct_exit_lane_remaining_mean_m': (
+                float(np.mean(first_distances)) if first_distances else None),
+            'left_direct_exit_lane_episodes': departures,
+            'left_direct_exit_lane_episode_rate': 100 * departures / episodes,
+            'toward_completed_changes': sum(
+                row['lane_change_counts'].get('toward', 0) for row in records),
+            'away_completed_changes': sum(
+                row['lane_change_counts'].get('away', 0) for row in records),
+            'direction_reversals': sum(row['lane_change_direction_reversals'] for row in records),
+        }
     return result
 
 

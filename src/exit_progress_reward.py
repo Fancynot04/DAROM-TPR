@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 PROFILE = 'route_end_progress_events_v1'
+DIRECTIONAL_PROFILE = 'route_end_progress_events_directional_lc_v1'
 DEFAULT_EXPERIMENT = {
     'seed': 42,
     'scenario': 'easy',
@@ -23,6 +24,12 @@ DEFAULT_EXPERIMENT = {
         'teleport': -100.0,
     },
 }
+DIRECTIONAL_EXPERIMENT = {
+    **DEFAULT_EXPERIMENT,
+    'total_timesteps': 1_000_000,
+    'checkpoint_freq': 200_000,
+    'reward': {**DEFAULT_EXPERIMENT['reward'], 'alpha': 3.0, 'beta': 6.0},
+}
 EVENTS = {
     'Arrived': 'arrival',
     'Collision': 'collision',
@@ -30,6 +37,16 @@ EVENTS = {
     'Missed Exit': 'missed_exit',
     'Ego Teleported': 'teleport',
 }
+
+
+def reward_profile(config):
+    keys = set(config['reward'])
+    base = set(DEFAULT_EXPERIMENT['reward'])
+    if keys == base:
+        return PROFILE
+    if keys == base | {'alpha', 'beta'}:
+        return DIRECTIONAL_PROFILE
+    raise ValueError('Progress reward fields do not match a known version')
 
 
 def validate_experiment(config):
@@ -40,31 +57,41 @@ def validate_experiment(config):
             or type(config['total_timesteps']) is not int or config['total_timesteps'] <= 0
             or type(config['checkpoint_freq']) is not int or config['checkpoint_freq'] <= 0):
         raise ValueError('Invalid progress experiment seed, scenario, budget or checkpoint interval')
-    if not isinstance(config['reward'], dict) or set(config['reward']) != set(DEFAULT_EXPERIMENT['reward']):
-        raise ValueError('Progress reward requires exactly seven configured coefficients')
+    if not isinstance(config['reward'], dict):
+        raise ValueError('Progress reward must be an object')
+    profile = reward_profile(config)
     for name, value in {**config['reward'], 'timeout_seconds': config['timeout_seconds']}.items():
         if type(value) not in (int, float) or not math.isfinite(value):
             raise ValueError(f'{name} must be a finite number')
     if (config['reward']['progress_per_meter'] < 0 or config['reward']['proximity_gain'] < 0
             or config['reward']['arrival'] < 0
             or any(config['reward'][name] > 0 for name in ('collision', 'timeout', 'missed_exit', 'teleport'))
+            or (profile == DIRECTIONAL_PROFILE and
+                (config['reward']['alpha'] < 0 or config['reward']['beta'] < 0))
             or config['timeout_seconds'] <= 0):
         raise ValueError('Progress, completion, failure and timeout signs must match the task')
     return json.loads(json.dumps(config))
 
 
-def load_experiment(path=None):
-    return validate_experiment(DEFAULT_EXPERIMENT if path is None else json.loads(Path(path).read_text()))
+def load_experiment(path=None, directional=False):
+    default = DIRECTIONAL_EXPERIMENT if directional else DEFAULT_EXPERIMENT
+    config = validate_experiment(default if path is None else json.loads(Path(path).read_text()))
+    expected = DIRECTIONAL_PROFILE if directional else PROFILE
+    if reward_profile(config) != expected:
+        raise ValueError(f'Configuration reward version must be {expected}')
+    return config
 
 
 def reward_identity(reward):
-    payload = json.dumps({'profile': PROFILE, 'reward': reward}, sort_keys=True,
+    profile = reward_profile({'reward': reward})
+    payload = json.dumps({'profile': profile, 'reward': reward}, sort_keys=True,
                          separators=(',', ':'), allow_nan=False).encode()
     return hashlib.sha256(payload).hexdigest()
 
 
 def experiment_identity(config):
-    payload = json.dumps({'profile': PROFILE, 'experiment': validate_experiment(config)},
+    profile = reward_profile(config)
+    payload = json.dumps({'profile': profile, 'experiment': validate_experiment(config)},
                          sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
     return hashlib.sha256(payload).hexdigest()
 
@@ -86,3 +113,16 @@ def progress_reward(before_remaining, after_remaining, before_odometer,
 def event_reward(outcome, reward):
     key = EVENTS.get(outcome)
     return (key, float(reward[key])) if key is not None else (None, 0.0)
+
+
+def directional_lane_reward(before, after, reward):
+    """Reward one verified same-edge adjacent lane change by route need."""
+    if (before is None or after is None or before['road'] != after['road']
+            or abs(after['lane'] - before['lane']) != 1):
+        return 0.0, None
+    delta = after['minimum_lane_changes'] - before['minimum_lane_changes']
+    if delta < 0:
+        return float(reward['alpha']), 'toward'
+    if delta > 0:
+        return -float(reward['beta']), 'away'
+    return 0.0, 'neutral'

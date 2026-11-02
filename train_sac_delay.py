@@ -35,6 +35,9 @@ class EpisodeRewardCallback(BaseCallback):
         self.current_episode_length = 0
         self.current_potential_reward = 0.0
         self.current_urgency_reward = 0.0
+        self.current_progress_reward = 0.0
+        self.current_event_reward = 0.0
+        self.current_lane_change_reward = 0.0
         self.lane_episodes = [0] * 5
         self.lane_successes = [0] * 5
         self.recent_outcomes = deque(maxlen=20)
@@ -57,9 +60,21 @@ class EpisodeRewardCallback(BaseCallback):
             self.log_file.close()
 
     def _on_step(self) -> bool:
-        direction = self.locals['infos'][0].get('exit_actor_request_direction', 0)
+        step_info = self.locals['infos'][0]
+        direction = step_info.get('exit_actor_request_direction', 0)
         self.toward_requests += int(direction == -1)
         self.away_requests += int(direction == 1)
+        if step_info.get('exit_reward_profile') == exit_config.DIRECTIONAL_REWARD_PROFILE:
+            components = step_info['reward_components']
+            self.current_progress_reward += components['progress']
+            self.current_lane_change_reward += components['lane_change']
+            self.current_event_reward += sum(
+                components[name] for name in exit_progress_reward.EVENTS.values())
+            event = step_info.get('directional_lane_change_event')
+            if event is not None:
+                self._write({'event': 'directional_lane_change',
+                             'steps': self.num_timesteps, 'transition': event,
+                             'reward_components': components})
         # Track episode reward and length
         self.current_episode_reward += self.locals['rewards'][0]
         self.current_potential_reward += self.locals['infos'][0].get('potential_reward', 0.0)
@@ -118,6 +133,10 @@ class EpisodeRewardCallback(BaseCallback):
                 metrics['train/episode_potential_reward'] = float(self.current_potential_reward)
                 if info.get('exit_reward_profile') == exit_config.URGENCY_REWARD_PROFILE:
                     metrics['train/episode_urgency_reward'] = float(self.current_urgency_reward)
+                if info.get('exit_reward_profile') == exit_config.DIRECTIONAL_REWARD_PROFILE:
+                    metrics['train/episode_progress_reward'] = float(self.current_progress_reward)
+                    metrics['train/episode_event_reward'] = float(self.current_event_reward)
+                    metrics['train/episode_lane_change_reward'] = float(self.current_lane_change_reward)
                 if 0 <= start_lane < 5:
                     self.lane_episodes[start_lane] += 1
                     self.lane_successes[start_lane] += int(info['is_success'])
@@ -136,6 +155,9 @@ class EpisodeRewardCallback(BaseCallback):
             self.current_episode_length = 0
             self.current_potential_reward = 0.0
             self.current_urgency_reward = 0.0
+            self.current_progress_reward = 0.0
+            self.current_event_reward = 0.0
+            self.current_lane_change_reward = 0.0
 
         if self.num_timesteps % 100 == 0 and self.locals['infos'][0].get('ego_start_lane') is not None:
             latest = self.model.logger.name_to_value
@@ -253,7 +275,7 @@ def parse_args():
     parser.add_argument('--exit_phase', choices=tuple(exit_config.PHASES), default=None,
                         help='Dedicated E76-to-D3 Easy pilot or Easy 1M configuration')
     parser.add_argument('--exit_config', default=None,
-                        help='JSON run/reward configuration for --exit_phase progress_events')
+                        help='JSON run/reward configuration for a progress_events phase')
     parser.add_argument('--safety', dest='use_safety', action='store_true')
     parser.add_argument('--save_dir', type=str, default='models_experiments')
     parser.add_argument('--load_path', type=str, default=None)
@@ -267,12 +289,14 @@ def parse_args():
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
-    if args.exit_config and args.exit_phase != 'progress_events':
-        parser.error('--exit_config is only for --exit_phase progress_events')
+    progress_phases = ('progress_events', 'progress_events_directional_lc')
+    if args.exit_config and args.exit_phase not in progress_phases:
+        parser.error('--exit_config requires a progress_events phase')
     args.progress_experiment = None
-    if args.exit_phase == 'progress_events':
+    if args.exit_phase in progress_phases:
         try:
-            args.progress_experiment = exit_progress_reward.load_experiment(args.exit_config)
+            args.progress_experiment = exit_progress_reward.load_experiment(
+                args.exit_config, directional=args.exit_phase == 'progress_events_directional_lc')
         except (OSError, ValueError, json.JSONDecodeError) as error:
             parser.error(f'Invalid progress experiment configuration: {error}')
         args.seed = args.progress_experiment['seed']

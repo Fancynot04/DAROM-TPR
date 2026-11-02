@@ -590,6 +590,47 @@ The existing E76→D3 and other Antwerp profiles retain their 600-second limit.
 This branch does not authorize a long run; record and confirm the remote
 experiment's actual parameters and fixed source commit before launch.
 
+#### Directional lane-change reward candidate (1M, not yet launched)
+
+`--exit_phase progress_events_directional_lc` retains the progress/event
+configuration above, the 400-second timeout, 134-dimensional delayed input,
+and safety-off `tracked_lane_change_v2` control. Its separate reward version is
+`route_end_progress_events_directional_lc_v1`. The default run uses Easy,
+training seed 42, 1,000,000 fresh environment steps, and model plus replay
+checkpoints every 200,000 steps. W&B can be disabled with `--wandb_mode disabled`.
+The only additional coefficients are `reward.alpha=3.0` and `reward.beta=6.0`.
+An explicit `--exit_config` JSON uses the same fields as above with these two
+additional reward entries. The version, full configuration and identities are
+stored in the manifest and checkpoint; the baseline progress checkpoint and
+replay buffer cannot be resumed under this changed reward.
+
+The lane-change reward is `+alpha` when a **completed** adjacent same-edge
+change reduces the route graph's minimum necessary active lane changes to D3,
+`-beta` when it increases that count, and zero otherwise. The graph is loaded
+from `sumo_new/Antwerp.net.xml`, including lane-level connections and junction
+`via` lanes. A settled `n=0` means a zero-change route exists, not that every
+legal continuation will enter D3. The event is detected after the physical
+lane index changes, lateral motion settles and the managed maneuver is no
+longer Pending. Repeated requests and Pending samples pay nothing. A normal
+E76→E77 connector remap resets the settled baseline and never earns a
+lane-change reward; a change still Pending across that boundary is deliberately
+not credited because its physical completion cannot be separated reliably
+from the connector remap. Teleport, collision and invalid route states earn
+no lane-change reward. Each event records stable before/after road, lane and
+minimum change count, last accepted request direction, actual direction,
+route direction and reward in `directional_lane_change_event`.
+
+The evaluator records first settled entry into a lane directly connected to
+D3 (remaining route-end meters), completed toward/away changes, departures
+from directly connected lanes, direction reversals, progress/event/lane-change
+reward totals, discounted return and ordinary undiscounted return per episode.
+Use the fixed evaluation seeds 200051–200100 with `--episodes 50 --seed 200051`.
+The 200k progress baseline is a different-budget reference, not a matched 1M
+comparison. Five periodic model/replay pairs are expected at 200k, 400k,
+600k, 800k and 1M, plus the final pair saved separately. Confirm remote
+capacity before launching; this phase remains unstarted until its plan,
+configuration and risk have explicit approval.
+
 `--exit_phase easy_pilot` and `--exit_phase easy_1m` select a separate
 `exit_e76_d3` task on the single-ego DAROM GRU/SAC training entry. Its route
 files preserve each scenario's background traffic. The ego trip is `E76 → D3`
