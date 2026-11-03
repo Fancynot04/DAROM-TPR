@@ -1,5 +1,6 @@
 # from delay_encoder import DelayAwareGRUEncoder
 import os
+import sys
 import time
 import argparse
 import json
@@ -38,6 +39,8 @@ class EpisodeRewardCallback(BaseCallback):
         self.current_progress_reward = 0.0
         self.current_event_reward = 0.0
         self.current_lane_change_reward = 0.0
+        self.current_efficiency_reward = 0.0
+        self.current_route_reward = 0.0
         self.lane_episodes = [0] * 5
         self.lane_successes = [0] * 5
         self.recent_outcomes = deque(maxlen=20)
@@ -64,8 +67,21 @@ class EpisodeRewardCallback(BaseCallback):
         direction = step_info.get('exit_actor_request_direction', 0)
         self.toward_requests += int(direction == -1)
         self.away_requests += int(direction == 1)
-        if step_info.get('exit_reward_profile') == exit_config.DIRECTIONAL_REWARD_PROFILE:
+        if step_info.get('exit_reward_profile') in (exit_config.DIRECTIONAL_REWARD_PROFILE, *exit_config.secrm_reward.PROFILES):
             components = step_info['reward_components']
+            self.current_efficiency_reward += components.get('efficiency', 0.0)
+            self.current_route_reward += components.get('route_following', 0.0)
+            if step_info.get('secrm_diagnostic') is not None:
+                target = step_info['secrm_diagnostic']['target']
+                effective = {key: target[key] for key in ('ego_decel', 'leader_decel',
+                    'effective_decel', 'stopped_gap', 'reaction_seconds')}
+                seen = getattr(self.model, 'secrm_effective_vehicle_parameters', [])
+                if effective not in seen:
+                    self.model.secrm_effective_vehicle_parameters = seen + [effective]
+                self._write({'event': 'secrm', 'steps': self.num_timesteps,
+                             'diagnostic': step_info['secrm_diagnostic'],
+                             'reward_components': components,
+                             'road_boundary': step_info.get('road_boundary')})
             self.current_progress_reward += components['progress']
             self.current_lane_change_reward += components['lane_change']
             self.current_event_reward += sum(
@@ -133,7 +149,9 @@ class EpisodeRewardCallback(BaseCallback):
                 metrics['train/episode_potential_reward'] = float(self.current_potential_reward)
                 if info.get('exit_reward_profile') == exit_config.URGENCY_REWARD_PROFILE:
                     metrics['train/episode_urgency_reward'] = float(self.current_urgency_reward)
-                if info.get('exit_reward_profile') == exit_config.DIRECTIONAL_REWARD_PROFILE:
+                if info.get('exit_reward_profile') in (exit_config.DIRECTIONAL_REWARD_PROFILE, *exit_config.secrm_reward.PROFILES):
+                    metrics['train/episode_efficiency_reward'] = float(self.current_efficiency_reward)
+                    metrics['train/episode_route_reward'] = float(self.current_route_reward)
                     metrics['train/episode_progress_reward'] = float(self.current_progress_reward)
                     metrics['train/episode_event_reward'] = float(self.current_event_reward)
                     metrics['train/episode_lane_change_reward'] = float(self.current_lane_change_reward)
@@ -155,6 +173,8 @@ class EpisodeRewardCallback(BaseCallback):
             self.current_episode_length = 0
             self.current_potential_reward = 0.0
             self.current_urgency_reward = 0.0
+            self.current_efficiency_reward = 0.0
+            self.current_route_reward = 0.0
             self.current_progress_reward = 0.0
             self.current_event_reward = 0.0
             self.current_lane_change_reward = 0.0
@@ -289,14 +309,19 @@ def parse_args():
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
-    progress_phases = ('progress_events', 'progress_events_directional_lc')
+    progress_phases = ('progress_events', 'progress_events_directional_lc',
+                       'secrm_efficiency', 'secrm_efficiency_route')
     if args.exit_config and args.exit_phase not in progress_phases:
         parser.error('--exit_config requires a progress_events phase')
     args.progress_experiment = None
+    if args.exit_phase and args.exit_phase.startswith('secrm_'):
+        if not any(arg == '--wandb_mode' or arg.startswith('--wandb_mode=') for arg in sys.argv):
+            args.wandb_mode = 'disabled'
     if args.exit_phase in progress_phases:
         try:
             args.progress_experiment = exit_progress_reward.load_experiment(
-                args.exit_config, directional=args.exit_phase == 'progress_events_directional_lc')
+                args.exit_config, directional=args.exit_phase == 'progress_events_directional_lc',
+                phase=args.exit_phase)
         except (OSError, ValueError, json.JSONDecodeError) as error:
             parser.error(f'Invalid progress experiment configuration: {error}')
         args.seed = args.progress_experiment['seed']
@@ -438,6 +463,9 @@ def main():
                         if args.exit_phase else None),
         potential_gamma=(args.gamma if args.exit_phase else None),
         reward_profile=args.exit_reward_profile,
+        secrm_formula_version=(exit_config.secrm_reward.FORMULA_VERSION
+                              if args.exit_reward_profile in exit_config.secrm_reward.PROFILES else None),
+        secrm_vehicle_parameter_policy='SUMO decel/minGap/allowedSpeed; effective ego decel=min(ego,leader)',
         progress_experiment=args.progress_experiment,
         progress_reward_identity=(exit_progress_reward.reward_identity(args.progress_experiment['reward'])
                                   if args.progress_experiment is not None else None),
@@ -585,6 +613,9 @@ def main():
                 if (getattr(loaded_model, 'exit_reward_profile', None)
                         != args.exit_reward_profile):
                     raise ValueError('Loaded model has a different E76-to-D3 reward profile')
+                if args.exit_reward_profile in exit_config.secrm_reward.PROFILES:
+                    if getattr(loaded_model, 'secrm_formula_version', None) != exit_config.secrm_reward.FORMULA_VERSION:
+                        raise ValueError('Loaded model has different SECRM formula version')
                 if args.progress_experiment is not None:
                     saved_experiment = getattr(loaded_model, 'exit_progress_experiment', None)
                     if saved_experiment is None:
@@ -608,6 +639,8 @@ def main():
                     raise ValueError('NAV136 300k continuation requires a 200k checkpoint')
                 if not e09:
                     loaded_model.load_replay_buffer(args.replay_buffer_path)
+                    if args.exit_reward_profile in exit_config.secrm_reward.PROFILES:
+                        exit_config.secrm_reward.validate_replay(loaded_model.replay_buffer, args.progress_experiment)
                 else:
                     from src.curriculum_branch import prepare_empty_replay_branch
                     prepare_empty_replay_branch(loaded_model, vec_env)
@@ -633,6 +666,11 @@ def main():
         model.exit_potential_beta = exit_config.potential_beta_for_profile(args.exit_reward_profile)
         model.exit_potential_gamma = args.gamma
         model.exit_reward_profile = args.exit_reward_profile
+        if args.exit_reward_profile in exit_config.secrm_reward.PROFILES:
+            model.secrm_formula_version = exit_config.secrm_reward.FORMULA_VERSION
+            exit_config.secrm_reward.stamp_replay(model.replay_buffer, args.progress_experiment)
+            if not hasattr(model, 'secrm_effective_vehicle_parameters'):
+                model.secrm_effective_vehicle_parameters = []
         if args.progress_experiment is not None:
             model.exit_progress_experiment = args.progress_experiment
             model.exit_progress_reward_identity = exit_progress_reward.reward_identity(

@@ -3,6 +3,7 @@
 import hashlib
 import json
 import math
+from . import secrm_reward
 from pathlib import Path
 
 
@@ -30,6 +31,16 @@ DIRECTIONAL_EXPERIMENT = {
     'checkpoint_freq': 200_000,
     'reward': {**DEFAULT_EXPERIMENT['reward'], 'alpha': 3.0, 'beta': 6.0},
 }
+SECRM_DEFAULTS = {
+    name: {**DEFAULT_EXPERIMENT, 'reward': {
+        **{key: DEFAULT_EXPERIMENT['reward'][key] for key in
+           ('arrival', 'collision', 'timeout', 'missed_exit', 'teleport')},
+        'efficiency_weight': 1.0, 'speed_epsilon': 0.1,
+        **({'route_weight': 1.0} if name == 'secrm_efficiency_route' else {})}}
+    for name in ('secrm_efficiency', 'secrm_efficiency_route')
+}
+CONFIGURABLE_PROFILES = (PROFILE, DIRECTIONAL_PROFILE, *secrm_reward.PROFILES)
+
 EVENTS = {
     'Arrived': 'arrival',
     'Collision': 'collision',
@@ -46,6 +57,10 @@ def reward_profile(config):
         return PROFILE
     if keys == base | {'alpha', 'beta'}:
         return DIRECTIONAL_PROFILE
+    for name, config in SECRM_DEFAULTS.items():
+        if keys == set(config['reward']):
+            return (secrm_reward.ROUTE_PROFILE if name.endswith('_route')
+                    else secrm_reward.EFFICIENCY_PROFILE)
     raise ValueError('Progress reward fields do not match a known version')
 
 
@@ -63,20 +78,24 @@ def validate_experiment(config):
     for name, value in {**config['reward'], 'timeout_seconds': config['timeout_seconds']}.items():
         if type(value) not in (int, float) or not math.isfinite(value):
             raise ValueError(f'{name} must be a finite number')
-    if (config['reward']['progress_per_meter'] < 0 or config['reward']['proximity_gain'] < 0
+    if (config['reward'].get('progress_per_meter', 0) < 0 or config['reward'].get('proximity_gain', 0) < 0
             or config['reward']['arrival'] < 0
             or any(config['reward'][name] > 0 for name in ('collision', 'timeout', 'missed_exit', 'teleport'))
             or (profile == DIRECTIONAL_PROFILE and
                 (config['reward']['alpha'] < 0 or config['reward']['beta'] < 0))
+            or config['reward'].get('efficiency_weight', 0) < 0
+            or config['reward'].get('route_weight', 0) < 0
+            or config['reward'].get('speed_epsilon', 0.1) <= 0
             or config['timeout_seconds'] <= 0):
         raise ValueError('Progress, completion, failure and timeout signs must match the task')
     return json.loads(json.dumps(config))
 
 
-def load_experiment(path=None, directional=False):
-    default = DIRECTIONAL_EXPERIMENT if directional else DEFAULT_EXPERIMENT
+def load_experiment(path=None, directional=False, phase=None):
+    default = (SECRM_DEFAULTS[phase] if phase in SECRM_DEFAULTS else
+               DIRECTIONAL_EXPERIMENT if directional else DEFAULT_EXPERIMENT)
     config = validate_experiment(default if path is None else json.loads(Path(path).read_text()))
-    expected = DIRECTIONAL_PROFILE if directional else PROFILE
+    expected = reward_profile(default)
     if reward_profile(config) != expected:
         raise ValueError(f'Configuration reward version must be {expected}')
     return config

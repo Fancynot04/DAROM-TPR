@@ -68,9 +68,12 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
         raise ValueError('E09 evaluation requires a valid mode and custom safety off')
     reward_profile = getattr(model, 'exit_reward_profile', None)
     progress_experiment = None
+    if reward_profile in exit_config.secrm_reward.PROFILES:
+        if getattr(model, 'secrm_formula_version', None) != exit_config.secrm_reward.FORMULA_VERSION:
+            raise ValueError('Checkpoint SECRM formula version mismatch')
     if (task == exit_config.TASK_ID and
             reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
-                               exit_config.DIRECTIONAL_REWARD_PROFILE)):
+                               exit_config.DIRECTIONAL_REWARD_PROFILE, *exit_config.secrm_reward.PROFILES)):
         progress_experiment = exit_progress_reward.validate_experiment(
             getattr(model, 'exit_progress_experiment', None))
         if exit_progress_reward.reward_profile(progress_experiment) != reward_profile:
@@ -170,8 +173,11 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
     for episode in range(episodes):
         observation, reset_info = env.reset(seed=seed + episode)
         base = env.unwrapped
+        secrm = getattr(base, 'exit_reward_profile', None) in exit_config.secrm_reward.PROFILES
         directional = (getattr(base, 'exit_reward_profile', None)
-                       == exit_config.DIRECTIONAL_REWARD_PROFILE)
+                       == exit_config.DIRECTIONAL_REWARD_PROFILE) or secrm
+        boundary_counts = Counter()
+        boundary_max_area = 0.0
         reward_totals = Counter()
         lane_events = Counter()
         first_direct_exit_lane_remaining = None
@@ -188,8 +194,10 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
             if directional and first_direct_exit_lane_remaining is None and base.ego_on_road:
                 road = base.traci.vehicle.getRoadID(base.ego_id)
                 lane = int(base.traci.vehicle.getLaneIndex(base.ego_id))
-                if (base.route_network.connections.get((road, exit_config.DESTINATION, lane))
-                        and base._exit_laterally_settled() and base.exit_maneuver is None):
+                route_zero = (base._secrm_snapshot()['route'].get('required_changes') == 0
+                              if secrm else bool(base.route_network.connections.get(
+                                  (road, exit_config.DESTINATION, lane))))
+                if (route_zero and base._exit_laterally_settled() and base.exit_maneuver is None):
                     first_direct_exit_lane_remaining = base._remaining_to_d3_end()
             urgency_record = None
             if urgency_trace is not None:
@@ -198,6 +206,10 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                     lane_change_seconds=exit_config.LANE_CHANGE_TIME_SECONDS)
             action, _ = model.predict(observation, deterministic=True)
             observation, reward, terminated, truncated, info = env.step(action)
+            if secrm:
+                boundary = info.get('road_boundary') or {'status': 'unknown'}
+                boundary_counts[boundary['status']] += 1
+                boundary_max_area = max(boundary_max_area, boundary.get('uncovered_area_m2', 0.0))
             if directional:
                 discounted_return += model.gamma ** steps * float(reward)
                 for name, value in info['reward_components'].items():
@@ -210,11 +222,12 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                         reversals += 1
                     previous_lane_direction = event['actual_direction']
                     before, after = event['before'], event['after']
-                    if (base.route_network.connections.get(
-                            (before['road'], exit_config.DESTINATION, before['lane']))
-                            and not base.route_network.connections.get(
-                                (after['road'], exit_config.DESTINATION, after['lane']))
-                            and event['request_direction'] == event['actual_direction']):
+                    left_favorable = (before['minimum_lane_changes'] == 0 and after['minimum_lane_changes'] > 0
+                                      if secrm else bool(base.route_network.connections.get(
+                                          (before['road'], exit_config.DESTINATION, before['lane'])))
+                                      and not base.route_network.connections.get(
+                                          (after['road'], exit_config.DESTINATION, after['lane'])))
+                    if (left_favorable and event['request_direction'] == event['actual_direction']):
                         lane_events['left_direct_exit_lane'] += 1
             if urgency_record is not None:
                 potential, unshaped_reward = diagnostic_reward_without_potential(
@@ -264,6 +277,15 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                                 'toward_requests': toward_requests,
                                 'away_requests': away_requests,
                                 'return': episode_return, 'reset_info': reset_info}
+                if secrm:
+                    record['road_boundary'] = {'sample_counts': dict(boundary_counts),
+                        'max_uncovered_area_m2': boundary_max_area,
+                        'full_body_exit_status': ('failed' if boundary_counts['outside'] or not record['success'] else 'unknown'),
+                        'reason': ('observed_road_boundary_violation' if boundary_counts['outside']
+                                   else 'no_route_completion' if not record['success']
+                                   else 'terminal_vehicle_removed_or_no_arrival_geometry'),
+                        'observed_body_safe_arrival': bool(record['success'] and not boundary_counts['outside']
+                                                         and not boundary_counts['unknown'])}
                 if task == exit_config.TASK_ID:
                     record['e77_zero_departures'] = e77_zero_departures
                     record['left_e77_zero_after_entry'] = e77_zero_departures > 0
@@ -316,6 +338,17 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                 row['lane_change_counts'].get('away', 0) for row in records),
             'direction_reversals': sum(row['lane_change_direction_reversals'] for row in records),
         }
+    if secrm:
+        result['boundary_diagnostics'] = {
+            'profile': 'sampled_footprint_road_union_v1',
+            'outside_episodes': sum(row['road_boundary']['sample_counts'].get('outside', 0) > 0 for row in records),
+            'unknown_sample_episodes': sum(row['road_boundary']['sample_counts'].get('unknown', 0) > 0 for row in records),
+            'observed_body_safe_arrivals': sum(row['road_boundary']['observed_body_safe_arrival'] for row in records),
+            'full_body_exit_qualified': 0,
+            'full_body_exit_unknown': sum(row['road_boundary']['full_body_exit_status'] == 'unknown' for row in records),
+            'full_body_exit_rate': None,
+            'limitation': 'SUMO removes arrived vehicles before a terminal footprint can be observed; sampled containment is not terminal certification.'}
+        result['directional_behavior']['first_entry_definition'] = 'settled_full_route_minimum_changes_zero'
     return result
 
 
@@ -374,6 +407,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
             'gru_input_mode': checkpoint_gru_input_mode(model),
             'antwerp_env_version': ANTWERP_ENV_VERSION,
             'training_seed': getattr(model, 'seed', None),
+            'secrm_formula_version': getattr(model, 'secrm_formula_version', None),
+            'secrm_effective_vehicle_parameters': getattr(model, 'secrm_effective_vehicle_parameters', None),
             'training_timesteps': getattr(model, 'num_timesteps', None),
             'deterministic': True, 'evaluation_seeds': list(seeds),
             'episodes_per_seed': episodes, 'total_episodes': episodes * len(seeds),

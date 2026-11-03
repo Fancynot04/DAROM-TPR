@@ -10,7 +10,7 @@ from gymnasium import spaces
 from .utils import *
 from .geometry import TrafficSnapshot, driving_axes, world_velocity
 from . import exit_e76_d3_config as exit_config
-from . import exit_progress_reward
+from . import exit_progress_reward, secrm_reward, road_boundary
 from .route_urgency import load_route_network, observe_route_urgency, route_urgency
 
 
@@ -133,7 +133,7 @@ class Merging(gym.Env):
         self.progress_experiment = (exit_progress_reward.validate_experiment(progress_experiment)
                                     if progress_experiment is not None else None)
         if self.exit_reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
-                                        exit_config.DIRECTIONAL_REWARD_PROFILE):
+                                        exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES):
             if task != exit_config.TASK_ID or self.progress_experiment is None:
                 raise ValueError('Progress reward requires an E76-D3 experiment configuration')
             if exit_progress_reward.reward_profile(self.progress_experiment) != self.exit_reward_profile:
@@ -154,7 +154,7 @@ class Merging(gym.Env):
             raise ValueError('An E76-to-D3 reward profile requires the E76-to-D3 task')
         self.route_network = (load_route_network(ANTWERP_DIR / 'Antwerp.net.xml')
                               if self.exit_reward_profile in (exit_config.URGENCY_REWARD_PROFILE,
-                                                              exit_config.DIRECTIONAL_REWARD_PROFILE)
+                                                              exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES)
                               and task == exit_config.TASK_ID else None)
         self.potential_gamma = (exit_config.POTENTIAL_GAMMA
                                 if potential_gamma is None else float(potential_gamma))
@@ -201,6 +201,10 @@ class Merging(gym.Env):
         self.progress_after_remaining = None
         self.progress_after_odometer = None
         self.terminal_reason = ''
+        self.secrm_before = None
+        self.secrm_stable = None
+        self.boundary_diagnostic = None
+        self.network_path = ANTWERP_DIR / 'Antwerp.net.xml'
         self.directional_settled_lane = None
         self.directional_pending_request = None
         self.directional_seen_lateral_motion = False
@@ -283,6 +287,10 @@ class Merging(gym.Env):
         self.progress_after_remaining = None
         self.progress_after_odometer = None
         self.terminal_reason = ''
+        self.secrm_before = None
+        self.secrm_stable = None
+        self.boundary_diagnostic = None
+        self.network_path = ANTWERP_DIR / 'Antwerp.net.xml'
         self.directional_settled_lane = None
         self.directional_pending_request = None
         self.directional_seen_lateral_motion = False
@@ -303,6 +311,43 @@ class Merging(gym.Env):
             distance = float(self.traci.vehicle.getDrivingDistance(
                 self.ego_id, 'D3', destination_position))
         return distance if math.isfinite(distance) and distance >= 0 else None
+
+    def _secrm_snapshot(self):
+        v, e = self.traci.vehicle, self.ego_id
+        leader = v.getLeader(e, 1000000.0)
+        params = dict(ego_decel=float(v.getDecel(e)), stopped_gap=float(v.getMinGap(e)))
+        if leader and leader[0]:
+            params = dict(gap=float(leader[1]) + float(v.getMinGap(e)),
+                          leader_speed=float(v.getSpeed(leader[0])),
+                          ego_decel=float(v.getDecel(e)),
+                          leader_decel=float(v.getDecel(leader[0])),
+                          stopped_gap=float(v.getMinGap(e)))
+        eff, diagnostic = secrm_reward.efficiency(
+            float(v.getSpeed(e)), float(v.getAllowedSpeed(e)), SUMO_STEP_LENGTH,
+            epsilon=self.progress_experiment['reward']['speed_epsilon'], **params)
+        road = v.getRoadID(e)
+        route_value = 0.0
+        route_info = {'status': 'connector_excluded', 'required_changes': None,
+                      'remaining_section_m': None}
+        if road == 'D3':
+            route_info = {'status': 'at_destination', 'required_changes': 0,
+                          'remaining_section_m': max(0.0, self._remaining_to_d3_end())}
+        elif not road.startswith(':'):
+            stable = self.exit_maneuver is None and self._exit_laterally_settled()
+            if stable:
+                required = secrm_reward.minimum_changes(
+                    self.route_network, tuple(v.getRoute(e)), int(v.getRouteIndex(e)),
+                    int(v.getLaneIndex(e)), LANE_CHANGE_EDGES)
+                self.secrm_stable = {'road': road, 'lane': int(v.getLaneIndex(e)),
+                                     'required_changes': required}
+            if self.secrm_stable is None:
+                raise ValueError('SECRM route has no stable lane before Pending')
+            remaining = float(self.traci.lane.getLength(v.getLaneID(e))) - float(v.getLanePosition(e))
+            route_value = secrm_reward.route_penalty(self.secrm_stable['required_changes'], max(0.0, remaining))
+            route_info = {**self.secrm_stable, 'status': 'settled' if stable else 'pending_cached',
+                          'remaining_section_m': max(0.0, remaining)}
+        return {'efficiency': eff, 'route_reward': route_value, 'target': diagnostic,
+                'route': route_info, 'road': road}
 
     def _reward_urgency(self):
         """Use only settled lane-route estimates for the opt-in reward."""
@@ -449,7 +494,7 @@ class Merging(gym.Env):
         """Settle a physical same-edge change once; ignore junction remapping."""
         self.directional_lane_reward = 0.0
         self.directional_lane_event = None
-        if self.exit_reward_profile != exit_config.DIRECTIONAL_REWARD_PROFILE:
+        if self.exit_reward_profile not in (exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES):
             return
         if (not self.ego_on_road or self.ego_teleported or self.teleport_transition
                 or self.terminal_reason in ('Collision', 'Ego Teleported')
@@ -482,7 +527,9 @@ class Merging(gym.Env):
             self.directional_seen_lateral_motion = False
             return
         value, direction = exit_progress_reward.directional_lane_reward(
-            previous, current, self.progress_experiment['reward'])
+            previous, current, (self.progress_experiment['reward']
+                                if self.exit_reward_profile == exit_config.DIRECTIONAL_REWARD_PROFILE
+                                else {'alpha': 0.0, 'beta': 0.0}))
         if (direction is not None and self.directional_pending_request is not None
                 and self.directional_seen_lateral_motion):
             self.directional_lane_reward = value
@@ -614,6 +661,19 @@ class Merging(gym.Env):
         }
 
     def getReward(self):
+
+        if self.exit_reward_profile in secrm_reward.PROFILES:
+            reward = self.progress_experiment['reward']
+            name, event = exit_progress_reward.event_reward(self.terminal_reason, reward)
+            values = self.secrm_before
+            active = values is not None and not self.teleport_transition and not self.ego_teleported
+            eff = values['efficiency'] * reward['efficiency_weight'] if active else 0.0
+            route = values['route_reward'] * reward.get('route_weight', 0.0) if active else 0.0
+            self.last_stage_reward = 0.0
+            self.reward_components = {'progress': 0.0, 'lane_change': 0.0,
+                'efficiency': eff, 'route_following': route,
+                **{key: event if key == name else 0.0 for key in exit_progress_reward.EVENTS.values()}}
+            return float(eff + route + event)
 
         if (self.exit_reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
                                          exit_config.DIRECTIONAL_REWARD_PROFILE)
@@ -830,7 +890,7 @@ class Merging(gym.Env):
                         self.exit_maneuver = {'edge': self.lane_name, 'target': target,
                                               'start_time': now, 'last_progress_time': now,
                                               'stable_steps': 0}
-                        if self.exit_reward_profile == exit_config.DIRECTIONAL_REWARD_PROFILE:
+                        if self.exit_reward_profile in (exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES):
                             self.directional_pending_request = int(direction)
                             self.directional_seen_lateral_motion = False
                     return
@@ -852,9 +912,12 @@ class Merging(gym.Env):
             self.lane_id = self.traci.vehicle.getLaneID(self.ego_id)
             self.lane_name = self.traci.vehicle.getRoadID(self.ego_id)
             self.lane_idx = self.traci.vehicle.getLaneIndex(self.ego_id)
-            if (self.exit_reward_profile == exit_config.DIRECTIONAL_REWARD_PROFILE
+            if (self.exit_reward_profile in (exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES)
                     and self.directional_settled_lane is None):
                 self._update_directional_lane_reward()
+        if self.exit_reward_profile in secrm_reward.PROFILES:
+            self.secrm_before = self._secrm_snapshot() if was_on_road else None
+            self.boundary_diagnostic = road_boundary.observe(self)
         parsed_action = parseAction(action)
         self.exit_actor_request_direction = (
             int(parsed_action[1]) if was_on_road and self.task == exit_config.TASK_ID
@@ -999,6 +1062,8 @@ class Merging(gym.Env):
                                              if self.task == exit_config.TASK_ID else None),
                      'exit_actor_request_direction': self.exit_actor_request_direction,
                      'directional_lane_change_event': self.directional_lane_event,
+                     'secrm_diagnostic': getattr(self, 'secrm_before', None),
+                     'road_boundary': getattr(self, 'boundary_diagnostic', None),
                      'teleport_started': started, 'teleport_ended': ended,
                      'is_success': info['message'] == 'Arrived' and not self.ego_teleported})
         return self.observation, float(self.reward), terminated, truncated, info

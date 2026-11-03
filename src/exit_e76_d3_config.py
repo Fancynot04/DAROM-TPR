@@ -1,5 +1,7 @@
 """Single-ego E76-to-D3 experiment profile."""
 
+from . import secrm_reward
+
 import math
 from .exit_progress_reward import PROFILE as PROGRESS_REWARD_PROFILE
 from .exit_progress_reward import DIRECTIONAL_PROFILE as DIRECTIONAL_REWARD_PROFILE
@@ -62,6 +64,11 @@ CURRICULUM_BRANCH_PHASES = {
 }
 
 PHASES = {
+    **{name: {'scenario': 'easy', 'total_timesteps': 200_000,
+              'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
+              'nav_features': False, 'reward_profile': profile}
+       for name, profile in zip(('secrm_efficiency', 'secrm_efficiency_route'),
+                                secrm_reward.PROFILES)},
     'progress_events': {
         'scenario': 'easy', 'total_timesteps': 200_000,
         'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
@@ -130,7 +137,7 @@ def potential_beta_for_profile(profile):
     if profile == REWARD_PROFILE:
         return POTENTIAL_BETA
     if profile in (URGENCY_REWARD_PROFILE, PROGRESS_REWARD_PROFILE,
-                   DIRECTIONAL_REWARD_PROFILE):
+                   DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES):
         return 0.0
     raise ValueError(f'Unknown E76-to-D3 reward profile: {profile!r}')
 

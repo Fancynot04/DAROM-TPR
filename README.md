@@ -2875,3 +2875,104 @@ If you use this code, please cite:
 ## Acknowledgements
 
 This work is supported by the National Science Foundation Award #2229885. Traffic demand and vehicle speed data are derived from the [NGSIM US Highway 101 dataset](https://www.fhwa.dot.gov/publications/research/operations/07030/).
+
+
+### SECRM-2D reward-only A/B (seed 42, 200k each)
+
+The `secrm_efficiency` (A) and `secrm_efficiency_route` (B) phases replace the
+route-end progress and directional lane-change payments with SECRM-2D-style
+longitudinal inefficiency, and, in B, route-following penalties. Both retain
+arrival +50 and collision/timeout/missed-exit/first-teleport −100, one terminal
+event per step. Native SUMO arrival and termination rules are preserved.
+The two phases share one code version, start independently from random weights
+and fresh replay, and run in order A → A evaluation → B → B evaluation.
+They are reward adaptations, not a reproduction of the paper's analytic safety
+controller. Source: [SECRM-2D, §§3.2–3.4 and 4.4](https://doi.org/10.1049/itr2.70013).
+
+At pre-action state `s_t`, the implementation computes Eq. (2)'s next-step safe
+speed bound and compares the resulting target against the current speed:
+
+```
+d = min(SUMO ego decel, SUMO leader decel)
+v_safe = max(0, -r*d/2 + sqrt((r*d/2)^2
+         - 2*d*(r*v/2 - v_leader^2/(2*d_leader) - gap + minGap)))
+v_target = min(v_safe, SUMO allowedSpeed)
+r_eff = -efficiency_weight * abs(v_target-v) / max(v_target, speed_epsilon)
+r_route = -route_weight * minimum_remaining_lane_changes / (1+section_remaining_m)
+```
+
+No leader means `v_target=allowedSpeed`. `getLeader` excludes ego `minGap`,
+which is added back to obtain the bumper gap before applying the formula.
+The effective `d` enforces the paper's defensive braking assumption for reward
+calculation only; it does not modify any SUMO vehicle or action. Reaction `r`
+is the 0.1 s simulation step. The default denominator floor is 0.1 m/s;
+zero speed at zero target pays zero. Negative radicands, invalid data or
+unreachable settled route states raise an error; no reward clipping or extra
+step-length scaling is applied. These failures must be investigated before
+formal training. Effective braking, gap and target values are logged; unique
+observed vehicle parameter combinations and the formula version are saved in
+model checkpoints.
+
+Route need comes from the complete remaining route's lane connections, not
+lane numbers or a hard-coded E77 lane. It is held at the previous settled
+value throughout Pending, then updated after containment/settling. `D` is the
+current external section's remaining distance, not distance to D3. Road
+transitions can therefore introduce jumps. Internal connectors pay no route
+penalty and carry an explicit excluded status, not a fabricated zero lane
+requirement. D3 pays no route penalty; its longitudinal reward continues.
+Actual completed lane-change events remain diagnostic only, with zero reward.
+
+Both defaults are Easy E76→D3, seed42, 200,000 steps, 50,000-step model/replay
+checkpoints, gamma .99, original 134-value observation and GRU/SAC settings,
+uniform 0–20-step delay, safety off, 400 s after takeover. W&B defaults to
+`disabled`. `--exit_config PATH` loads a JSON object with the existing
+seed/scenario/total_timesteps/checkpoint_freq/timeout_seconds/reward fields.
+A's reward keys are the five event names above plus `efficiency_weight=1.0`
+and `speed_epsilon=0.1`; B adds `route_weight=1.0`. Old progress/alpha/beta keys
+are rejected. The model, replay, configuration identity and formula version
+must agree for continuation. A and B cannot resume each other's replay.
+
+After an explicitly approved remote deployment and resource check, execute
+from the fixed-commit snapshot (replace COMMIT with its short hash):
+
+```bash
+SUMO_HOME=/usr/share/sumo /home/cyl/project/DAROM-original/.venv/bin/python -B train_sac_delay.py \
+  --exit_phase secrm_efficiency --run_name secrm-efficiency-s42-200k-COMMIT \
+  --device cuda --wandb_mode disabled --save_dir models_experiments/e76-d3/secrm/efficiency
+# Run the registered 50-episode evaluation below, then train B:
+SUMO_HOME=/usr/share/sumo /home/cyl/project/DAROM-original/.venv/bin/python -B train_sac_delay.py \
+  --exit_phase secrm_efficiency_route --run_name secrm-efficiency-route-s42-200k-COMMIT \
+  --device cuda --wandb_mode disabled --save_dir models_experiments/e76-d3/secrm/efficiency-route
+# Evaluate each final200k model, with separate new JSON output paths:
+SUMO_HOME=/usr/share/sumo /home/cyl/project/DAROM-original/.venv/bin/python -B evaluate_sac_delay.py MODEL.zip \
+  --task exit_e76_d3 --scenario easy --delay-mode uniform --episodes 50 --seed 200051 \
+  --no-safety --device cpu --torch-threads 1 --output NEW_REPORT.json
+```
+
+The evaluator reports settled full-route zero-change entry distance, departure
+from that favorable state, completed toward/away changes and reversals, reward
+components, and discounted/undiscounted returns. Model selection is the final
+200k checkpoint, never the highest-return checkpoint.
+
+Read-only boundary diagnostics subtract road-surface tiles from the entire
+vehicle rectangle, combining all neighboring lanes and junction polygons.
+Normal lane-divider crossing is not a road departure. SUMO network geometry
+is approximated by mitered lane strips and triangulated junction shapes;
+small uncovered junction-entry seams (≤0.02 m²) are marked unknown rather
+than physical collisions. Other observed footprint violations are recorded
+without changing reward or termination. Logs expose raw uncovered area.
+SUMO removes arrived vehicles before a terminal footprint can be queried:
+`observed_body_safe_arrival` describes the sampled trajectory only, while
+`full_body_exit_status` is unknown for otherwise compliant native arrivals.
+`full_body_exit_rate=null` means terminal geometry cannot certify that rate;
+unknown cases are never counted as qualified exits. This diagnostic does not
+claim continuous-time or curb-collision certification.
+
+Register two `exp` archives, full commit, command and independent outputs
+before remote execution. The budget is 400k total plus two final-model
+50-episode evaluations, not additional seeds. Four periodic plus final
+model/replay pairs per group mean ten replay files (roughly 10.2 GiB with the
+current allocated buffer); reserve at least 15 GiB and verify actual storage.
+Offline frozen-policy calibration is wiring/scale evidence, not new-model
+performance. The two reward weights are configurable candidates fixed at one
+for this experiment. No formal training starts during implementation.
