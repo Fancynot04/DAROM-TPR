@@ -39,6 +39,11 @@ SECRM_DEFAULTS = {
         **({'route_weight': 1.0} if name == 'secrm_efficiency_route' else {})}}
     for name in ('secrm_efficiency', 'secrm_efficiency_route')
 }
+# C shares B's formula profile; only event weights change, hence a new identity.
+SECRM_DEFAULTS['secrm_efficiency_route_no_events'] = {
+    **SECRM_DEFAULTS['secrm_efficiency_route'],
+    'reward': {**SECRM_DEFAULTS['secrm_efficiency_route']['reward'],
+               **{key: 0.0 for key in ('arrival', 'collision', 'timeout', 'missed_exit', 'teleport')}}}
 CONFIGURABLE_PROFILES = (PROFILE, DIRECTIONAL_PROFILE, *secrm_reward.PROFILES)
 
 EVENTS = {

@@ -310,7 +310,8 @@ def parse_args():
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
     progress_phases = ('progress_events', 'progress_events_directional_lc',
-                       'secrm_efficiency', 'secrm_efficiency_route')
+                       'secrm_efficiency', 'secrm_efficiency_route',
+                       'secrm_efficiency_route_no_events')
     if args.exit_config and args.exit_phase not in progress_phases:
         parser.error('--exit_config requires a progress_events phase')
     args.progress_experiment = None

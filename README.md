@@ -2976,3 +2976,30 @@ current allocated buffer); reserve at least 15 GiB and verify actual storage.
 Offline frozen-policy calibration is wiring/scale evidence, not new-model
 performance. The two reward weights are configurable candidates fixed at one
 for this experiment. No formal training starts during implementation.
+
+
+The additional C phase, `secrm_efficiency_route_no_events`, uses both new
+reward terms with weight 1, but sets **all five event values to 0**. Collision,
+timeout, missed-exit, first-teleport and native-arrival termination still apply;
+only their reward payments are removed. Thus C pays `r_eff + r_route` even on
+terminal transitions (except teleport, which suppresses both dense terms as in
+A/B). It shares B's formula profile, but has a distinct full reward/configuration
+identity; B's model or replay cannot be resumed as C. It starts from random
+weights with new replay, seed42, Easy, 200k, 50k checkpoints, 400s takeover
+limit, W&B disabled and the same final200k/50-seed evaluation protocol.
+
+```bash
+SUMO_HOME=/usr/share/sumo /home/cyl/project/DAROM-original/.venv/bin/python -B train_sac_delay.py \
+  --exit_phase secrm_efficiency_route_no_events \
+  --run_name secrm-efficiency-route-no-events-s42-200k-COMMIT \
+  --device cuda --wandb_mode disabled \
+  --save_dir models_experiments/e76-d3/secrm/efficiency-route-no-events
+```
+
+The expanded execution order is A → evaluate A → B → evaluate B → C → evaluate C.
+The total suite is now **600k training steps and 150 evaluation episodes**,
+without additional training seeds. Fifteen periodic/final replay files are
+estimated at 15.3 GiB; reserve at least 20 GiB and verify remotely before
+launch. Compare B/C at the same budget to study the event rewards; removing
+terminal penalties may weaken safety/task incentives. All runs still require
+the registered configuration and explicit remote-launch confirmation.

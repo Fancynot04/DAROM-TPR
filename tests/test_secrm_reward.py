@@ -84,6 +84,24 @@ class SecrmTests(unittest.TestCase):
         replay.secrm_formula_version='other'
         with self.assertRaises(ValueError):s.validate_replay(replay,a)
 
+    def test_no_event_group_keeps_dense_reward_for_every_terminal_event(self):
+        c=config.load_experiment(phase='secrm_efficiency_route_no_events')
+        b=config.load_experiment(phase='secrm_efficiency_route')
+        self.assertEqual(config.reward_profile(c),s.ROUTE_PROFILE)
+        self.assertNotEqual(config.reward_identity(c['reward']),config.reward_identity(b['reward']))
+        env=Merging(seed=42,task=exits.TASK_ID,exit_reward_profile=s.ROUTE_PROFILE,progress_experiment=c)
+        env.secrm_before={'efficiency':-.2,'route_reward':-.03}
+        for event,key in config.EVENTS.items():
+            env.terminal_reason=event
+            self.assertAlmostEqual(env.getReward(),-.23)
+            self.assertTrue(all(env.reward_components[k]==0 for k in config.EVENTS.values()))
+        env.ego_teleported=True
+        self.assertEqual(env.getReward(),0.)
+        replay=SimpleNamespace();s.stamp_replay(replay,b)
+        with self.assertRaises(ValueError):s.validate_replay(replay,c)
+        self.assertEqual((c['seed'],c['total_timesteps'],c['checkpoint_freq'],env.episode_limit_steps),
+                         (42,200000,50000,4000))
+
     def test_training_defaults(self):
         for phase in config.SECRM_DEFAULTS:
             with patch.object(sys,'argv',['train','--exit_phase',phase]):args=parse_args()
