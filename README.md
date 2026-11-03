@@ -2893,31 +2893,47 @@ At pre-action state `s_t`, the implementation computes Eq. (2)'s next-step safe
 speed bound and compares the resulting target against the current speed:
 
 ```
-d = min(SUMO ego decel, SUMO leader decel)
-v_safe = max(0, -r*d/2 + sqrt((r*d/2)^2
-         - 2*d*(r*v/2 - v_leader^2/(2*d_leader) - gap + minGap)))
-v_target = min(v_safe, SUMO allowedSpeed)
+d_E = min(abs(action_space.low[0]), SUMO ego emergencyDecel)
+d_L = SUMO leader emergencyDecel
+v_safe = -r*d_E/2 + sqrt((r*d_E/2)^2
+         - 2*d_E*(r*v/2 - v_leader^2/(2*d_L) - physical_gap + minGap))
+v_target = min(v_safe, SUMO allowedSpeed, existing 32 m/s controller cap)
 r_eff = -efficiency_weight * abs(v_target-v) / max(v_target, speed_epsilon)
 r_route = -route_weight * minimum_remaining_lane_changes / (1+section_remaining_m)
 ```
 
-No leader means `v_target=allowedSpeed`. `getLeader` excludes ego `minGap`,
-which is added back to obtain the bumper gap before applying the formula.
-The effective `d` enforces the paper's defensive braking assumption for reward
-calculation only; it does not modify any SUMO vehicle or action. Reaction `r`
-is the 0.1 s simulation step. The default denominator floor is 0.1 m/s;
-zero speed at zero target pays zero. Negative radicands, invalid data or
-unreachable settled route states raise an error; no reward clipping or extra
-step-length scaling is applied. These failures must be investigated before
-formal training. Effective braking, gap and target values are logged; unique
-observed vehicle parameter combinations and the formula version are saved in
-model checkpoints.
+No leader means `v_target=min(allowedSpeed, 32 m/s)`. `getLeader` excludes ego
+`minGap`; the code adds it back to obtain the physical bumper gap. SUMO
+`decel` is the comfortable bound, `apparentDecel` is the deceleration other
+drivers expect, and `emergencyDecel` is the physical maximum. Ego's commanded
+braking is also bounded by the existing action interval (currently 5 m/s²).
+The leader uses emergency braking as assumed by the paper. These values are
+read from SUMO and logged; the controller and its safety settings are unchanged.
+The paper's defensive assumption `d_E <= d_L` is logged per selected leader;
+this reward-only adaptation does not claim the paper's safety guarantee.
+
+For continuous sublane changes, a candidate leader is retained if vehicle
+footprints overlap the ego path now or during the next 0.1 s. A laterally
+separate leader is excluded; every step also checks nearby vehicles on the
+current road for a closer body occupying the path. Uncertain lateral overlap is
+treated as a constraint. The 0.1 m geometric margin is an engineering convention. Negative
+longitudinal gap alone does not imply collision. If the braking inequality has
+no nonnegative solution, diagnostics record `constraint_status=infeasible`,
+the paper's `v_safe` is left undefined, and an engineering target of zero is
+used for the reward. The denominator uses `max(v_target, speed_epsilon)` with
+default 0.1 m/s; a stopped ego at zero target receives zero. No reward clipping
+or extra step-length scaling is applied. Nonfinite input remains an error.
+Unique observed braking parameter sets and the formula version are saved in
+model checkpoints; per-step target and leader-selection diagnostics are logged.
 
 Route need comes from the complete remaining route's lane connections, not
-lane numbers or a hard-coded E77 lane. It is held at the previous settled
-value throughout Pending, then updated after containment/settling. `D` is the
+lane numbers or a hard-coded E77 lane. It is recomputed from the current road,
+route index and lane every step, including Pending and E76→E77 transitions;
+the status records whether the vehicle is settled. `D` is the
 current external section's remaining distance, not distance to D3. Road
-transitions can therefore introduce jumps. Internal connectors pay no route
+transitions can therefore introduce jumps. Nonfinite section distance and
+unreachable route state raise a diagnostic error; finite negative distance is
+clamped to zero. Internal connectors pay no route
 penalty and carry an explicit excluded status, not a fabricated zero lane
 requirement. D3 pays no route penalty; its longitudinal reward continues.
 Actual completed lane-change events remain diagnostic only, with zero reward.

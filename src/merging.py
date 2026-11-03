@@ -19,6 +19,7 @@ ANTWERP_DIR = Path(__file__).resolve().parents[1] / 'sumo_new'
 EGO_DEPART_TIME = 120.0
 EGO_DEPARTURE_DEADLINE = 1200.0
 SUMO_STEP_LENGTH = 0.1
+EGO_SPEED_CAP_MPS = 32.0
 LANE_CHANGE_EDGES = frozenset(('E75', 'E76', 'E77', 'E78', 'E82'))
 ANTWERP_ENV_VERSION = 3
 
@@ -202,7 +203,6 @@ class Merging(gym.Env):
         self.progress_after_odometer = None
         self.terminal_reason = ''
         self.secrm_before = None
-        self.secrm_stable = None
         self.boundary_diagnostic = None
         self.network_path = ANTWERP_DIR / 'Antwerp.net.xml'
         self.directional_settled_lane = None
@@ -288,7 +288,6 @@ class Merging(gym.Env):
         self.progress_after_odometer = None
         self.terminal_reason = ''
         self.secrm_before = None
-        self.secrm_stable = None
         self.boundary_diagnostic = None
         self.network_path = ANTWERP_DIR / 'Antwerp.net.xml'
         self.directional_settled_lane = None
@@ -315,37 +314,96 @@ class Merging(gym.Env):
     def _secrm_snapshot(self):
         v, e = self.traci.vehicle, self.ego_id
         leader = v.getLeader(e, 1000000.0)
-        params = dict(ego_decel=float(v.getDecel(e)), stopped_gap=float(v.getMinGap(e)))
-        if leader and leader[0]:
-            params = dict(gap=float(leader[1]) + float(v.getMinGap(e)),
-                          leader_speed=float(v.getSpeed(leader[0])),
-                          ego_decel=float(v.getDecel(e)),
-                          leader_decel=float(v.getDecel(leader[0])),
-                          stopped_gap=float(v.getMinGap(e)))
+        # The action can command at most 5 m/s² of braking. SUMO emergencyDecel
+        # is the physical maximum; decel is comfortable, apparentDecel is what
+        # other drivers expect. The paper's d_E must respect both limits.
+        ego_braking = {'comfortable': float(v.getDecel(e)),
+                       'apparent': float(v.getApparentDecel(e)),
+                       'emergency': float(v.getEmergencyDecel(e)),
+                       'action_limit': -float(self.action_space.low[0])}
+        ego_braking['used'] = min(ego_braking['emergency'], ego_braking['action_limit'])
+        if (any(not math.isfinite(x) or x <= 0 for x in ego_braking.values())
+                or not math.isfinite(float(v.getMinGap(e))) or float(v.getMinGap(e)) < 0):
+            raise ValueError(f'Invalid SECRM ego braking/minGap: {ego_braking!r}')
+        params = dict(ego_decel=ego_braking['used'], stopped_gap=float(v.getMinGap(e)))
+        leader_info = {'status': 'none', 'id': None}
+        ego_pose = v.getPosition(e)
+        ego_angle = float(v.getAngle(e))
+        ego_road = v.getRoadID(e)
+        ego_lane_position = float(v.getLanePosition(e))
+        def relation(other):
+            return secrm_reward.lateral_relation(
+                ego_pose, ego_angle, float(v.getLength(e)), float(v.getWidth(e)),
+                float(v.getLateralSpeed(e)), v.getPosition(other),
+                float(v.getAngle(other)), float(v.getLength(other)), float(v.getWidth(other)),
+                float(v.getLateralSpeed(other)), SUMO_STEP_LENGTH)
+        # During a continuous lane change getLeader may refer to one nominal
+        # lane, or return no vehicle, while another body occupies the swept ego
+        # path. Compare the native leader with all same-section path occupants.
+        native_id = leader[0] if leader and leader[0] else None
+        candidates = []
+        if native_id is not None and relation(native_id) != 'separated':
+            candidates.append((native_id, float(leader[1]) + params['stopped_gap'],
+                               'traci_leader'))
+        for other in v.getIDList():
+            if other in (e, native_id) or v.getRoadID(other) != ego_road:
+                continue
+            longitudinal = float(v.getLanePosition(other))-ego_lane_position
+            if (-float(v.getLength(other)) <= longitudinal <= 150
+                    and relation(other) != 'separated'):
+                candidates.append((other, longitudinal-float(v.getLength(other)),
+                                   'lateral_path'))
+        selected = min(candidates, key=lambda item: item[1]) if candidates else None
+        if selected is None and native_id is not None:
+            leader_info = {'status': 'laterally_separated', 'id': native_id,
+                           'raw_gap': float(leader[1])}
+        if selected is not None:
+            lid, gap, source = selected
+            leader_braking = {'comfortable': float(v.getDecel(lid)),
+                              'apparent': float(v.getApparentDecel(lid)),
+                              'emergency': float(v.getEmergencyDecel(lid))}
+            if any(not math.isfinite(x) or x <= 0 for x in leader_braking.values()):
+                raise ValueError(f'Invalid SECRM leader braking: {lid!r}, {leader_braking!r}')
+            params.update(gap=gap, leader_speed=float(v.getSpeed(lid)),
+                          leader_decel=leader_braking['emergency'])
+            leader_info = {'status': source, 'id': lid, 'braking': leader_braking,
+                           'physical_gap': gap}
+        allowed_speed = float(v.getAllowedSpeed(e))
+        if not math.isfinite(allowed_speed) or allowed_speed < 0:
+            raise ValueError(f'Invalid SECRM allowed speed: {allowed_speed!r}')
         eff, diagnostic = secrm_reward.efficiency(
-            float(v.getSpeed(e)), float(v.getAllowedSpeed(e)), SUMO_STEP_LENGTH,
+            float(v.getSpeed(e)), min(allowed_speed, EGO_SPEED_CAP_MPS), SUMO_STEP_LENGTH,
             epsilon=self.progress_experiment['reward']['speed_epsilon'], **params)
+        diagnostic.update(ego_braking=ego_braking, leader_selection=leader_info)
         road = v.getRoadID(e)
         route_value = 0.0
         route_info = {'status': 'connector_excluded', 'required_changes': None,
                       'remaining_section_m': None}
         if road == 'D3':
+            remaining = self._remaining_to_d3_end()
+            if remaining is None or not math.isfinite(remaining):
+                raise ValueError(f'Invalid SECRM D3 remaining distance: {remaining!r}')
             route_info = {'status': 'at_destination', 'required_changes': 0,
-                          'remaining_section_m': max(0.0, self._remaining_to_d3_end())}
+                          'remaining_section_m': max(0.0, remaining)}
         elif not road.startswith(':'):
             stable = self.exit_maneuver is None and self._exit_laterally_settled()
-            if stable:
-                required = secrm_reward.minimum_changes(
-                    self.route_network, tuple(v.getRoute(e)), int(v.getRouteIndex(e)),
-                    int(v.getLaneIndex(e)), LANE_CHANGE_EDGES)
-                self.secrm_stable = {'road': road, 'lane': int(v.getLaneIndex(e)),
-                                     'required_changes': required}
-            if self.secrm_stable is None:
-                raise ValueError('SECRM route has no stable lane before Pending')
-            remaining = float(self.traci.lane.getLength(v.getLaneID(e))) - float(v.getLanePosition(e))
-            route_value = secrm_reward.route_penalty(self.secrm_stable['required_changes'], max(0.0, remaining))
-            route_info = {**self.secrm_stable, 'status': 'settled' if stable else 'pending_cached',
-                          'remaining_section_m': max(0.0, remaining)}
+            route = tuple(v.getRoute(e))
+            route_index = int(v.getRouteIndex(e))
+            lane = int(v.getLaneIndex(e))
+            lane_id = v.getLaneID(e)
+            if (route_index < 0 or route_index >= len(route) or route[route_index] != road
+                    or lane_id != f'{road}_{lane}'):
+                raise ValueError(f'SECRM road/route/lane mismatch: {road!r}, {route!r}, {route_index}, {lane_id!r}, {lane}')
+            required = secrm_reward.minimum_changes(
+                self.route_network, route, route_index, lane, LANE_CHANGE_EDGES)
+            remaining = float(self.traci.lane.getLength(lane_id)) - float(v.getLanePosition(e))
+            if not math.isfinite(remaining):
+                raise ValueError(f'Invalid SECRM section distance: road={road!r}, lane={lane}, distance={remaining!r}')
+            remaining = max(0.0, remaining)
+            route_value = secrm_reward.route_penalty(required, remaining)
+            route_info = {'road': road, 'lane': lane, 'required_changes': required,
+                          'status': 'settled' if stable else 'pending_current_lane',
+                          'remaining_section_m': remaining}
         return {'efficiency': eff, 'route_reward': route_value, 'target': diagnostic,
                 'route': route_info, 'road': road}
 
@@ -932,8 +990,8 @@ class Merging(gym.Env):
         if was_on_road:
             self._apply_lane_change(parsed_action[1])
             self.traci.vehicle.setAcceleration(self.ego_id, parsed_action[0], 1)
-            if self.traci.vehicle.getSpeed(self.ego_id) > 32:
-                self.traci.vehicle.setSpeed(self.ego_id, 32)
+            if self.traci.vehicle.getSpeed(self.ego_id) > EGO_SPEED_CAP_MPS:
+                self.traci.vehicle.setSpeed(self.ego_id, EGO_SPEED_CAP_MPS)
         self.counter += 1
         self.parsed_action = parsed_action
         return was_on_road

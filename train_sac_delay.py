@@ -75,6 +75,8 @@ class EpisodeRewardCallback(BaseCallback):
                 target = step_info['secrm_diagnostic']['target']
                 effective = {key: target[key] for key in ('ego_decel', 'leader_decel',
                     'effective_decel', 'stopped_gap', 'reaction_seconds')}
+                effective['ego_braking'] = target['ego_braking']
+                effective['leader_braking'] = target['leader_selection'].get('braking')
                 seen = getattr(self.model, 'secrm_effective_vehicle_parameters', [])
                 if effective not in seen:
                     self.model.secrm_effective_vehicle_parameters = seen + [effective]
@@ -466,7 +468,9 @@ def main():
         reward_profile=args.exit_reward_profile,
         secrm_formula_version=(exit_config.secrm_reward.FORMULA_VERSION
                               if args.exit_reward_profile in exit_config.secrm_reward.PROFILES else None),
-        secrm_vehicle_parameter_policy='SUMO decel/minGap/allowedSpeed; effective ego decel=min(ego,leader)',
+        secrm_vehicle_parameter_policy=('ego=min(action braking bound, SUMO emergencyDecel); '
+            'leader=SUMO emergencyDecel; record comfortable/apparent; '
+            'physical gap=getLeader+ego minGap; limit=min(allowedSpeed, 32 m/s controller cap)'),
         progress_experiment=args.progress_experiment,
         progress_reward_identity=(exit_progress_reward.reward_identity(args.progress_experiment['reward'])
                                   if args.progress_experiment is not None else None),

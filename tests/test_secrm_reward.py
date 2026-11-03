@@ -1,5 +1,6 @@
 """SECRM reward contracts, topology, numerical failures and boundary coverage."""
 import copy
+import heapq
 import math
 import pickle
 import sys
@@ -26,15 +27,35 @@ class SecrmTests(unittest.TestCase):
             value,d=s.efficiency(speed,30,.1)
             self.assertAlmostEqual(value,expected)
             self.assertEqual(d['target_speed'],30)
+        self.assertEqual(s.efficiency(0,0,.1)[0],0)
+        self.assertEqual(s.efficiency(1,0,.1)[0],-10)
 
     def test_safe_speed_satisfies_paper_stopping_gap_identity(self):
         _,d=s.efficiency(15,30,.1,gap=25,leader_speed=10,ego_decel=4,leader_decel=6,stopped_gap=2)
         v=d['safe_speed']
         self.assertAlmostEqual((15+v)*.1/2+v*v/(2*4)-100/(2*6)+2,25)
 
+    def test_independent_quadratic_oracle_and_braking_parameters(self):
+        for gap in (8, 20, 40):
+            for ego_brake, leader_brake in ((4, 9), (5, 6), (5, 9)):
+                _, d = s.efficiency(12, 30, .1, gap=gap, leader_speed=8,
+                                    ego_decel=ego_brake, leader_decel=leader_brake,
+                                    stopped_gap=2.5)
+                if d['constraint_status'] == 'feasible':
+                    candidate = d['safe_speed']
+                    stopping_gap = ((12+candidate)*.05 + candidate**2/(2*ego_brake)
+                                    -8**2/(2*leader_brake)+2.5)
+                    self.assertAlmostEqual(stopping_gap, gap, places=7)
+        _, comfortable=s.efficiency(20,30,.1,gap=30,leader_speed=15,
+                                    ego_decel=5,leader_decel=4.5,stopped_gap=2.5)
+        _, emergency=s.efficiency(20,30,.1,gap=30,leader_speed=15,
+                                  ego_decel=5,leader_decel=9,stopped_gap=2.5)
+        self.assertLess(emergency['target_speed'],comfortable['target_speed'])
+
     def test_effective_braking_and_stopped_target(self):
         _,d=s.efficiency(0,30,.1,gap=2,leader_speed=0,ego_decel=9,leader_decel=3,stopped_gap=2)
-        self.assertEqual(d['effective_decel'],3)
+        self.assertEqual(d['effective_decel'],9)
+        self.assertFalse(d['paper_braking_assumption'])
         self.assertAlmostEqual(d['target_speed'],0)
         self.assertEqual(s.efficiency(0,30,.1,gap=2,leader_speed=0,ego_decel=3,leader_decel=3,stopped_gap=2)[0],0)
 
@@ -44,9 +65,13 @@ class SecrmTests(unittest.TestCase):
         self.assertAlmostEqual(d['target_speed'],0)
         self.assertAlmostEqual(value,-100)
 
-    def test_invalid_safe_state_is_not_silently_clipped(self):
-        with self.assertRaisesRegex(ValueError,'radicand'):
-            s.efficiency(30,30,.1,gap=0,leader_speed=0,ego_decel=4,leader_decel=4,stopped_gap=2)
+    def test_invalid_safe_state_is_diagnosed_and_finite(self):
+        value, d = s.efficiency(30,30,.1,gap=0,leader_speed=0,
+                                ego_decel=4,leader_decel=4,stopped_gap=2)
+        self.assertEqual(d['constraint_status'], 'infeasible')
+        self.assertIsNone(d['safe_speed'])
+        self.assertEqual(d['target_speed'], 0)
+        self.assertTrue(math.isfinite(value))
         for kw in [{'epsilon':0},{'gap':math.nan},{'gap':1,'leader_speed':-1}]:
             with self.assertRaises(ValueError):s.efficiency(10,30,.1,**kw)
 
@@ -64,6 +89,23 @@ class SecrmTests(unittest.TestCase):
         for lane in range(6):self.assertEqual(s.minimum_changes(n,route,1,lane,LANE_CHANGE_EDGES),lane)
         self.assertEqual(s.minimum_changes(n,route,2,0,LANE_CHANGE_EDGES),0)
         with self.assertRaises(ValueError):s.minimum_changes(n,route,0,100,LANE_CHANGE_EDGES)
+
+        # Independent state graph: legal road connections cost zero, each
+        # adjacent active lane change costs one.
+        for start_edge in range(len(route)):
+            for start_lane in n.lanes[route[start_edge]]:
+                queue=[(0,start_edge,start_lane)];seen={}
+                while queue:
+                    cost,edge,lane=heapq.heappop(queue)
+                    if (edge,lane) in seen:continue
+                    seen[edge,lane]=cost
+                    if edge==len(route)-1:break
+                    for adjacent in (lane-1,lane+1):
+                        if adjacent in n.lanes[route[edge]] and route[edge] in LANE_CHANGE_EDGES:
+                            heapq.heappush(queue,(cost+1,edge,adjacent))
+                    for next_lane,_ in n.connections.get((route[edge],route[edge+1],lane),()):
+                        heapq.heappush(queue,(cost,edge+1,next_lane))
+                self.assertEqual(s.minimum_changes(n,route,start_edge,start_lane,LANE_CHANGE_EDGES),cost)
 
     def test_configuration_identity_and_no_legacy_fields(self):
         a=config.load_experiment(phase='secrm_efficiency');b=config.load_experiment(phase='secrm_efficiency_route')
@@ -130,6 +172,12 @@ class SecrmTests(unittest.TestCase):
         v=t.vehicle;v.getLeader.return_value=('lead',8)
         v.getMinGap.return_value=2;v.getSpeed.side_effect=lambda x:10 if x=='ego' else 12
         v.getAllowedSpeed.return_value=30;v.getDecel.return_value=4
+        v.getApparentDecel.return_value=4;v.getEmergencyDecel.return_value=9
+        v.getPosition.side_effect=lambda x:(100,0) if x=='ego' else (120,0)
+        v.getAngle.return_value=90;v.getWidth.return_value=2
+        v.getLength.return_value=4.2
+        v.getLateralSpeed.return_value=0
+        v.getIDList.return_value=('ego',)
         v.getRoadID.return_value='E76';v.getRoute.return_value=('E76','E77','D3')
         v.getRouteIndex.return_value=0;v.getLaneIndex.return_value=2
         v.getLaneID.return_value='E76_2';v.getLanePosition.return_value=100
@@ -141,12 +189,67 @@ class SecrmTests(unittest.TestCase):
         with patch.object(e,'_exit_laterally_settled',return_value=True):d=e._secrm_snapshot()
         self.assertEqual(d['target']['gap'],10)
         self.assertEqual(d['route']['required_changes'],2)
-        t.vehicle.getLaneIndex.return_value=1;e.exit_maneuver={'target':1}
-        d=e._secrm_snapshot();self.assertEqual(d['route']['required_changes'],2)
-        self.assertEqual(d['route']['status'],'pending_cached')
+        t.vehicle.getLaneIndex.return_value=1;t.vehicle.getLaneID.return_value='E76_1';e.exit_maneuver={'target':1}
+        d=e._secrm_snapshot();self.assertEqual(d['route']['required_changes'],1)
+        self.assertEqual(d['route']['status'],'pending_current_lane')
         e.exit_maneuver=None
         with patch.object(e,'_exit_laterally_settled',return_value=True):d=e._secrm_snapshot()
         self.assertEqual(d['route']['required_changes'],1)
+        t.vehicle.getLaneIndex.return_value=0;t.vehicle.getLaneID.return_value='E76_0'
+        with patch.object(e,'_exit_laterally_settled',return_value=True):d=e._secrm_snapshot()
+        self.assertEqual(d['route']['required_changes'],0)
+
+    def test_seed43_negative_gap_laterally_separate_regression(self):
+        e=self.make_env();t=self.fake_snapshot(e);v=t.vehicle
+        v.getLeader.return_value=('lead',-5.237229346061554)
+        v.getMinGap.return_value=2.5
+        v.getSpeed.side_effect=lambda x:9.946592761466428 if x=='ego' else 14.66490589856147
+        v.getPosition.side_effect=lambda x:(594.064,0) if x=='ego' else (590,2.63)
+        v.getLanePosition.side_effect=lambda x:594.064 if x=='ego' else 590
+        v.getWidth.return_value=1.8
+        v.getLateralSpeed.side_effect=lambda x:.4 if x=='ego' else 0
+        v.getIDList.return_value=('ego','lead')
+        with patch.object(e,'_exit_laterally_settled',return_value=False):d=e._secrm_snapshot()
+        self.assertEqual(d['target']['leader_selection']['status'],'laterally_separated')
+        self.assertEqual(d['target']['constraint_status'],'no_leader')
+        self.assertTrue(math.isfinite(d['efficiency']))
+        self.assertAlmostEqual(d['target']['target_speed'],30)
+        v.getPosition.side_effect=lambda x:(594.064,0) if x=='ego' else (590,.5)
+        with patch.object(e,'_exit_laterally_settled',return_value=False):d=e._secrm_snapshot()
+        self.assertEqual(d['target']['leader_selection']['status'],'traci_leader')
+        self.assertEqual(d['target']['leader_decel'],9)
+        self.assertTrue(math.isfinite(d['efficiency']))
+
+    def test_separated_leader_falls_back_to_occupied_path(self):
+        e=self.make_env();t=self.fake_snapshot(e);v=t.vehicle
+        v.getLeader.return_value=('side',-2)
+        v.getPosition.side_effect=lambda x:{'ego':(100,0),'side':(105,3),
+                                            'front':(114,.4)}[x]
+        v.getLanePosition.side_effect=lambda x:{'ego':100,'side':105,'front':114}[x]
+        v.getIDList.return_value=('ego','side','front')
+        with patch.object(e,'_exit_laterally_settled',return_value=True):d=e._secrm_snapshot()
+        self.assertEqual(d['target']['leader_selection']['id'],'front')
+        self.assertEqual(d['target']['leader_selection']['status'],'lateral_path')
+        self.assertAlmostEqual(d['target']['gap'],9.8)
+        self.assertTrue(math.isfinite(d['efficiency']))
+
+    def test_pending_crosses_e76_e77_and_nonfinite_distance_rejected(self):
+        e=self.make_env();t=self.fake_snapshot(e);v=t.vehicle
+        v.getLeader.return_value=None
+        e.exit_maneuver={'target':0}
+        v.getRoadID.return_value='E77';v.getRouteIndex.return_value=1
+        v.getLaneIndex.return_value=1;v.getLaneID.return_value='E77_1'
+        t.lane.getLength.return_value=172.35
+        d=e._secrm_snapshot()
+        self.assertEqual((d['route']['road'],d['route']['lane'],d['route']['required_changes']),('E77',1,1))
+        self.assertEqual(d['route']['status'],'pending_current_lane')
+        self.assertAlmostEqual(d['route_reward'],-1/73.35)
+        for bad in (math.nan,math.inf,-math.inf):
+            t.lane.getLength.return_value=bad
+            with self.assertRaisesRegex(ValueError,'section distance'):e._secrm_snapshot()
+        t.lane.getLength.return_value=50
+        d=e._secrm_snapshot()
+        self.assertEqual(d['route']['remaining_section_m'],0)
 
     def test_connector_and_destination(self):
         e=self.make_env();t=self.fake_snapshot(e)
