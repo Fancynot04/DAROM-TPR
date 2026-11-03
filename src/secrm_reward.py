@@ -47,7 +47,7 @@ def lateral_relation(ego_position, ego_angle, ego_length, ego_width, ego_lateral
 
 
 def efficiency(speed, limit, reaction, gap=None, leader_speed=None,
-               ego_decel=None, leader_decel=None, stopped_gap=None, epsilon=0.1):
+               ego_decel=None, leader_decel=None, stopped_gap=None, epsilon=2.0):
     values = [speed, limit, reaction, epsilon]
     if any(not math.isfinite(x) for x in values) or min(values) < 0 or min(reaction, epsilon) <= 0:
         raise ValueError('Invalid SECRM speed/limit/reaction/epsilon')

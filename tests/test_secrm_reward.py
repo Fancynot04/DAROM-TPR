@@ -28,7 +28,7 @@ class SecrmTests(unittest.TestCase):
             self.assertAlmostEqual(value,expected)
             self.assertEqual(d['target_speed'],30)
         self.assertEqual(s.efficiency(0,0,.1)[0],0)
-        self.assertEqual(s.efficiency(1,0,.1)[0],-10)
+        self.assertEqual(s.efficiency(1,0,.1)[0],-.5)
 
     def test_safe_speed_satisfies_paper_stopping_gap_identity(self):
         _,d=s.efficiency(15,30,.1,gap=25,leader_speed=10,ego_decel=4,leader_decel=6,stopped_gap=2)
@@ -63,7 +63,7 @@ class SecrmTests(unittest.TestCase):
         value,d=s.efficiency(10,30,.1,gap=2.5,leader_speed=0,
                              ego_decel=4,leader_decel=4,stopped_gap=2)
         self.assertAlmostEqual(d['target_speed'],0)
-        self.assertAlmostEqual(value,-100)
+        self.assertAlmostEqual(value,-5)
 
     def test_invalid_safe_state_is_diagnosed_and_finite(self):
         value, d = s.efficiency(30,30,.1,gap=0,leader_speed=0,
@@ -119,9 +119,13 @@ class SecrmTests(unittest.TestCase):
     def test_replay_configuration_cannot_cross_groups_or_versions(self):
         a=config.load_experiment(phase='secrm_efficiency')
         b=config.load_experiment(phase='secrm_efficiency_route')
+        old=copy.deepcopy(a);old['reward']['speed_epsilon']=0.1
+        self.assertEqual(a['reward']['speed_epsilon'],2.0)
+        self.assertNotEqual(config.reward_identity(a['reward']),config.reward_identity(old['reward']))
         replay=SimpleNamespace()
         with self.assertRaises(ValueError):s.validate_replay(replay,a)
         s.stamp_replay(replay,a);replay=pickle.loads(pickle.dumps(replay));s.validate_replay(replay,a)
+        with self.assertRaises(ValueError):s.validate_replay(replay,old)
         with self.assertRaises(ValueError):s.validate_replay(replay,b)
         replay.secrm_formula_version='other'
         with self.assertRaises(ValueError):s.validate_replay(replay,a)

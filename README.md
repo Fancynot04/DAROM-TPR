@@ -2921,7 +2921,7 @@ longitudinal gap alone does not imply collision. If the braking inequality has
 no nonnegative solution, diagnostics record `constraint_status=infeasible`,
 the paper's `v_safe` is left undefined, and an engineering target of zero is
 used for the reward. The denominator uses `max(v_target, speed_epsilon)` with
-default 0.1 m/s; a stopped ego at zero target receives zero. No reward clipping
+default 2.0 m/s; a stopped ego at zero target receives zero. No reward clipping
 or extra step-length scaling is applied. Nonfinite input remains an error.
 Unique observed braking parameter sets and the formula version are saved in
 model checkpoints; per-step target and leader-selection diagnostics are logged.
@@ -2944,7 +2944,7 @@ uniform 0–20-step delay, safety off, 400 s after takeover. W&B defaults to
 `disabled`. `--exit_config PATH` loads a JSON object with the existing
 seed/scenario/total_timesteps/checkpoint_freq/timeout_seconds/reward fields.
 A's reward keys are the five event names above plus `efficiency_weight=1.0`
-and `speed_epsilon=0.1`; B adds `route_weight=1.0`. Old progress/alpha/beta keys
+and `speed_epsilon=2.0`; B adds `route_weight=1.0`. Old progress/alpha/beta keys
 are rejected. The model, replay, configuration identity and formula version
 must agree for continuation. A and B cannot resume each other's replay.
 

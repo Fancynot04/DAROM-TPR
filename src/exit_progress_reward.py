@@ -35,7 +35,7 @@ SECRM_DEFAULTS = {
     name: {**DEFAULT_EXPERIMENT, 'reward': {
         **{key: DEFAULT_EXPERIMENT['reward'][key] for key in
            ('arrival', 'collision', 'timeout', 'missed_exit', 'teleport')},
-        'efficiency_weight': 1.0, 'speed_epsilon': 0.1,
+        'efficiency_weight': 1.0, 'speed_epsilon': 2.0,
         **({'route_weight': 1.0} if name == 'secrm_efficiency_route' else {})}}
     for name in ('secrm_efficiency', 'secrm_efficiency_route')
 }
