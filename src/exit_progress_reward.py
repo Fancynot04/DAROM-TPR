@@ -46,13 +46,9 @@ SECRM_DEFAULTS['secrm_efficiency_route_no_events'] = {
                **{key: 0.0 for key in ('arrival', 'collision', 'timeout', 'missed_exit', 'teleport')}}}
 CONFIGURABLE_PROFILES = (PROFILE, DIRECTIONAL_PROFILE, *secrm_reward.PROFILES)
 
-EVENTS = {
-    'Arrived': 'arrival',
-    'Collision': 'collision',
-    'Max Steps': 'timeout',
-    'Missed Exit': 'missed_exit',
-    'Ego Teleported': 'teleport',
-}
+from .rewards.events import EVENTS, event_reward
+from .rewards.progress import progress_reward
+from .rewards.directional_lane import directional_lane_reward
 
 
 def reward_profile(config):
@@ -118,35 +114,3 @@ def experiment_identity(config):
     payload = json.dumps({'profile': profile, 'experiment': validate_experiment(config)},
                          sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
     return hashlib.sha256(payload).hexdigest()
-
-
-def progress_reward(before_remaining, after_remaining, before_odometer,
-                    after_odometer, initial_remaining, reward):
-    values = (before_remaining, after_remaining, before_odometer,
-              after_odometer, initial_remaining)
-    if any(value is None or not math.isfinite(value) for value in values):
-        return 0.0
-    if before_remaining < 0 or after_remaining < 0 or initial_remaining <= 0:
-        return 0.0
-    meters = min(max(0.0, before_remaining - after_remaining),
-                 max(0.0, after_odometer - before_odometer))
-    closeness = 1.0 - min(max(before_remaining / initial_remaining, 0.0), 1.0)
-    return reward['progress_per_meter'] * meters * (1.0 + reward['proximity_gain'] * closeness)
-
-
-def event_reward(outcome, reward):
-    key = EVENTS.get(outcome)
-    return (key, float(reward[key])) if key is not None else (None, 0.0)
-
-
-def directional_lane_reward(before, after, reward):
-    """Reward one verified same-edge adjacent lane change by route need."""
-    if (before is None or after is None or before['road'] != after['road']
-            or abs(after['lane'] - before['lane']) != 1):
-        return 0.0, None
-    delta = after['minimum_lane_changes'] - before['minimum_lane_changes']
-    if delta < 0:
-        return float(reward['alpha']), 'toward'
-    if delta > 0:
-        return -float(reward['beta']), 'away'
-    return 0.0, 'neutral'

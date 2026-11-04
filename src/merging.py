@@ -11,6 +11,7 @@ from .utils import *
 from .geometry import TrafficSnapshot, driving_axes, world_velocity
 from . import exit_e76_d3_config as exit_config
 from . import exit_progress_reward, secrm_reward, road_boundary
+from .rewards.registry import RewardContext, settle
 from .route_urgency import load_route_network, observe_route_urgency, route_urgency
 
 
@@ -720,37 +721,23 @@ class Merging(gym.Env):
 
     def getReward(self):
 
-        if self.exit_reward_profile in secrm_reward.PROFILES:
-            reward = self.progress_experiment['reward']
-            name, event = exit_progress_reward.event_reward(self.terminal_reason, reward)
-            values = self.secrm_before
-            active = values is not None and not self.teleport_transition and not self.ego_teleported
-            eff = values['efficiency'] * reward['efficiency_weight'] if active else 0.0
-            route = values['route_reward'] * reward.get('route_weight', 0.0) if active else 0.0
+        if (self.exit_reward_profile in secrm_reward.PROFILES
+                or (self.exit_reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
+                                                 exit_config.DIRECTIONAL_REWARD_PROFILE)
+                    and self.task == exit_config.TASK_ID)):
+            context = RewardContext(
+                outcome=self.terminal_reason, config=self.progress_experiment['reward'],
+                teleported=self.teleport_transition or self.ego_teleported,
+                progress_before=self.progress_before_remaining,
+                progress_after=self.progress_after_remaining,
+                odometer_before=self.progress_before_odometer,
+                odometer_after=self.progress_after_odometer,
+                initial_remaining=self.progress_initial_remaining,
+                lane_change=self.directional_lane_reward,
+                secrm_before=self.secrm_before)
+            total, self.reward_components = settle(self.exit_reward_profile, context)
             self.last_stage_reward = 0.0
-            self.reward_components = {'progress': 0.0, 'lane_change': 0.0,
-                'efficiency': eff, 'route_following': route,
-                **{key: event if key == name else 0.0 for key in exit_progress_reward.EVENTS.values()}}
-            return float(eff + route + event)
-
-        if (self.exit_reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
-                                         exit_config.DIRECTIONAL_REWARD_PROFILE)
-                and self.task == exit_config.TASK_ID):
-            reward = self.progress_experiment['reward']
-            progress = (0.0 if self.teleport_transition or self.ego_teleported
-                        else exit_progress_reward.progress_reward(
-                            self.progress_before_remaining, self.progress_after_remaining,
-                            self.progress_before_odometer, self.progress_after_odometer,
-                            self.progress_initial_remaining, reward))
-            event_name, event_value = exit_progress_reward.event_reward(self.terminal_reason, reward)
-            self.reward_components = {'progress': float(progress),
-                                      **{name: (event_value if name == event_name else 0.0)
-                                         for name in exit_progress_reward.EVENTS.values()
-                                         if name not in ('progress_per_meter', 'proximity_gain')}}
-            self.last_stage_reward = 0.0
-            if self.exit_reward_profile == exit_config.DIRECTIONAL_REWARD_PROFILE:
-                self.reward_components['lane_change'] = float(self.directional_lane_reward)
-            return float(progress + event_value + self.directional_lane_reward)
+            return total
 
         # print(self.egoIdx)
         # print('action', action, 'safe_action', safe_action)

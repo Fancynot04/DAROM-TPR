@@ -3019,3 +3019,27 @@ estimated at 15.3 GiB; reserve at least 20 GiB and verify remotely before
 launch. Compare B/C at the same budget to study the event rewards; removing
 terminal penalties may weaken safety/task incentives. All runs still require
 the registered configuration and explicit remote-launch confirmation.
+
+### Reward implementation layout
+
+The E76-to-D3 configurable reward profiles use `src/rewards/registry.py` as
+an explicit component registry and settlement entry point. The environment
+continues to collect the pre-action SECRM snapshot and the post-action progress
+and terminal event; the registry only settles those captured values and does
+not advance SUMO or change action execution. Components live in `events.py`,
+`progress.py`, `directional_lane.py`, `secrm_efficiency.py`, and
+`secrm_route.py`. The existing `src/exit_progress_reward.py` and
+`src/secrm_reward.py` imports remain compatibility interfaces. Historical
+Merge and urgency/potential reward paths remain in their existing locations.
+
+Existing experiment JSON, phase names, reward identity hashes and replay checks
+are unchanged. A/B/C/D continue to use their established configurations;
+zero event values or zero efficiency weight disable those contributions. To add
+a new reward, implement and test its calculation separately, register its
+settlement function and profile, and extend the existing configuration
+validation, training/diagnostic logging and checkpoint metadata as required.
+The current registry does not yet accept arbitrary component lists in JSON:
+profile mappings are explicit so that old checkpoint identities and experiment
+contracts are preserved. Different formulas or parameters require a new reward
+identity, experiment archive and output directory; do not reuse an incompatible
+replay buffer.
