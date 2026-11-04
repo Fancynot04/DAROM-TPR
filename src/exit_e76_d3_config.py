@@ -69,6 +69,11 @@ PHASES = {
               'nav_features': False, 'reward_profile': profile}
        for name, profile in zip(('secrm_efficiency', 'secrm_efficiency_route'),
                                 secrm_reward.PROFILES)},
+    'secrm_efficiency_directional': {
+        'scenario': 'easy', 'total_timesteps': 500_000,
+        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': secrm_reward.DIRECTIONAL_PROFILE,
+    },
     'secrm_efficiency_route_no_events': {
         'scenario': 'easy', 'total_timesteps': 200_000,
         'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,

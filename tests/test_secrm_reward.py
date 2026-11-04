@@ -14,7 +14,7 @@ from src.merging import Merging, ANTWERP_DIR, LANE_CHANGE_EDGES
 from src.route_urgency import load_route_network
 from src.road_boundary import coverage, ccw, bbox, footprint, road_tiles
 from evaluate_sac_delay import validate_checkpoint_setup, evaluate
-from train_sac_delay import parse_args
+from train_sac_delay import parse_args, IntermediateCheckpointCallback
 
 
 class SecrmTests(unittest.TestCase):
@@ -151,7 +151,8 @@ class SecrmTests(unittest.TestCase):
     def test_training_defaults(self):
         for phase in config.SECRM_DEFAULTS:
             with patch.object(sys,'argv',['train','--exit_phase',phase]):args=parse_args()
-            self.assertEqual((args.seed,args.total_timesteps,args.checkpoint_freq,args.wandb_mode),(42,200000,50000,'disabled'))
+            budget = (500000, 250000) if phase == 'secrm_efficiency_directional' else (200000, 50000)
+            self.assertEqual((args.seed,args.total_timesteps,args.checkpoint_freq,args.wandb_mode),(42,*budget,'disabled'))
             self.assertTrue(args.save_replay_buffer)
             self.assertFalse(args.nav_features)
 
@@ -169,6 +170,67 @@ class SecrmTests(unittest.TestCase):
             e.ego_teleported=True;e.terminal_reason='Ego Teleported'
             self.assertEqual(e.getReward(),-100)
             self.assertEqual(e.episode_limit_steps,4000)
+
+    def test_directional_profile_tracker_and_settlement(self):
+        c = config.load_experiment(phase='secrm_efficiency_directional')
+        env = Merging(seed=42, task=exits.TASK_ID, exit_reward_profile=s.DIRECTIONAL_PROFILE,
+                      progress_experiment=c)
+        env.ego_on_road = True
+        env.lane_name = 'E77'
+        env._connection = Mock()
+        env._connection.vehicle.getLateralSpeed.return_value = 0.0
+        def estimate(lane, n, pending=False, road='E77'):
+            return {'status': 'ok', 'valid_for_threshold': not pending, 'pending': pending,
+                    'road': road, 'projected_lane': lane, 'minimum_lane_changes': n}
+        env.secrm_before = {'efficiency': -.2, 'route_reward': -4.0}
+        with patch('src.merging.observe_route_urgency') as observe:
+            observe.return_value = estimate(1, 1)
+            env._update_directional_lane_reward()
+            env.directional_pending_request = -1
+            observe.return_value = estimate(1, 1, pending=True)
+            env._update_directional_lane_reward()
+            self.assertEqual(env.directional_lane_reward, 0)
+            env.directional_seen_lateral_motion = True
+            observe.return_value = estimate(0, 0)
+            env._update_directional_lane_reward()
+            self.assertEqual(env.directional_lane_reward, 3)
+            self.assertAlmostEqual(env.getReward(), 2.8)
+            self.assertEqual(env.reward_components['route_following'], 0)
+            env._update_directional_lane_reward()
+            self.assertEqual(env.directional_lane_reward, 0)
+            env.directional_pending_request = 1
+            env.directional_seen_lateral_motion = True
+            observe.return_value = estimate(1, 1)
+            env._update_directional_lane_reward()
+            self.assertEqual(env.directional_lane_reward, -6)
+            env.terminal_reason = 'Arrived'
+            self.assertAlmostEqual(env.getReward(), 43.8)
+            env.teleport_transition = True
+            env._update_directional_lane_reward()
+            self.assertEqual(env.directional_lane_reward, 0)
+
+    def test_intermediate_checkpoint_skips_only_final_step(self):
+        callback = IntermediateCheckpointCallback(final_step=500000, save_freq=250000,
+                                                   save_path='unused', name_prefix='test')
+        callback.num_timesteps = 500000
+        with patch('stable_baselines3.common.callbacks.CheckpointCallback._on_step', return_value=True) as save:
+            self.assertTrue(callback._on_step())
+            save.assert_not_called()
+            callback.num_timesteps = 250000
+            self.assertTrue(callback._on_step())
+            save.assert_called_once()
+
+    def test_directional_profile_replay_and_checkpoint_identity(self):
+        c = config.load_experiment(phase='secrm_efficiency_directional')
+        buffer = SimpleNamespace()
+        s.stamp_replay(buffer, c)
+        s.validate_replay(buffer, c)
+        changed = copy.deepcopy(c)
+        changed['reward']['beta'] = 7.0
+        with self.assertRaises(ValueError):
+            s.validate_replay(buffer, changed)
+        with self.assertRaises(ValueError):
+            s.validate_replay(buffer, config.load_experiment(phase='secrm_efficiency'))
 
     def fake_snapshot(self,e):
         e.ego_id='ego';e.ego_on_road=True

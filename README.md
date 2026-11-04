@@ -3043,3 +3043,12 @@ profile mappings are explicit so that old checkpoint identities and experiment
 contracts are preserved. Different formulas or parameters require a new reward
 identity, experiment archive and output directory; do not reuse an incompatible
 replay buffer.
+
+The `secrm_efficiency_directional` phase combines pre-action SECRM efficiency,
+actual route-graph directional lane-change payment, and terminal events. Its
+500k seed-42 default uses efficiency weight 1, speed denominator floor 2 m/s,
+toward +3, away -6, arrival +50 and collision/timeout/missed-exit/teleport -100.
+Progress and SECRM route penalties are not paid. It uses 400 seconds, an
+intermediate model/replay at 250k and a single final model/replay at 500k. The
+complete configuration and SECRM formula version are included in checkpoint
+identity; do not reuse another profile's replay.

@@ -8,7 +8,8 @@ import math
 
 EFFICIENCY_PROFILE = 'secrm_efficiency_events_v1'
 ROUTE_PROFILE = 'secrm_efficiency_route_events_v1'
-PROFILES = (EFFICIENCY_PROFILE, ROUTE_PROFILE)
+DIRECTIONAL_PROFILE = 'secrm_efficiency_directional_events_v1'
+PROFILES = (EFFICIENCY_PROFILE, ROUTE_PROFILE, DIRECTIONAL_PROFILE)
 FORMULA_VERSION = 'secrm_eq2_prestate_geometry_v2'
 
 

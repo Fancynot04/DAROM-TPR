@@ -57,6 +57,7 @@ PROFILE_COMPONENTS = {
     'route_end_progress_events_directional_lc_v1': ('progress', 'events', 'directional_lane'),
     'secrm_efficiency_events_v1': ('events', 'secrm_efficiency', 'secrm_route'),
     'secrm_efficiency_route_events_v1': ('events', 'secrm_efficiency', 'secrm_route'),
+    'secrm_efficiency_directional_events_v1': ('events', 'secrm_efficiency', 'secrm_route', 'directional_lane'),
 }
 
 
@@ -76,6 +77,9 @@ def settle(profile, context):
                       'efficiency': parts['efficiency'], 'route_following': parts['route_following'],
                       **{key: parts[key] for key in events.EVENTS.values()}}
         total = parts['efficiency'] + parts['route_following'] + event
+        if 'directional_lane' in names:
+            components['lane_change'] = 0.0 if context.teleported else parts['lane_change']
+            total += components['lane_change']
     else:
         components = {'progress': parts['progress'], **{key: parts[key] for key in events.EVENTS.values()}}
         if 'directional_lane' in names:

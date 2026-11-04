@@ -19,7 +19,8 @@ class RewardRegistryTests(unittest.TestCase):
 
     def test_legacy_profiles_and_events(self):
         configs = [old.load_experiment(), old.load_experiment(directional=True)]
-        configs.extend(old.load_experiment(phase=phase) for phase in old.SECRM_DEFAULTS)
+        configs.extend(old.load_experiment(phase=phase) for phase in old.SECRM_DEFAULTS
+                       if phase != 'secrm_efficiency_directional')
         d = copy.deepcopy(old.load_experiment(phase='secrm_efficiency_route'))
         d['reward']['efficiency_weight'] = 0.0
         configs.append(d)
@@ -41,6 +42,32 @@ class RewardRegistryTests(unittest.TestCase):
                             expected += event + ctx.lane_change
                         self.assertAlmostEqual(total, expected)
                         self.assertAlmostEqual(total, sum(parts.values()))
+
+    def test_efficiency_directional_composition_and_identity(self):
+        config = old.load_experiment(phase='secrm_efficiency_directional')
+        self.assertEqual(old.reward_profile(config), secrm_reward.DIRECTIONAL_PROFILE)
+        self.assertEqual((config['total_timesteps'], config['checkpoint_freq']), (500_000, 250_000))
+        self.assertNotIn('route_weight', config['reward'])
+        self.assertNotIn('progress_per_meter', config['reward'])
+        for lane_reward in (3.0, -6.0, 0.0):
+            for outcome in ('', *old.EVENTS):
+                ctx = self.context(config, outcome=outcome, lane_change=lane_reward)
+                total, parts = settle(secrm_reward.DIRECTIONAL_PROFILE, ctx)
+                _, event = old.event_reward(outcome, config['reward'])
+                self.assertAlmostEqual(total, -0.2 + event + lane_reward)
+                self.assertEqual(parts['route_following'], 0.0)
+                self.assertEqual(parts['progress'], 0.0)
+                self.assertEqual(parts['lane_change'], lane_reward)
+                self.assertAlmostEqual(sum(parts.values()), total)
+        bad = copy.deepcopy(config)
+        bad['reward']['alpha'] = -1
+        with self.assertRaises(ValueError):
+            old.validate_experiment(bad)
+        changed = copy.deepcopy(config)
+        changed['reward']['beta'] = 7
+        self.assertNotEqual(old.reward_identity(config['reward']), old.reward_identity(changed['reward']))
+        self.assertNotEqual(old.reward_identity(config['reward']),
+                            old.reward_identity(old.SECRM_DEFAULTS['secrm_efficiency']['reward']))
 
     def test_unknown_profile_is_rejected(self):
         with self.assertRaises(ValueError):

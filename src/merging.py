@@ -587,7 +587,8 @@ class Merging(gym.Env):
             return
         value, direction = exit_progress_reward.directional_lane_reward(
             previous, current, (self.progress_experiment['reward']
-                                if self.exit_reward_profile == exit_config.DIRECTIONAL_REWARD_PROFILE
+                                if self.exit_reward_profile in (exit_config.DIRECTIONAL_REWARD_PROFILE,
+                                                                secrm_reward.DIRECTIONAL_PROFILE)
                                 else {'alpha': 0.0, 'beta': 0.0}))
         if (direction is not None and self.directional_pending_request is not None
                 and self.directional_seen_lateral_motion):

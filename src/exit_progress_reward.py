@@ -39,6 +39,11 @@ SECRM_DEFAULTS = {
         **({'route_weight': 1.0} if name == 'secrm_efficiency_route' else {})}}
     for name in ('secrm_efficiency', 'secrm_efficiency_route')
 }
+SECRM_DEFAULTS['secrm_efficiency_directional'] = {
+    **SECRM_DEFAULTS['secrm_efficiency'],
+    'total_timesteps': 500_000, 'checkpoint_freq': 250_000,
+    'reward': {**SECRM_DEFAULTS['secrm_efficiency']['reward'], 'alpha': 3.0, 'beta': 6.0},
+}
 # C shares B's formula profile; only event weights change, hence a new identity.
 SECRM_DEFAULTS['secrm_efficiency_route_no_events'] = {
     **SECRM_DEFAULTS['secrm_efficiency_route'],
@@ -60,7 +65,8 @@ def reward_profile(config):
         return DIRECTIONAL_PROFILE
     for name, config in SECRM_DEFAULTS.items():
         if keys == set(config['reward']):
-            return (secrm_reward.ROUTE_PROFILE if name.endswith('_route')
+            return (secrm_reward.DIRECTIONAL_PROFILE if name == 'secrm_efficiency_directional'
+                    else secrm_reward.ROUTE_PROFILE if name.endswith('_route')
                     else secrm_reward.EFFICIENCY_PROFILE)
     raise ValueError('Progress reward fields do not match a known version')
 
@@ -82,7 +88,7 @@ def validate_experiment(config):
     if (config['reward'].get('progress_per_meter', 0) < 0 or config['reward'].get('proximity_gain', 0) < 0
             or config['reward']['arrival'] < 0
             or any(config['reward'][name] > 0 for name in ('collision', 'timeout', 'missed_exit', 'teleport'))
-            or (profile == DIRECTIONAL_PROFILE and
+            or (profile in (DIRECTIONAL_PROFILE, secrm_reward.DIRECTIONAL_PROFILE) and
                 (config['reward']['alpha'] < 0 or config['reward']['beta'] < 0))
             or config['reward'].get('efficiency_weight', 0) < 0
             or config['reward'].get('route_weight', 0) < 0
