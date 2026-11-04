@@ -12,6 +12,7 @@ from .geometry import TrafficSnapshot, driving_axes, world_velocity
 from . import exit_e76_d3_config as exit_config
 from . import exit_progress_reward, secrm_reward, road_boundary
 from .rewards.registry import RewardContext, settle
+from .rewards.directional_lane import adaptive_lane_reward
 from .route_urgency import load_route_network, observe_route_urgency, route_urgency
 
 
@@ -208,6 +209,8 @@ class Merging(gym.Env):
         self.network_path = ANTWERP_DIR / 'Antwerp.net.xml'
         self.directional_settled_lane = None
         self.directional_pending_request = None
+        self.directional_request_distance = None
+        self.directional_request_time = None
         self.directional_seen_lateral_motion = False
         self.directional_lane_event = None
         self.directional_lane_reward = 0.0
@@ -293,6 +296,8 @@ class Merging(gym.Env):
         self.network_path = ANTWERP_DIR / 'Antwerp.net.xml'
         self.directional_settled_lane = None
         self.directional_pending_request = None
+        self.directional_request_distance = None
+        self.directional_request_time = None
         self.directional_seen_lateral_motion = False
         self.directional_lane_event = None
         self.directional_lane_reward = 0.0
@@ -310,6 +315,18 @@ class Merging(gym.Env):
         else:
             distance = float(self.traci.vehicle.getDrivingDistance(
                 self.ego_id, 'D3', destination_position))
+        return distance if math.isfinite(distance) and distance >= 0 else None
+
+    def _remaining_to_d3_start(self):
+        """Route distance to D3 entrance; None means unavailable or already past it."""
+        if not self.ego_on_road or self.lane_name == 'D3':
+            return None
+        try:
+            distance = float(self.traci.vehicle.getDrivingDistance(self.ego_id, 'D3', 0.0))
+        except Exception as error:
+            # A failed diagnostic must not change the lane-change controller.
+            self.directional_distance_error = str(error)
+            return None
         return distance if math.isfinite(distance) and distance >= 0 else None
 
     def _secrm_snapshot(self):
@@ -592,12 +609,21 @@ class Merging(gym.Env):
                                 else {'alpha': 0.0, 'beta': 0.0}))
         if (direction is not None and self.directional_pending_request is not None
                 and self.directional_seen_lateral_motion):
+            status = 'fixed'
+            if self.exit_reward_profile == secrm_reward.ADAPTIVE_PROFILE:
+                value, status = adaptive_lane_reward(direction, self.directional_request_distance,
+                    self.progress_experiment['reward']['lane_reward_mode'])
             self.directional_lane_reward = value
             self.directional_lane_event = {
                 'before': previous, 'after': current,
                 'request_direction': self.directional_pending_request,
                 'actual_direction': current['lane'] - previous['lane'],
                 'route_direction': direction, 'reward': value,
+                'request_distance_to_d3_start_m': self.directional_request_distance,
+                'request_time_s': self.directional_request_time,
+                'completion_time_s': (float(self.traci.simulation.getTime())
+                                      if self.directional_request_time is not None else None),
+                'distance_reward_status': status,
             }
         if not estimate['pending']:
             self.directional_pending_request = None
@@ -939,6 +965,8 @@ class Merging(gym.Env):
                         if self.exit_reward_profile in (exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES):
                             self.directional_pending_request = int(direction)
                             self.directional_seen_lateral_motion = False
+                            self.directional_request_distance = self._remaining_to_d3_start()
+                            self.directional_request_time = float(now)
                     return
                 self.target_lane_idx = target
                 self.traci.vehicle.changeLane(self.ego_id, target, 0)

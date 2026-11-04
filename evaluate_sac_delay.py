@@ -190,7 +190,38 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
         toward_requests = away_requests = 0
         previous_e77_lane = None
         e77_zero_departures = 0
+        lane_event_details = []
+        first_toward_request_distance = None
+        first_e77_zero_distance = None
+        stopped_steps = 0
+        stopped_streak = 0
+        max_stopped_streak = 0
+        hard_braking_steps = 0
+        e77_zero_traffic_samples = []
         while True:
+            if secrm and base.ego_on_road:
+                vehicle = base.traci.vehicle
+                speed = float(vehicle.getSpeed(base.ego_id))
+                acceleration = float(vehicle.getAcceleration(base.ego_id))
+                stopped_streak = stopped_streak + 1 if speed < 0.5 else 0
+                max_stopped_streak = max(max_stopped_streak, stopped_streak)
+                stopped_steps += int(speed < 0.5)
+                hard_braking_steps += int(acceleration <= -4.5)
+                if (base.lane_name == 'E77' and base.lane_idx == 0
+                        and (speed < 0.5 or acceleration <= -4.5)):
+                    leader = vehicle.getLeader(base.ego_id, 100.0)
+                    gap = (float(leader[1]) + float(vehicle.getMinGap(base.ego_id))
+                           if leader and leader[0] else None)
+                    e77_zero_traffic_samples.append({
+                        'step': steps, 'speed_mps': speed, 'acceleration_mps2': acceleration,
+                        'leader_id': leader[0] if leader else None, 'leader_physical_gap_m': gap,
+                        'leader_speed_mps': float(vehicle.getSpeed(leader[0])) if leader and leader[0] else None,
+                        'distance_to_d3_start_m': base._remaining_to_d3_start(),
+                    })
+                if (first_e77_zero_distance is None and base.lane_name == 'E77'
+                        and base.lane_idx == 0 and base.exit_maneuver is None
+                        and base._exit_laterally_settled()):
+                    first_e77_zero_distance = base._remaining_to_d3_start()
             if directional and first_direct_exit_lane_remaining is None and base.ego_on_road:
                 road = base.traci.vehicle.getRoadID(base.ego_id)
                 lane = int(base.traci.vehicle.getLaneIndex(base.ego_id))
@@ -216,6 +247,10 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                     reward_totals[name] += float(value)
                 event = info.get('directional_lane_change_event')
                 if event is not None:
+                    lane_event_details.append(dict(event))
+                    if (event['route_direction'] == 'toward'
+                            and first_toward_request_distance is None):
+                        first_toward_request_distance = event.get('request_distance_to_d3_start_m')
                     lane_events[event['route_direction']] += 1
                     if (previous_lane_direction is not None
                             and previous_lane_direction != event['actual_direction']):
@@ -297,6 +332,17 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                         reward_totals=dict(reward_totals),
                         event_reward_total=sum(reward_totals[name] for name in exit_progress_reward.EVENTS.values()),
                         discounted_return=discounted_return)
+                    if secrm:
+                        record.update(
+                            first_toward_request_distance_to_d3_start_m=first_toward_request_distance,
+                            first_stable_e77_zero_distance_to_d3_start_m=first_e77_zero_distance,
+                            lane_change_events=lane_event_details,
+                            completed_changes_by_edge=dict(Counter(
+                                x['before']['road'] for x in lane_event_details)),
+                            stopped_seconds_below_0_5_mps=stopped_steps * 0.1,
+                            max_stopped_streak_seconds=max_stopped_streak * 0.1,
+                            hard_braking_steps_le_minus_4_5_mps2=hard_braking_steps,
+                            e77_zero_slow_or_braking_samples=e77_zero_traffic_samples)
                 if urgency_trace is not None:
                     record['return_without_potential'] = unshaped_episode_return
                 records.append(record)

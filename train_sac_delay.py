@@ -325,7 +325,8 @@ def parse_args():
     args = parser.parse_args()
     progress_phases = ('progress_events', 'progress_events_directional_lc',
                        'secrm_efficiency', 'secrm_efficiency_route',
-                       'secrm_efficiency_route_no_events', 'secrm_efficiency_directional')
+                       'secrm_efficiency_route_no_events', 'secrm_efficiency_directional',
+                       'secrm_efficiency_directional_l1', 'secrm_efficiency_directional_l2')
     if args.exit_config and args.exit_phase not in progress_phases:
         parser.error('--exit_config requires a progress_events phase')
     args.progress_experiment = None
@@ -724,7 +725,8 @@ def main():
         name_prefix=args.run_name, verbose=2,
         save_replay_buffer=args.save_replay_buffer,
     )
-    if args.exit_phase == 'secrm_efficiency_directional':
+    if args.exit_phase in ('secrm_efficiency_directional', 'secrm_efficiency_directional_l1',
+                           'secrm_efficiency_directional_l2'):
         checkpoint_callback = IntermediateCheckpointCallback(
             final_step=args.total_timesteps, save_freq=args.checkpoint_freq,
             save_path=checkpoint_dir, name_prefix=args.run_name, verbose=2,

@@ -3052,3 +3052,37 @@ Progress and SECRM route penalties are not paid. It uses 400 seconds, an
 intermediate model/replay at 250k and a single final model/replay at 500k. The
 complete configuration and SECRM formula version are included in checkpoint
 identity; do not reuse another profile's replay.
+
+### L1/L2 distance-adaptive lane-change ablation
+
+`secrm_efficiency_directional_l1` and `secrm_efficiency_directional_l2`
+retain the L0 SECRM efficiency and terminal events, and pay directional
+lane-change rewards only after the existing stable-event detector reports a
+completed change. The distance is captured when a lane-change command is
+accepted: `getDrivingDistance(ego, 'D3', 0.0)` is the longitudinal route
+distance to the start of D3, not the lane-reachability or the D3-end distance.
+A nonfinite, negative or unavailable value is recorded as `invalid_distance`
+and the adaptive lane-change payment is zero; it is never clipped to zero.
+The original detector still excludes cross-edge remapping and uses the same
+pending execution rules as L0. Distance and elapsed-time metadata are added
+to detected events; this does not alter the fixed L0 payment.
+
+Let `d = min(distance, 1067)` in meters after validity checking. L1 pays
+`3 + 2*d/1067` toward, `-9 + 3*d/1067` away. L2 pays `3+d/176` toward and
+`-9+d/176` away for `d <= 176`, or `4+(d-176)/891` toward and
+`-8+2*(d-176)/891` away otherwise. `lane_reward_mode` is part of the full
+reward identity; replay buffers must not be shared between L0, L1 and L2.
+Evaluation event diagnostics record initiation distance, request/completion
+times, route direction and payment, plus first toward change, first stable
+E77_0 distance, edge counts, low-speed duration and hard-braking samples.
+The latter are descriptive samples, not causal congestion or safety labels.
+L0's historical 03bfbb report lacks these new event fields; re-evaluate its
+frozen model with the same SUMO version and seeds for matched metrics.
+
+The phases default to Easy, seed 42, fresh 500k steps, the same 400-second
+limit, and one 250k checkpoint plus the final 500k model/replay. W&B remains
+disabled by default. Record the exact commit and distinct output paths in the
+experiment ledger and obtain the project-required confirmation before remote
+upload or training. Alternating directional payments can have positive
+*discounted* return even when their undiscounted sum is negative; reward and
+trajectory comparisons require a matched counterfactual, not this sum alone.

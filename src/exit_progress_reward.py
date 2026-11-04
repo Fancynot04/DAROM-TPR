@@ -44,6 +44,12 @@ SECRM_DEFAULTS['secrm_efficiency_directional'] = {
     'total_timesteps': 500_000, 'checkpoint_freq': 250_000,
     'reward': {**SECRM_DEFAULTS['secrm_efficiency']['reward'], 'alpha': 3.0, 'beta': 6.0},
 }
+for mode in ('l1', 'l2'):
+    SECRM_DEFAULTS[f'secrm_efficiency_directional_{mode}'] = {
+        **SECRM_DEFAULTS['secrm_efficiency_directional'],
+        'reward': {**SECRM_DEFAULTS['secrm_efficiency']['reward'],
+                   'lane_reward_mode': mode},
+    }
 # C shares B's formula profile; only event weights change, hence a new identity.
 SECRM_DEFAULTS['secrm_efficiency_route_no_events'] = {
     **SECRM_DEFAULTS['secrm_efficiency_route'],
@@ -63,6 +69,8 @@ def reward_profile(config):
         return PROFILE
     if keys == base | {'alpha', 'beta'}:
         return DIRECTIONAL_PROFILE
+    if keys == set(SECRM_DEFAULTS['secrm_efficiency_directional_l1']['reward']):
+        return secrm_reward.ADAPTIVE_PROFILE
     for name, config in SECRM_DEFAULTS.items():
         if keys == set(config['reward']):
             return (secrm_reward.DIRECTIONAL_PROFILE if name == 'secrm_efficiency_directional'
@@ -83,6 +91,10 @@ def validate_experiment(config):
         raise ValueError('Progress reward must be an object')
     profile = reward_profile(config)
     for name, value in {**config['reward'], 'timeout_seconds': config['timeout_seconds']}.items():
+        if name == 'lane_reward_mode':
+            if value not in ('l1', 'l2'):
+                raise ValueError('lane_reward_mode must be l1 or l2')
+            continue
         if type(value) not in (int, float) or not math.isfinite(value):
             raise ValueError(f'{name} must be a finite number')
     if (config['reward'].get('progress_per_meter', 0) < 0 or config['reward'].get('proximity_gain', 0) < 0
@@ -105,6 +117,9 @@ def load_experiment(path=None, directional=False, phase=None):
     expected = reward_profile(default)
     if reward_profile(config) != expected:
         raise ValueError(f'Configuration reward version must be {expected}')
+    if (phase in ('secrm_efficiency_directional_l1', 'secrm_efficiency_directional_l2')
+            and config['reward']['lane_reward_mode'] != default['reward']['lane_reward_mode']):
+        raise ValueError('Configuration lane reward mode does not match the phase')
     return config
 
 

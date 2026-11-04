@@ -58,6 +58,7 @@ PROFILE_COMPONENTS = {
     'secrm_efficiency_events_v1': ('events', 'secrm_efficiency', 'secrm_route'),
     'secrm_efficiency_route_events_v1': ('events', 'secrm_efficiency', 'secrm_route'),
     'secrm_efficiency_directional_events_v1': ('events', 'secrm_efficiency', 'secrm_route', 'directional_lane'),
+    'secrm_efficiency_adaptive_directional_events_v1': ('events', 'secrm_efficiency', 'secrm_route', 'directional_lane'),
 }
 
 

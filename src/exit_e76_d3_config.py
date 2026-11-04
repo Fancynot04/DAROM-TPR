@@ -74,6 +74,11 @@ PHASES = {
         'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
         'nav_features': False, 'reward_profile': secrm_reward.DIRECTIONAL_PROFILE,
     },
+    **{f'secrm_efficiency_directional_{mode}': {
+        'scenario': 'easy', 'total_timesteps': 500_000,
+        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
+    } for mode in ('l1', 'l2')},
     'secrm_efficiency_route_no_events': {
         'scenario': 'easy', 'total_timesteps': 200_000,
         'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
