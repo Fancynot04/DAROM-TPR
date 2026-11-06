@@ -3106,3 +3106,10 @@ replay are restored; Python, NumPy, Torch and environment RNGs restart from
 seed 42 at a fresh episode. The continuation writes to a distinct run name and
 output directory, saves an intermediate model/replay at 750k, saves the final
 model/replay at 1M, and preserves the original 500k artifacts.
+
+The `secrm_efficiency_directional_l1_speed120_2m` phase applies the same
+continuation contract to the exact frozen 1M model and replay buffer. It keeps
+all task, reward, observation, optimizer and safety settings unchanged, checks
+both 1M parent hashes, and trains only the remaining 1,000,000 steps to a
+cumulative 2M budget. It saves model/replay pairs at 1.25M, 1.5M, 1.75M and
+2M in a new output directory, leaving the 500k and 1M artifacts untouched.

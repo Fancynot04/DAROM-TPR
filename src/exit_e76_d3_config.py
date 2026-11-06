@@ -63,6 +63,8 @@ CURRICULUM_BRANCH_MODEL_SHA256 = '83d9b67170220c33672f8ceaeb4e19685b014cbf8e89c7
 CURRICULUM_BRANCH_REPLAY_SHA256 = '10fdd7430ab1cab71af17b2093a6a469372a96e06006facd7066ce2a19a4120e'
 SPEED120_500K_MODEL_SHA256 = '2ad93cfe603a905d121c7d97fa9ec582ab9ecbfd0ffea055c019d82aaa072f8f'
 SPEED120_500K_REPLAY_SHA256 = 'a57641dc72efe1fd30bb935852483524fd825c73d36f78c86205c5e849b4ce0b'
+SPEED120_1M_MODEL_SHA256 = 'db25464892250a5667251ce93ebefa033a8ba5b2d60f27d55570b45481d89d86'
+SPEED120_1M_REPLAY_SHA256 = '0edc1e3b1ffe4ae5dfaacdcfc903382616c2663c58928935085669e771b0d259'
 CURRICULUM_BRANCH_PHASES = {
     'urgency_curriculum_hold2_150k': URGENCY_CURRICULUM_STAGES[:2],
     'urgency_curriculum_expand3_150k': URGENCY_CURRICULUM_STAGES[:3],
@@ -92,6 +94,12 @@ PHASES = {
     },
     'secrm_efficiency_directional_l1_speed120_1m': {
         'scenario': 'easy', 'total_timesteps': 1_000_000,
+        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
+        'road_speed_limit_mps': SPEED_LIMIT_120_KPH_MPS,
+    },
+    'secrm_efficiency_directional_l1_speed120_2m': {
+        'scenario': 'easy', 'total_timesteps': 2_000_000,
         'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
         'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
         'road_speed_limit_mps': SPEED_LIMIT_120_KPH_MPS,
@@ -161,6 +169,21 @@ PHASES = {
     'gamma099_baseline_800k': {
         'scenario': 'easy', 'total_timesteps': 800_000,
         'checkpoint_freq': 200_000, 'gamma': POTENTIAL_GAMMA,
+    },
+}
+
+SPEED120_CONTINUATIONS = {
+    'secrm_efficiency_directional_l1_speed120_1m': {
+        'start_step': 500_000,
+        'parent_model_sha256': SPEED120_500K_MODEL_SHA256,
+        'parent_replay_sha256': SPEED120_500K_REPLAY_SHA256,
+        'checkpoint_steps': (750_000, 1_000_000),
+    },
+    'secrm_efficiency_directional_l1_speed120_2m': {
+        'start_step': 1_000_000,
+        'parent_model_sha256': SPEED120_1M_MODEL_SHA256,
+        'parent_replay_sha256': SPEED120_1M_REPLAY_SHA256,
+        'checkpoint_steps': (1_250_000, 1_500_000, 1_750_000, 2_000_000),
     },
 }
 

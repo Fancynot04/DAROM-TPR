@@ -25,33 +25,39 @@ class L1Speed120Tests(unittest.TestCase):
         self.assertAlmostEqual(phase['road_speed_limit_mps'], 120.0 / 3.6)
         self.assertFalse(phase['nav_features'])
 
-    def test_1m_phase_is_paired_continuation_of_frozen_500k_run(self):
-        base = exit_progress_reward.load_experiment(
-            phase='secrm_efficiency_directional_l1_speed120_500k')
-        continuation = exit_progress_reward.load_experiment(
-            phase='secrm_efficiency_directional_l1_speed120_1m')
-        self.assertEqual(continuation['reward'], base['reward'])
-        self.assertEqual(continuation['seed'], base['seed'])
-        self.assertEqual(continuation['scenario'], base['scenario'])
-        self.assertEqual(continuation['timeout_seconds'], base['timeout_seconds'])
-        self.assertEqual((continuation['total_timesteps'], continuation['checkpoint_freq']),
-                         (1_000_000, 250_000))
-        phase = exits.PHASES['secrm_efficiency_directional_l1_speed120_1m']
-        self.assertAlmostEqual(phase['road_speed_limit_mps'], 120.0 / 3.6)
+    def test_continuation_phases_require_their_frozen_parent(self):
+        cases = (
+            ('secrm_efficiency_directional_l1_speed120_500k',
+             'secrm_efficiency_directional_l1_speed120_1m', 1_000_000),
+            ('secrm_efficiency_directional_l1_speed120_1m',
+             'secrm_efficiency_directional_l1_speed120_2m', 2_000_000),
+        )
+        for parent_phase, continuation_phase, target_steps in cases:
+            with self.subTest(phase=continuation_phase):
+                parent = exit_progress_reward.load_experiment(phase=parent_phase)
+                continuation = exit_progress_reward.load_experiment(
+                    phase=continuation_phase)
+                for field in ('reward', 'seed', 'scenario', 'timeout_seconds'):
+                    self.assertEqual(continuation[field], parent[field], field)
+                self.assertEqual(
+                    (continuation['total_timesteps'], continuation['checkpoint_freq']),
+                    (target_steps, 250_000))
+                phase = exits.PHASES[continuation_phase]
+                self.assertAlmostEqual(phase['road_speed_limit_mps'], 120.0 / 3.6)
 
-        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
-                                'secrm_efficiency_directional_l1_speed120_1m']):
-            with self.assertRaises(SystemExit):
-                parse_args()
-        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
-                                'secrm_efficiency_directional_l1_speed120_1m',
-                                '--load_path', 'parent.zip',
-                                '--replay_buffer_path', 'parent.pkl']):
-            args = parse_args()
-        self.assertEqual((args.total_timesteps, args.checkpoint_freq),
-                         (1_000_000, 250_000))
-        self.assertEqual((args.load_path, args.replay_buffer_path),
-                         ('parent.zip', 'parent.pkl'))
+                with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
+                                        continuation_phase]):
+                    with self.assertRaises(SystemExit):
+                        parse_args()
+                with patch('sys.argv', ['train_sac_delay.py', '--exit_phase',
+                                        continuation_phase,
+                                        '--load_path', 'parent.zip',
+                                        '--replay_buffer_path', 'parent.pkl']):
+                    args = parse_args()
+                self.assertEqual((args.total_timesteps, args.checkpoint_freq),
+                                 (target_steps, 250_000))
+                self.assertEqual((args.load_path, args.replay_buffer_path),
+                                 ('parent.zip', 'parent.pkl'))
 
     def test_corridor_override_includes_route_and_connectors(self):
         config = exit_progress_reward.load_experiment(
