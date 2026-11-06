@@ -328,7 +328,8 @@ def parse_args():
                        'secrm_efficiency', 'secrm_efficiency_route',
                        'secrm_efficiency_route_no_events', 'secrm_efficiency_directional',
                        'secrm_efficiency_directional_l1', 'secrm_efficiency_directional_l2',
-                       'secrm_efficiency_directional_l1_speed120_500k')
+                       'secrm_efficiency_directional_l1_speed120_500k',
+                       'secrm_efficiency_directional_l1_speed120_1m')
     if args.exit_config and args.exit_phase not in progress_phases:
         parser.error('--exit_config requires a progress_events phase')
     args.progress_experiment = None
@@ -400,6 +401,9 @@ def parse_args():
                            'urgency_134_curriculum_500k',
                            'secrm_efficiency_directional_l1_speed120_500k') and args.load_path:
         parser.error('This E76-to-D3 phase must start from random initialization')
+    if (args.exit_phase == 'secrm_efficiency_directional_l1_speed120_1m'
+            and not args.load_path):
+        parser.error('The speed120 1M phase requires the frozen 500k model and replay buffer')
     if args.exit_phase == 'nav_300k' and not args.load_path:
         parser.error('NAV136 300k continuation requires the 200k model and replay buffer')
     if args.exit_phase in exit_config.CURRICULUM_BRANCH_PHASES and not args.load_path:
@@ -419,6 +423,7 @@ def main():
     args = parse_args()
     curriculum_branch = args.exit_phase in exit_config.CURRICULUM_BRANCH_PHASES
     e09 = bool(args.exit_phase and args.exit_phase.startswith('e09_pending_'))
+    speed120_continuation = args.exit_phase == 'secrm_efficiency_directional_l1_speed120_1m'
     parent_hashes = None
     if e09:
         from src.curriculum_branch import sha256_file
@@ -428,6 +433,18 @@ def main():
     if curriculum_branch:
         from src.curriculum_branch import validate_parent_files
         parent_hashes = validate_parent_files(args.load_path, args.replay_buffer_path)
+    if speed120_continuation:
+        from src.curriculum_branch import sha256_file
+        parent_hashes = {
+            'parent_model_sha256': sha256_file(args.load_path),
+            'parent_replay_sha256': sha256_file(args.replay_buffer_path),
+        }
+        expected = {
+            'parent_model_sha256': exit_config.SPEED120_500K_MODEL_SHA256,
+            'parent_replay_sha256': exit_config.SPEED120_500K_REPLAY_SHA256,
+        }
+        if parent_hashes != expected:
+            raise ValueError('Speed120 1M continuation requires the frozen 500k model and replay')
 
     if args.run_name is None:
         args.run_name = f"SAC-merging-delay-wrapper-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -531,6 +548,11 @@ def main():
                       continuation_budget=50_000,
                       checkpoint_steps=exit_config.CURRICULUM_BRANCH_CHECKPOINTS,
                       reset_protocol='fresh_episode_common_seed43_rng_v1')
+    if speed120_continuation:
+        config.update(parent_hashes, resume_start_step=500_000,
+                      continuation_budget=500_000,
+                      checkpoint_steps=(750_000, 1_000_000),
+                      reset_protocol='fresh_episode_seed42_rng_v1')
     config_bytes = json.dumps(config, sort_keys=True, separators=(',', ':')).encode('utf-8')
     config_sha256 = hashlib.sha256(config_bytes).hexdigest()
     if args.episode_log:
@@ -664,7 +686,8 @@ def main():
                 if not e09:
                     loaded_model.load_replay_buffer(args.replay_buffer_path)
                     if args.exit_reward_profile in exit_config.secrm_reward.PROFILES:
-                        exit_config.secrm_reward.validate_replay(loaded_model.replay_buffer, args.progress_experiment)
+                        exit_config.secrm_reward.validate_replay(
+                            loaded_model.replay_buffer, saved_experiment)
                 else:
                     from src.curriculum_branch import prepare_empty_replay_branch
                     prepare_empty_replay_branch(loaded_model, vec_env)
@@ -734,7 +757,8 @@ def main():
     )
     if args.exit_phase in ('secrm_efficiency_directional', 'secrm_efficiency_directional_l1',
                            'secrm_efficiency_directional_l2',
-                           'secrm_efficiency_directional_l1_speed120_500k'):
+                           'secrm_efficiency_directional_l1_speed120_500k',
+                           'secrm_efficiency_directional_l1_speed120_1m'):
         checkpoint_callback = IntermediateCheckpointCallback(
             final_step=args.total_timesteps, save_freq=args.checkpoint_freq,
             save_path=checkpoint_dir, name_prefix=args.run_name, verbose=2,
@@ -755,6 +779,14 @@ def main():
                                  'relative_warmup_steps': 100,
                                  'absolute_learning_starts': model.learning_starts,
                                  **restored_learner_summary(model)})
+    if speed120_continuation:
+        from src.curriculum_branch import restored_learner_summary
+        episode_callback.starting_timesteps = 500_000
+        episode_callback._write({
+            'event': 'speed120_resume', 'steps': 500_000, 'env_steps': 500_000,
+            **parent_hashes, 'reset_protocol': config['reset_protocol'],
+            **restored_learner_summary(model),
+        })
     wandb_callback = WandbCallback(
         gradient_save_freq=0 if args.exit_phase else 1000,
         verbose=2,
@@ -765,7 +797,7 @@ def main():
 
     # Train and save before closing the single active TraCI connection.
     try:
-        if curriculum_branch or e09:
+        if curriculum_branch or e09 or speed120_continuation:
             # Reset Python/NumPy/Torch RNGs identically AFTER logger setup.
             # Optimizers, entropy, target critics and replay remain loaded.
             model.set_random_seed(args.seed)

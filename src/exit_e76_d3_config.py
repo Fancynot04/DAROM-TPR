@@ -61,6 +61,8 @@ CURRICULUM_BRANCH_START = 100_000
 CURRICULUM_BRANCH_CHECKPOINTS = (110_000, 125_000, 150_000)
 CURRICULUM_BRANCH_MODEL_SHA256 = '83d9b67170220c33672f8ceaeb4e19685b014cbf8e89c77ba7135178af30064f'
 CURRICULUM_BRANCH_REPLAY_SHA256 = '10fdd7430ab1cab71af17b2093a6a469372a96e06006facd7066ce2a19a4120e'
+SPEED120_500K_MODEL_SHA256 = '2ad93cfe603a905d121c7d97fa9ec582ab9ecbfd0ffea055c019d82aaa072f8f'
+SPEED120_500K_REPLAY_SHA256 = 'a57641dc72efe1fd30bb935852483524fd825c73d36f78c86205c5e849b4ce0b'
 CURRICULUM_BRANCH_PHASES = {
     'urgency_curriculum_hold2_150k': URGENCY_CURRICULUM_STAGES[:2],
     'urgency_curriculum_expand3_150k': URGENCY_CURRICULUM_STAGES[:3],
@@ -84,6 +86,12 @@ PHASES = {
     } for mode in ('l1', 'l2')},
     'secrm_efficiency_directional_l1_speed120_500k': {
         'scenario': 'easy', 'total_timesteps': 500_000,
+        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
+        'road_speed_limit_mps': SPEED_LIMIT_120_KPH_MPS,
+    },
+    'secrm_efficiency_directional_l1_speed120_1m': {
+        'scenario': 'easy', 'total_timesteps': 1_000_000,
         'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
         'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
         'road_speed_limit_mps': SPEED_LIMIT_120_KPH_MPS,

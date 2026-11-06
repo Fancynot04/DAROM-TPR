@@ -3097,3 +3097,12 @@ minimum of safe speed, the 33.333 m/s road limit and the unchanged 32 m/s cap.
 The run budget is 500,000 environment steps, with model/replay saves at 250,000
 and 500,000 steps. The final checkpoint is evaluated on fixed seeds
 200051–200150. Existing phases do not apply this run-scoped lane override.
+
+The `secrm_efficiency_directional_l1_speed120_1m` phase continues that exact
+frozen 500k model and replay buffer to a cumulative 1,000,000 environment
+steps. It refuses fresh initialization and verifies both parent SHA-256 values
+before loading. The optimizer, target critics, automatic entropy state and
+replay are restored; Python, NumPy, Torch and environment RNGs restart from
+seed 42 at a fresh episode. The continuation writes to a distinct run name and
+output directory, saves an intermediate model/replay at 750k, saves the final
+model/replay at 1M, and preserves the original 500k artifacts.
