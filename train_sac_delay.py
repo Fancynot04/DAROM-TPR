@@ -328,7 +328,7 @@ def parse_args():
                        'secrm_efficiency', 'secrm_efficiency_route',
                        'secrm_efficiency_route_no_events', 'secrm_efficiency_directional',
                        'secrm_efficiency_directional_l1', 'secrm_efficiency_directional_l2',
-                       'secrm_efficiency_directional_l1_speed120_50k')
+                       'secrm_efficiency_directional_l1_speed120_500k')
     if args.exit_config and args.exit_phase not in progress_phases:
         parser.error('--exit_config requires a progress_events phase')
     args.progress_experiment = None
@@ -398,7 +398,7 @@ def parse_args():
     if args.exit_phase in ('nav_200k', 'control_134_200k',
                            'urgency_134_200k', 'urgency_134_300k',
                            'urgency_134_curriculum_500k',
-                           'secrm_efficiency_directional_l1_speed120_50k') and args.load_path:
+                           'secrm_efficiency_directional_l1_speed120_500k') and args.load_path:
         parser.error('This E76-to-D3 phase must start from random initialization')
     if args.exit_phase == 'nav_300k' and not args.load_path:
         parser.error('NAV136 300k continuation requires the 200k model and replay buffer')
@@ -734,7 +734,7 @@ def main():
     )
     if args.exit_phase in ('secrm_efficiency_directional', 'secrm_efficiency_directional_l1',
                            'secrm_efficiency_directional_l2',
-                           'secrm_efficiency_directional_l1_speed120_50k'):
+                           'secrm_efficiency_directional_l1_speed120_500k'):
         checkpoint_callback = IntermediateCheckpointCallback(
             final_step=args.total_timesteps, save_freq=args.checkpoint_freq,
             save_path=checkpoint_dir, name_prefix=args.run_name, verbose=2,

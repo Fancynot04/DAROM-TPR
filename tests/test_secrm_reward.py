@@ -151,9 +151,7 @@ class SecrmTests(unittest.TestCase):
     def test_training_defaults(self):
         for phase in config.SECRM_DEFAULTS:
             with patch.object(sys,'argv',['train','--exit_phase',phase]):args=parse_args()
-            budget = ((50000, 50000)
-                      if phase == 'secrm_efficiency_directional_l1_speed120_50k'
-                      else (500000, 250000)
+            budget = ((500000, 250000)
                       if phase.startswith('secrm_efficiency_directional')
                       else (200000, 50000))
             self.assertEqual((args.seed,args.total_timesteps,args.checkpoint_freq,args.wandb_mode),(42,*budget,'disabled'))

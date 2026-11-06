@@ -50,10 +50,10 @@ for mode in ('l1', 'l2'):
         'reward': {**SECRM_DEFAULTS['secrm_efficiency']['reward'],
                    'lane_reward_mode': mode},
     }
-SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_50k'] = {
+SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_500k'] = {
     **SECRM_DEFAULTS['secrm_efficiency_directional_l1'],
-    'total_timesteps': 50_000,
-    'checkpoint_freq': 50_000,
+    'total_timesteps': 500_000,
+    'checkpoint_freq': 250_000,
 }
 # C shares B's formula profile; only event weights change, hence a new identity.
 SECRM_DEFAULTS['secrm_efficiency_route_no_events'] = {
@@ -123,7 +123,7 @@ def load_experiment(path=None, directional=False, phase=None):
     if reward_profile(config) != expected:
         raise ValueError(f'Configuration reward version must be {expected}')
     if (phase in ('secrm_efficiency_directional_l1', 'secrm_efficiency_directional_l2',
-                  'secrm_efficiency_directional_l1_speed120_50k')
+                  'secrm_efficiency_directional_l1_speed120_500k')
             and config['reward']['lane_reward_mode'] != default['reward']['lane_reward_mode']):
         raise ValueError('Configuration lane reward mode does not match the phase')
     return config

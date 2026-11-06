@@ -13,20 +13,20 @@ class L1Speed120Tests(unittest.TestCase):
         base = exit_progress_reward.load_experiment(
             phase='secrm_efficiency_directional_l1')
         variant = exit_progress_reward.load_experiment(
-            phase='secrm_efficiency_directional_l1_speed120_50k')
+            phase='secrm_efficiency_directional_l1_speed120_500k')
         self.assertEqual(variant['reward'], base['reward'])
         self.assertEqual(variant['seed'], base['seed'])
         self.assertEqual(variant['scenario'], base['scenario'])
         self.assertEqual(variant['timeout_seconds'], base['timeout_seconds'])
-        self.assertEqual(variant['total_timesteps'], 50_000)
-        self.assertEqual(variant['checkpoint_freq'], 50_000)
-        phase = exits.PHASES['secrm_efficiency_directional_l1_speed120_50k']
+        self.assertEqual(variant['total_timesteps'], 500_000)
+        self.assertEqual(variant['checkpoint_freq'], 250_000)
+        phase = exits.PHASES['secrm_efficiency_directional_l1_speed120_500k']
         self.assertAlmostEqual(phase['road_speed_limit_mps'], 120.0 / 3.6)
         self.assertFalse(phase['nav_features'])
 
     def test_corridor_override_includes_route_and_connectors(self):
         config = exit_progress_reward.load_experiment(
-            phase='secrm_efficiency_directional_l1_speed120_50k')
+            phase='secrm_efficiency_directional_l1_speed120_500k')
         env = Merging(
             seed=42, scenario='easy', task=exits.TASK_ID,
             exit_reward_profile=exits.secrm_reward.ADAPTIVE_PROFILE,
@@ -46,7 +46,7 @@ class L1Speed120Tests(unittest.TestCase):
 
     def test_missing_corridor_fails_closed(self):
         config = exit_progress_reward.load_experiment(
-            phase='secrm_efficiency_directional_l1_speed120_50k')
+            phase='secrm_efficiency_directional_l1_speed120_500k')
         env = Merging(
             seed=42, scenario='easy', task=exits.TASK_ID,
             exit_reward_profile=exits.secrm_reward.ADAPTIVE_PROFILE,
