@@ -19,6 +19,9 @@ URGENCY_CLIP = 1.5
 URGENCY_WEIGHT = 0.10
 CONTROL_PROFILE = 'tracked_lane_change_v2'
 DISTANCE_SCALE_EDGES = ('E76', 'E77', 'D3')
+SPEED_LIMIT_CORRIDOR_EDGES = ('E76', 'E77', 'D3')
+SPEED_LIMIT_CORRIDOR_INTERNAL_PREFIXES = (':J105_', ':J106_')
+SPEED_LIMIT_120_KPH_MPS = 120.0 / 3.6
 NAV_OBSERVATION_PROFILE = 'nav_d3_required_lanes_v1'
 NAV_DISTANCE_SCALE_METERS = 1260.74
 NAV_DIM = 2
@@ -79,6 +82,12 @@ PHASES = {
         'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
         'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
     } for mode in ('l1', 'l2')},
+    'secrm_efficiency_directional_l1_speed120_50k': {
+        'scenario': 'easy', 'total_timesteps': 50_000,
+        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
+        'road_speed_limit_mps': SPEED_LIMIT_120_KPH_MPS,
+    },
     'secrm_efficiency_route_no_events': {
         'scenario': 'easy', 'total_timesteps': 200_000,
         'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,

@@ -119,7 +119,7 @@ class Merging(gym.Env):
     def __init__(self, seed, mode='all', radius = 50, render_mode= None, runSafetyCheck=False,
                  scenario='medium', task='legacy_o3_d1', potential_gamma=None,
                  exit_reward_profile=None, e09_pending_mode=None,
-                 progress_experiment=None):
+                 progress_experiment=None, road_speed_limit_mps=None):
         if scenario not in ('easy', 'medium', 'hard'):
             raise ValueError(f'Unknown Antwerp scenario: {scenario}')
         if task not in ANTWERP_TASKS:
@@ -135,6 +135,13 @@ class Merging(gym.Env):
                                     else exit_reward_profile)
         self.progress_experiment = (exit_progress_reward.validate_experiment(progress_experiment)
                                     if progress_experiment is not None else None)
+        if road_speed_limit_mps is not None:
+            road_speed_limit_mps = float(road_speed_limit_mps)
+            if not math.isfinite(road_speed_limit_mps) or road_speed_limit_mps <= 0:
+                raise ValueError('Road speed limit must be a positive finite value')
+            if task != exit_config.TASK_ID:
+                raise ValueError('Road speed-limit override is only defined for E76-to-D3')
+        self.road_speed_limit_mps = road_speed_limit_mps
         if self.exit_reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
                                         exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES):
             if task != exit_config.TASK_ID or self.progress_experiment is None:
@@ -244,6 +251,25 @@ class Merging(gym.Env):
 
         self.render_mode = render_mode
         self._connection = None
+
+    def _apply_exit_road_speed_limit(self):
+        """Apply a run-scoped corridor limit before any simulated vehicle departs."""
+        if self.road_speed_limit_mps is None:
+            return ()
+        lane_ids = tuple(self.traci.lane.getIDList())
+        selected = tuple(
+            lane_id for lane_id in lane_ids
+            if lane_id.split('_', 1)[0] in exit_config.SPEED_LIMIT_CORRIDOR_EDGES
+            or lane_id.startswith(exit_config.SPEED_LIMIT_CORRIDOR_INTERNAL_PREFIXES)
+        )
+        expected = {f'{edge}_0' for edge in exit_config.SPEED_LIMIT_CORRIDOR_EDGES}
+        if (not expected.issubset(selected)
+                or not any(lane.startswith(':J105_') for lane in selected)
+                or not any(lane.startswith(':J106_') for lane in selected)):
+            raise RuntimeError('E76-to-D3 speed-limit corridor is incomplete')
+        for lane_id in selected:
+            self.traci.lane.setMaxSpeed(lane_id, self.road_speed_limit_mps)
+        return selected
 
     @property
     def traci(self):
@@ -686,6 +712,7 @@ class Merging(gym.Env):
             '--collision.action', 'remove', '-Q',
         ]
         self.traci.start(sumo_cmd)
+        self._apply_exit_road_speed_limit()
 
         # Stop one step before the scheduled departure so TraCI observes its ID.
         self.traci.simulationStep(EGO_DEPART_TIME - SUMO_STEP_LENGTH)

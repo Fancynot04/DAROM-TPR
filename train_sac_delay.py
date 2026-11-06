@@ -269,12 +269,13 @@ def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None
              ablation='full', task='legacy_o3_d1', potential_gamma=None,
              nav_features=False, exit_reward_profile=None,
              curriculum_stages=None, curriculum_route_dir=None, e09_pending_mode=None,
-             progress_experiment=None):
+             progress_experiment=None, road_speed_limit_mps=None):
     env = DelayWrapper(
         Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
                 potential_gamma=potential_gamma, exit_reward_profile=exit_reward_profile,
                 e09_pending_mode=e09_pending_mode,
-                progress_experiment=progress_experiment),
+                progress_experiment=progress_experiment,
+                road_speed_limit_mps=road_speed_limit_mps),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation, nav_features=nav_features,
     )
@@ -326,7 +327,8 @@ def parse_args():
     progress_phases = ('progress_events', 'progress_events_directional_lc',
                        'secrm_efficiency', 'secrm_efficiency_route',
                        'secrm_efficiency_route_no_events', 'secrm_efficiency_directional',
-                       'secrm_efficiency_directional_l1', 'secrm_efficiency_directional_l2')
+                       'secrm_efficiency_directional_l1', 'secrm_efficiency_directional_l2',
+                       'secrm_efficiency_directional_l1_speed120_50k')
     if args.exit_config and args.exit_phase not in progress_phases:
         parser.error('--exit_config requires a progress_events phase')
     args.progress_experiment = None
@@ -395,7 +397,8 @@ def parse_args():
         parser.error('E76-to-D3 continuation requires both model and replay-buffer paths')
     if args.exit_phase in ('nav_200k', 'control_134_200k',
                            'urgency_134_200k', 'urgency_134_300k',
-                           'urgency_134_curriculum_500k') and args.load_path:
+                           'urgency_134_curriculum_500k',
+                           'secrm_efficiency_directional_l1_speed120_50k') and args.load_path:
         parser.error('This E76-to-D3 phase must start from random initialization')
     if args.exit_phase == 'nav_300k' and not args.load_path:
         parser.error('NAV136 300k continuation requires the 200k model and replay buffer')
@@ -500,6 +503,8 @@ def main():
         wandb_entity=args.entity,
         use_safety=args.use_safety,
         training_safety=args.use_safety,
+        road_speed_limit_mps=(exit_config.PHASES[args.exit_phase].get('road_speed_limit_mps')
+                              if args.exit_phase else None),
         antwerp_env_version=ANTWERP_ENV_VERSION,
         device=args.device,
         torch_threads=args.torch_threads,
@@ -545,7 +550,8 @@ def main():
                         (os.path.join('tmp', 'ai', 'e76-d3', args.exit_phase,
                                       args.run_name, 'routes')
                          if config['curriculum_stages'] is not None else None),
-                        config['e09_pending_mode'], args.progress_experiment)
+                        config['e09_pending_mode'], args.progress_experiment,
+                        config['road_speed_limit_mps'])
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -696,6 +702,7 @@ def main():
             model.exit_progress_experiment_identity = exit_progress_reward.experiment_identity(
                 args.progress_experiment)
         model.exit_control_profile = exit_config.CONTROL_PROFILE
+        model.road_speed_limit_mps = config['road_speed_limit_mps']
         if e09:
             model.e09_pending_mode = config['e09_pending_mode']
 
@@ -726,7 +733,8 @@ def main():
         save_replay_buffer=args.save_replay_buffer,
     )
     if args.exit_phase in ('secrm_efficiency_directional', 'secrm_efficiency_directional_l1',
-                           'secrm_efficiency_directional_l2'):
+                           'secrm_efficiency_directional_l2',
+                           'secrm_efficiency_directional_l1_speed120_50k'):
         checkpoint_callback = IntermediateCheckpointCallback(
             final_step=args.total_timesteps, save_freq=args.checkpoint_freq,
             save_path=checkpoint_dir, name_prefix=args.run_name, verbose=2,

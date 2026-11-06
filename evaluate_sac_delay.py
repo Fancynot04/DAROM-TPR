@@ -34,12 +34,14 @@ REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout
 
 def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1',
              potential_gamma=None, nav_features=False, exit_reward_profile=None,
-             e09_pending_mode=None, progress_experiment=None):
+             e09_pending_mode=None, progress_experiment=None,
+             road_speed_limit_mps=None):
     env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
                                potential_gamma=potential_gamma,
                                exit_reward_profile=exit_reward_profile,
                                e09_pending_mode=e09_pending_mode,
-                               progress_experiment=progress_experiment),
+                               progress_experiment=progress_experiment,
+                               road_speed_limit_mps=road_speed_limit_mps),
                        max_delay=20, mode='all', delay_mode=delay_mode,
                        seed=seed, ablation=ablation, nav_features=nav_features)
     return SafetyWrapper(env) if safety else env
@@ -119,6 +121,7 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
         setup['exit_observation_profile'] = getattr(model, 'exit_observation_profile', None)
         setup['nav_features'] = nav_features
         setup['exit_reward_profile'] = reward_profile
+        setup['road_speed_limit_mps'] = getattr(model, 'road_speed_limit_mps', None)
         if progress_experiment is not None:
             setup['progress_experiment'] = progress_experiment
             setup['progress_reward_identity'] = exit_progress_reward.reward_identity(
@@ -440,7 +443,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
                            potential_gamma=setup.get('potential_gamma'),
                            nav_features=setup.get('nav_features', False),
                            exit_reward_profile=setup.get('exit_reward_profile'),
-                           progress_experiment=setup.get('progress_experiment'))
+                           progress_experiment=setup.get('progress_experiment'),
+                           road_speed_limit_mps=setup.get('road_speed_limit_mps'))
             try:
                 runs.append({'seed': seed, 'episodes': episodes,
                              **evaluate(model, env, episodes, seed, task=task,

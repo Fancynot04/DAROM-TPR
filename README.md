@@ -3086,3 +3086,13 @@ experiment ledger and obtain the project-required confirmation before remote
 upload or training. Alternating directional payments can have positive
 *discounted* return even when their undiscounted sum is negative; reward and
 trajectory comparisons require a matched counterfactual, not this sum alone.
+
+The `secrm_efficiency_directional_l1_speed120_50k` phase is a short L1
+road-limit sensitivity run. It preserves L1's seed 42, Easy scene, 134-value
+observation, SAC settings, reward formula, 400-second timeout, random
+initialization and fresh replay, while setting the E76, J105, E77, J106 and D3
+corridor lanes to 120 km/h (33.333 m/s) before any vehicle departs. The
+existing Ego controller cap remains 32 m/s, so the SECRM target uses the
+minimum of safe speed, the 33.333 m/s road limit and the unchanged 32 m/s cap.
+The run budget is 50,000 environment steps with one final model/replay save at
+50,000 steps. Existing phases do not apply this run-scoped lane override.
