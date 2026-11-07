@@ -14,6 +14,7 @@ from .trajectory_segments import load_episode, summarize_segment
 
 
 PAIR_VERSION = "darom-pbrl-p0-pairs-v1"
+GAP_DERIVATION_VERSION = "candidate-lane-signed-envelope-gap-v2"
 
 
 def _episode_by_seed(dataset):
@@ -52,6 +53,242 @@ def _minimum_gap(row):
     return min(values) if values else None
 
 
+def _gap_observations(row):
+    ego = row["pre"]["ego"]
+    time_s = row.get("sim_time_pre_s")
+    observations = []
+    for lane in row["pre"]["surroundings"].get("candidate_lanes", []):
+        for relative_position in ("front", "rear"):
+            vehicle = lane.get(f"{relative_position}_vehicle")
+            gap = lane.get(f"{relative_position}_gap_m")
+            ttc = lane.get(f"{relative_position}_ttc_s")
+            if vehicle is None or gap is None:
+                continue
+            if relative_position == "front":
+                closing = (ego.get("speed_mps") - vehicle.get("speed_mps")
+                           if ego.get("speed_mps") is not None
+                           and vehicle.get("speed_mps") is not None else None)
+                formula = "other_front_position - other_length - ego_front_position"
+            else:
+                closing = (vehicle.get("speed_mps") - ego.get("speed_mps")
+                           if ego.get("speed_mps") is not None
+                           and vehicle.get("speed_mps") is not None else None)
+                formula = "ego_front_position - ego_length - other_front_position"
+            if gap < 0:
+                ttc_valid, invalid_reason = False, "negative_gap_longitudinal_overlap"
+                longitudinal_relation = "overlap"
+            elif closing is None:
+                ttc_valid, invalid_reason = False, "closing_speed_missing"
+                longitudinal_relation = relative_position
+            elif closing <= 0:
+                ttc_valid, invalid_reason = False, "not_closing"
+                longitudinal_relation = relative_position
+            elif ttc is None:
+                ttc_valid, invalid_reason = False, "ttc_missing"
+                longitudinal_relation = relative_position
+            else:
+                ttc_valid, invalid_reason = True, None
+                longitudinal_relation = relative_position
+            observations.append({
+                "time_s": time_s,
+                "road": ego.get("road_id"),
+                "ego_lane": ego.get("lane_index"),
+                "candidate_lane_id": lane.get("lane_id"),
+                "candidate_lane_index": lane.get("lane_index"),
+                "candidate_lane_relation": lane.get("relation"),
+                "other_vehicle_id": vehicle.get("vehicle_id"),
+                "other_vehicle_lane_id": vehicle.get("lane_id"),
+                "relative_position": relative_position,
+                "longitudinal_relation": longitudinal_relation,
+                "signed_gap_m": gap,
+                "overlap_m": -gap if gap < 0 else None,
+                "closing_speed_mps": closing,
+                "ttc_s": ttc if ttc_valid else None,
+                "ttc_valid": ttc_valid,
+                "ttc_invalid_reason": invalid_reason,
+                "gap_formula": formula,
+                "ttc_formula": "signed_gap_m / closing_speed_mps",
+            })
+    return observations
+
+
+def _gap_audit(segment):
+    events = [event for row in segment["transitions"]
+              for event in _gap_observations(row)]
+    signed = min(events, key=lambda item: item["signed_gap_m"], default=None)
+    nonnegative = min((item for item in events if item["signed_gap_m"] >= 0),
+                      key=lambda item: item["signed_gap_m"], default=None)
+    return {
+        "derivation_version": GAP_DERIVATION_VERSION,
+        "definition": ("Signed longitudinal envelope clearance on current and adjacent "
+                       "candidate lanes; negative means longitudinal overlap, not a "
+                       "negative Euclidean distance."),
+        "minimum_signed_gap": signed,
+        "minimum_nonnegative_gap": nonnegative,
+        "negative_gap_event_count": sum(item["signed_gap_m"] < 0 for item in events),
+        "ttc_validity": "gap >= 0 and closing_speed > 0; otherwise TTC is null",
+    }
+
+
+def _initial_conditions(segment):
+    row = segment["transitions"][0]
+    ego, route = row["pre"]["ego"], row["pre"]["route"]
+    surroundings = []
+    for lane in row["pre"]["surroundings"].get("candidate_lanes", []):
+        surroundings.append({
+            "lane_id": lane.get("lane_id"), "lane_index": lane.get("lane_index"),
+            "relation": lane.get("relation"),
+            "front_vehicle_id": (lane.get("front_vehicle") or {}).get("vehicle_id"),
+            "front_gap_m": lane.get("front_gap_m"),
+            "front_relative_speed_mps": lane.get("front_relative_speed_mps"),
+            "front_ttc_s": lane.get("front_ttc_s"),
+            "rear_vehicle_id": (lane.get("rear_vehicle") or {}).get("vehicle_id"),
+            "rear_gap_m": lane.get("rear_gap_m"),
+            "rear_relative_speed_mps": lane.get("rear_relative_speed_mps"),
+            "rear_ttc_s": lane.get("rear_ttc_s"),
+        })
+    return {
+        "eval_seed": row.get("eval_seed"), "sim_time_s": row.get("sim_time_pre_s"),
+        "road": ego.get("road_id"), "lane_id": ego.get("lane_id"),
+        "lane_index": ego.get("lane_index"),
+        "distance_d3_m": route.get("distance_to_d3_start_m"),
+        "speed_mps": ego.get("speed_mps"),
+        "route_requirement_n_changes": route.get("route_requirement_n_changes"),
+        "pending": row["pre"].get("pending"),
+        "surroundings": surroundings,
+    }
+
+
+def _route_change_events(segment):
+    events = []
+    for row in segment["transitions"]:
+        before, after = row["pre"], row["post"]
+        before_n = before["route"].get("route_requirement_n_changes")
+        after_n = after["route"].get("route_requirement_n_changes")
+        if before_n is None or after_n is None or before_n == after_n:
+            continue
+        actual_change = bool(row["execution"].get("lane_change_completed"))
+        road_connection = (before["ego"].get("road_id") != after["ego"].get("road_id"))
+        if actual_change:
+            cause = "actual_lane_change"
+        elif road_connection:
+            cause = "road_connection_transition"
+        else:
+            cause = "route_state_change_without_completion_event"
+        events.append({
+            "time_s": row.get("sim_time_post_s"), "before_n": before_n,
+            "after_n": after_n,
+            "before": {"road": before["ego"].get("road_id"),
+                       "lane_id": before["ego"].get("lane_id"),
+                       "lane_index": before["ego"].get("lane_index"),
+                       "distance_d3_m": before["route"].get("distance_to_d3_start_m")},
+            "after": {"road": after["ego"].get("road_id"),
+                      "lane_id": after["ego"].get("lane_id"),
+                      "lane_index": after["ego"].get("lane_index"),
+                      "distance_d3_m": after["route"].get("distance_to_d3_start_m")},
+            "actual_lane_change_completed": actual_change,
+            "road_connection_transition": road_connection,
+            "associated_change_direction": row["execution"].get("completed_direction"),
+            "cause": cause,
+        })
+    return events
+
+
+def _lane_change_events(segment):
+    rows = segment["transitions"]
+    events = []
+    for row in rows:
+        completion = row["execution"].get("lane_change_completion_event")
+        if completion is None:
+            continue
+        request_time = completion.get("request_time_s")
+        request_direction = completion.get("request_direction")
+        completion_time = completion.get("completion_time_s")
+        request_row = next((candidate for candidate in rows
+                            if request_time is not None
+                            and candidate.get("sim_time_pre_s") is not None
+                            and abs(candidate["sim_time_pre_s"] - request_time) <= 0.11
+                            and candidate["sac"].get("lateral_direction") == request_direction),
+                           None)
+        blocked = [candidate for candidate in rows
+                   if request_time is not None
+                   and completion_time is not None
+                   and candidate.get("sim_time_pre_s") is not None
+                   and request_time <= candidate["sim_time_pre_s"] <= completion_time
+                   and candidate["controller"]["lateral"].get("blocked_by_pending")]
+        events.append({
+            "direction": completion.get("actual_direction"),
+            "route_direction": completion.get("route_direction"),
+            "request_time_s": request_time,
+            "completion_time_s": completion_time,
+            "request_distance_d3_m": completion.get("request_distance_to_d3_start_m"),
+            "request_in_segment": request_row is not None,
+            "request_actor_direction": (request_row["sac"].get("lateral_direction")
+                                        if request_row is not None else None),
+            "request_command_sent": (request_row["controller"]["lateral"].get(
+                "traci_command_called") if request_row is not None else None),
+            "request_blocked_by_pending": (request_row["controller"]["lateral"].get(
+                "blocked_by_pending") if request_row is not None else None),
+            "pending_start_time_s": completion.get("request_time_s"),
+            "pending_duration_s": ((completion_time - request_time)
+                                   if completion_time is not None
+                                   and request_time is not None else None),
+            "blocked_actor_requests_during_pending": len(blocked),
+        })
+    return events
+
+
+def _comparability(left, right):
+    a, b = left["initial"], right["initial"]
+    differences, critical = [], []
+
+    def compare(name, av, bv, threshold=None, exact=False):
+        delta = abs(av - bv) if isinstance(av, (int, float)) and isinstance(
+            bv, (int, float)) else None
+        if exact:
+            issue = av != bv
+        elif av is None and bv is None:
+            issue = False
+        elif delta is None:
+            issue = True
+        else:
+            issue = delta > threshold
+        row = {"field": name, "A": av, "B": bv, "absolute_difference": delta,
+               "threshold": threshold, "large_difference": issue}
+        differences.append(row)
+        if issue:
+            critical.append(name)
+
+    compare("eval_seed", a.get("eval_seed"), b.get("eval_seed"), exact=True)
+    compare("sim_time_s", a.get("sim_time_s"), b.get("sim_time_s"), threshold=0.11)
+    compare("road", a.get("road"), b.get("road"), exact=True)
+    compare("lane_index", a.get("lane_index"), b.get("lane_index"), exact=True)
+    compare("distance_d3_m", a.get("distance_d3_m"), b.get("distance_d3_m"),
+            threshold=30.0)
+    compare("speed_mps", a.get("speed_mps"), b.get("speed_mps"), threshold=2.0)
+    compare("route_requirement_n_changes", a.get("route_requirement_n_changes"),
+            b.get("route_requirement_n_changes"), exact=True)
+    compare("pending_active", (a.get("pending") or {}).get("active"),
+            (b.get("pending") or {}).get("active"), exact=True)
+    lanes_a = {row["relation"]: row for row in a.get("surroundings", [])}
+    lanes_b = {row["relation"]: row for row in b.get("surroundings", [])}
+    for relation in sorted(lanes_a.keys() | lanes_b.keys()):
+        for position in ("front", "rear"):
+            aa, bb = lanes_a.get(relation, {}), lanes_b.get(relation, {})
+            compare(f"{relation}_{position}_vehicle_id",
+                    aa.get(f"{position}_vehicle_id"), bb.get(f"{position}_vehicle_id"),
+                    exact=True)
+            compare(f"{relation}_{position}_gap_m", aa.get(f"{position}_gap_m"),
+                    bb.get(f"{position}_gap_m"), threshold=20.0)
+    return {
+        "status": "insufficient" if critical else "comparable",
+        "message": ("可比性不足" if critical else "起始条件在当前阈值内可比"),
+        "large_difference_fields": critical,
+        "differences": differences,
+        "note": "Comparability only; this does not rank A or B.",
+    }
+
+
 def _compact(segment):
     steps = []
     for row in segment["transitions"]:
@@ -71,7 +308,20 @@ def _compact(segment):
             "minimum_gap_m": _minimum_gap(row),
             "pending": row.get("pre", {}).get("pending", {}).get("active"),
         })
-    return {"summary": segment["summary"], "steps": steps}
+    audit = _gap_audit(segment)
+    return {
+        "summary": segment["summary"],
+        "initial": _initial_conditions(segment),
+        "gap_audit": audit,
+        "route_change_events": _route_change_events(segment),
+        "lane_change_events": _lane_change_events(segment),
+        "distance_aligned_progress": [
+            {"distance_d3_m": row["distance_d3_m"], "route_n": row["route_n"],
+             "road": row["road"], "lane": row["lane"],
+             "speed_mps": row["speed_mps"], "time_s": row["time_s"]}
+            for row in steps],
+        "steps": steps,
+    }
 
 
 def _similar_start(left, right):
@@ -188,12 +438,14 @@ def build_pairs(dataset_a, dataset_b, seeds, output_dir, assets_dir, blind_salt)
             with gzip.open(path, "wt", encoding="utf-8") as stream:
                 json.dump(segment, stream, ensure_ascii=False, allow_nan=False)
             segment_paths.append(str(path.relative_to(output)))
+        compact_a, compact_b = _compact(ordered[0]), _compact(ordered[1])
         public.append({
             "pair_id": pair_id,
             "initial_condition": {"eval_seed": seed, "start_step": start,
                                   "duration_s": 10.0},
-            "A": _compact(ordered[0]),
-            "B": _compact(ordered[1]),
+            "comparability": _comparability(compact_a, compact_b),
+            "A": compact_a,
+            "B": compact_b,
         })
         provenance.append({
             "pair_id": pair_id, "eval_seed": seed, "start_step": start,

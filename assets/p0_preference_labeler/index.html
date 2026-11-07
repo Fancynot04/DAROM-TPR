@@ -11,8 +11,9 @@
     <p>只比较这 10 秒内的驾驶行为。模型来源、最终结果和原奖励均已隐藏。</p></header>
   <main>
     <nav><button id="previous">← 上一对</button><strong id="progress">加载中</strong><button id="next">下一对 →</button></nav>
-    <section class="comparison"><article><h2>轨迹 A</h2><div id="summary-a"></div><canvas id="chart-a"></canvas></article>
-      <article><h2>轨迹 B</h2><div id="summary-b"></div><canvas id="chart-b"></canvas></article></section>
+    <section id="comparability"></section>
+    <section class="comparison"><article><h2>轨迹 A</h2><div id="summary-a"></div><canvas id="chart-a"></canvas><div id="details-a"></div></article>
+      <article><h2>轨迹 B</h2><div id="summary-b"></div><canvas id="chart-b"></canvas><div id="details-b"></div></article></section>
     <section class="labels" aria-label="偏好选择">
       <button data-label="A_better">A 更好</button><button data-label="B_better">B 更好</button>
       <button data-label="similar">相近</button><button data-label="cannot_judge">无法判断</button>

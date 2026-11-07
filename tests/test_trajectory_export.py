@@ -139,7 +139,9 @@ class TrajectoryExportTests(unittest.TestCase):
                     patch("src.trajectory_preferences._best_window",
                           return_value=(3.0, 10, segment, segment)) as best, \
                     patch("src.trajectory_preferences._compact",
-                          return_value={"summary": {}, "steps": []}):
+                          return_value={"summary": {}, "steps": []}), \
+                    patch("src.trajectory_preferences._comparability",
+                          return_value={"status": "comparable"}):
                 count = trajectory_preferences.build_pairs(
                     root / "a", root / "b", [1, 2], root / "output",
                     assets, "blind")
@@ -157,6 +159,88 @@ class TrajectoryExportTests(unittest.TestCase):
                 provenance["skipped"][0]["short_trajectories"][0]["steps"], 80)
             self.assertEqual(len(list(
                 (root / "output/segments").glob("*.json.gz"))), 2)
+
+    def test_negative_candidate_gap_is_overlap_and_has_no_valid_ttc(self):
+        segment = {"transitions": [{
+            "sim_time_pre_s": 12.0,
+            "pre": {
+                "ego": {"road_id": "E76", "lane_index": 1,
+                        "speed_mps": 20.0},
+                "surroundings": {"candidate_lanes": [{
+                    "lane_id": "E76_0", "lane_index": 0, "relation": "right",
+                    "front_vehicle": {"vehicle_id": "front", "lane_id": "E76_0",
+                                      "speed_mps": 18.0},
+                    "front_gap_m": -2.5, "front_ttc_s": None,
+                    "rear_vehicle": {"vehicle_id": "rear", "lane_id": "E76_0",
+                                     "speed_mps": 24.0},
+                    "rear_gap_m": 8.0, "rear_ttc_s": 2.0,
+                }]},
+            },
+        }]}
+        audit = trajectory_preferences._gap_audit(segment)
+        self.assertEqual(audit["minimum_signed_gap"]["signed_gap_m"], -2.5)
+        self.assertEqual(audit["minimum_signed_gap"]["overlap_m"], 2.5)
+        self.assertFalse(audit["minimum_signed_gap"]["ttc_valid"])
+        self.assertEqual(audit["minimum_signed_gap"]["ttc_invalid_reason"],
+                         "negative_gap_longitudinal_overlap")
+        self.assertIsNone(audit["minimum_signed_gap"]["ttc_s"])
+        self.assertEqual(audit["minimum_nonnegative_gap"]["signed_gap_m"], 8.0)
+        self.assertEqual(audit["minimum_nonnegative_gap"]["ttc_s"], 2.0)
+
+    def test_route_and_lane_change_events_keep_request_completion_distinct(self):
+        request = {
+            "sim_time_pre_s": 10.0,
+            "sac": {"lateral_direction": -1},
+            "controller": {"lateral": {"traci_command_called": True,
+                                         "blocked_by_pending": False}},
+            "execution": {"lane_change_completed": False,
+                          "lane_change_completion_event": None},
+            "pre": {
+                "ego": {"road_id": "E76", "lane_id": "E76_2", "lane_index": 2},
+                "route": {"route_requirement_n_changes": 2,
+                          "distance_to_d3_start_m": 900.0},
+            },
+            "post": {
+                "ego": {"road_id": "E76", "lane_id": "E76_2", "lane_index": 2},
+                "route": {"route_requirement_n_changes": 2,
+                          "distance_to_d3_start_m": 897.0},
+            },
+        }
+        completion = {
+            "sim_time_pre_s": 14.9, "sim_time_post_s": 15.0,
+            "sac": {"lateral_direction": -1},
+            "controller": {"lateral": {"traci_command_called": False,
+                                         "blocked_by_pending": True}},
+            "execution": {
+                "lane_change_completed": True, "completed_direction": -1,
+                "lane_change_completion_event": {
+                    "actual_direction": -1, "route_direction": "toward",
+                    "request_direction": -1, "request_time_s": 10.0,
+                    "completion_time_s": 15.0,
+                    "request_distance_to_d3_start_m": 900.0,
+                },
+            },
+            "pre": {
+                "ego": {"road_id": "E76", "lane_id": "E76_2", "lane_index": 2},
+                "route": {"route_requirement_n_changes": 2,
+                          "distance_to_d3_start_m": 800.0},
+            },
+            "post": {
+                "ego": {"road_id": "E76", "lane_id": "E76_1", "lane_index": 1},
+                "route": {"route_requirement_n_changes": 1,
+                          "distance_to_d3_start_m": 797.0},
+            },
+        }
+        segment = {"transitions": [request, completion]}
+        lane_event = trajectory_preferences._lane_change_events(segment)[0]
+        self.assertTrue(lane_event["request_in_segment"])
+        self.assertTrue(lane_event["request_command_sent"])
+        self.assertFalse(lane_event["request_blocked_by_pending"])
+        self.assertEqual(lane_event["blocked_actor_requests_during_pending"], 1)
+        route_event = trajectory_preferences._route_change_events(segment)[0]
+        self.assertEqual(route_event["cause"], "actual_lane_change")
+        self.assertTrue(route_event["actual_lane_change_completed"])
+        self.assertFalse(route_event["road_connection_transition"])
 
     def test_cli_export_is_opt_in(self):
         default = parse_args(["model", "--episodes", "1"])

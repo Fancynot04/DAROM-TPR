@@ -3169,3 +3169,14 @@ kept separate from raw transitions, and includes route demand, first direct
 exit-route distance, stable-route duration, completed/reverse changes, repeated
 requests, speed, jerk, minimum candidate-lane gap/TTC and segment events. This
 export creates no preference labels and does not infer quality from reward.
+
+The P0 preference projection also records A/B start-condition differences,
+route-demand transitions, request/Pending/completion linkage, and route progress
+indexed by remaining D3 distance. Candidate-lane gap is a signed longitudinal
+vehicle-envelope clearance, not Euclidean distance: a negative value means the
+two vehicles overlap longitudinally on the current/adjacent lane projection.
+Such rows retain vehicle, lane and time provenance but have invalid/null TTC;
+TTC is valid only for nonnegative gap with positive closing speed. The labeler
+shows the minimum nonnegative clearance separately and flags materially
+different start conditions as insufficiently comparable without choosing a
+preferred trajectory.
