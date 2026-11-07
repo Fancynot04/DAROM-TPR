@@ -64,8 +64,10 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
     if checkpoint_task != task:
         raise ValueError(f'Checkpoint task={checkpoint_task!r}, requested {task!r}')
     trained_e09 = getattr(model, 'e09_pending_mode', None)
+    if e09_pending_mode is None:
+        e09_pending_mode = trained_e09
     if trained_e09 is not None and e09_pending_mode not in ('on', 'off'):
-        raise ValueError('E09 checkpoints require an explicit pending evaluation mode')
+        raise ValueError('Pending-mode checkpoints require an explicit valid evaluation mode')
     if e09_pending_mode is not None and (e09_pending_mode not in ('on', 'off') or safety):
         raise ValueError('E09 evaluation requires a valid mode and custom safety off')
     reward_profile = getattr(model, 'exit_reward_profile', None)
@@ -122,6 +124,7 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
         setup['nav_features'] = nav_features
         setup['exit_reward_profile'] = reward_profile
         setup['road_speed_limit_mps'] = getattr(model, 'road_speed_limit_mps', None)
+        setup['e09_pending_mode'] = e09_pending_mode
         if progress_experiment is not None:
             setup['progress_experiment'] = progress_experiment
             setup['progress_reward_identity'] = exit_progress_reward.reward_identity(
@@ -201,7 +204,22 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
         max_stopped_streak = 0
         hard_braking_steps = 0
         e77_zero_traffic_samples = []
+        speed_samples = []
+        commands_sent = Counter()
+        previous_step_request = 0
+        same_direction_repeat_requests = 0
+        current_request_run = 0
+        max_same_direction_request_run = 0
+        last_nonzero_request = None
+        short_horizon_request_reversals = 0
         while True:
+            if (getattr(base, 'ego_on_road', False)
+                    and not getattr(base, 'ego_teleporting', False)
+                    and hasattr(base, 'traci')):
+                measured_speed = float(base.traci.vehicle.getSpeed(base.ego_id))
+                if not math.isfinite(measured_speed):
+                    raise ValueError('Non-finite evaluation speed')
+                speed_samples.append(measured_speed)
             if secrm and base.ego_on_road:
                 vehicle = base.traci.vehicle
                 speed = float(vehicle.getSpeed(base.ego_id))
@@ -282,6 +300,27 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                 urgency_trace.write(json.dumps(urgency_record, allow_nan=False) + '\n')
             toward_requests += int(info.get('exit_actor_request_direction') == -1)
             away_requests += int(info.get('exit_actor_request_direction') == 1)
+            request_direction = int(info.get('exit_actor_request_direction', 0))
+            if request_direction:
+                if request_direction == previous_step_request:
+                    same_direction_repeat_requests += 1
+                    current_request_run += 1
+                else:
+                    current_request_run = 1
+                max_same_direction_request_run = max(
+                    max_same_direction_request_run, current_request_run)
+                if (last_nonzero_request is not None
+                        and request_direction != last_nonzero_request[0]
+                        and steps - last_nonzero_request[1] <= 10):
+                    short_horizon_request_reversals += 1
+                last_nonzero_request = (request_direction, steps)
+            else:
+                current_request_run = 0
+            previous_step_request = request_direction
+            applied_direction = int(info.get('exit_applied_lane_change_direction', 0))
+            if applied_direction:
+                commands_sent['total'] += 1
+                commands_sent['toward' if applied_direction < 0 else 'away'] += 1
             if task == exit_config.TASK_ID:
                 current_e77_lane = e77_lane_index(env)
                 if previous_e77_lane == 0 and current_e77_lane is not None and current_e77_lane > 0:
@@ -314,6 +353,16 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                                 'success': outcome == 'Arrived' and not teleported,
                                 'toward_requests': toward_requests,
                                 'away_requests': away_requests,
+                                'lane_change_commands_sent': commands_sent['total'],
+                                'toward_commands_sent': commands_sent['toward'],
+                                'away_commands_sent': commands_sent['away'],
+                                'same_direction_repeat_requests': same_direction_repeat_requests,
+                                'max_same_direction_request_run': max_same_direction_request_run,
+                                'short_horizon_request_reversals_1s': short_horizon_request_reversals,
+                                'request_frequency_hz': ((toward_requests + away_requests)
+                                                         / (steps * 0.1)),
+                                'mean_speed_mps': (float(np.mean(speed_samples))
+                                                   if speed_samples else None),
                                 'return': episode_return, 'reset_info': reset_info}
                 if secrm:
                     record['road_boundary'] = {'sample_counts': dict(boundary_counts),
@@ -367,6 +416,21 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
     else:
         result['toward_requests'] = sum(item['toward_requests'] for item in records)
         result['away_requests'] = sum(item['away_requests'] for item in records)
+        result['lane_change_commands_sent'] = sum(
+            item['lane_change_commands_sent'] for item in records)
+        result['toward_commands_sent'] = sum(item['toward_commands_sent'] for item in records)
+        result['away_commands_sent'] = sum(item['away_commands_sent'] for item in records)
+        result['same_direction_repeat_requests'] = sum(
+            item['same_direction_repeat_requests'] for item in records)
+        result['short_horizon_request_reversals_1s'] = sum(
+            item['short_horizon_request_reversals_1s'] for item in records)
+        result['max_same_direction_request_run'] = max(
+            (item['max_same_direction_request_run'] for item in records), default=0)
+        result['mean_request_frequency_hz'] = float(np.mean([
+            item['request_frequency_hz'] for item in records]))
+        valid_speeds = [item['mean_speed_mps'] for item in records
+                        if item['mean_speed_mps'] is not None]
+        result['mean_speed_mps'] = float(np.mean(valid_speeds)) if valid_speeds else None
         if task == exit_config.TASK_ID:
             result['e77_zero_redeparture_episodes'] = sum(
                 item['left_e77_zero_after_entry'] for item in records)
@@ -443,6 +507,7 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
                            potential_gamma=setup.get('potential_gamma'),
                            nav_features=setup.get('nav_features', False),
                            exit_reward_profile=setup.get('exit_reward_profile'),
+                           e09_pending_mode=setup.get('e09_pending_mode'),
                            progress_experiment=setup.get('progress_experiment'),
                            road_speed_limit_mps=setup.get('road_speed_limit_mps'))
             try:

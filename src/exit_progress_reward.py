@@ -55,6 +55,10 @@ SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_500k'] = {
     'total_timesteps': 500_000,
     'checkpoint_freq': 250_000,
 }
+SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_no_pending_500k'] = {
+    **SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_500k'],
+    'checkpoint_freq': 100_000,
+}
 SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_1m'] = {
     **SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_500k'],
     'total_timesteps': 1_000_000,
@@ -132,6 +136,7 @@ def load_experiment(path=None, directional=False, phase=None):
         raise ValueError(f'Configuration reward version must be {expected}')
     if (phase in ('secrm_efficiency_directional_l1', 'secrm_efficiency_directional_l2',
                   'secrm_efficiency_directional_l1_speed120_500k',
+                  'secrm_efficiency_directional_l1_speed120_no_pending_500k',
                   'secrm_efficiency_directional_l1_speed120_1m',
                   'secrm_efficiency_directional_l1_speed120_2m')
             and config['reward']['lane_reward_mode'] != default['reward']['lane_reward_mode']):

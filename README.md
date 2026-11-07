@@ -3113,3 +3113,20 @@ all task, reward, observation, optimizer and safety settings unchanged, checks
 both 1M parent hashes, and trains only the remaining 1,000,000 steps to a
 cumulative 2M budget. It saves model/replay pairs at 1.25M, 1.5M, 1.75M and
 2M in a new output directory, leaving the 500k and 1M artifacts untouched.
+
+The `secrm_efficiency_directional_l1_speed120_no_pending_500k` phase is the E10
+request-lock ablation. It starts seed 42 from random weights and an empty replay,
+uses the exact L1 speed120 reward/environment contract, and saves model/replay
+pairs every 100,000 steps through 500,000. Its only controller change is
+`e09_pending_mode=off`: every in-bounds E76/E77 lateral action is submitted to
+SUMO even while an earlier request is still recorded. The custom remaining-lane
+distance gate is also bypassed. The passive maneuver record is retained for
+physical completion rewards and the E77 terminal grace check; it cannot block
+commands, and a request is not counted as a completed lane change. Existing
+phases keep the tracked Pending lock and distance gate unchanged.
+
+E10 deliberately retains `laneChangeMode=0` for matched comparability. Under
+SUMO's TraCI bitset semantics this disables autonomous lane changes and does not
+preserve target-lane safety-gap enforcement for external commands. Collision,
+emergency-stop, request, submitted-command, stable physical completion and
+one-second request-reversal statistics must therefore be reported separately.

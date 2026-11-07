@@ -188,6 +188,7 @@ class Merging(gym.Env):
         self.ego_teleporting = False
         self.missed_exit = False
         self.exit_maneuver = None
+        self.exit_applied_lane_change_direction = 0
         self.ego_on_road = False
         self.teleport_transition = False
         self.observation_snapshot = None
@@ -289,6 +290,7 @@ class Merging(gym.Env):
         self.ego_teleporting = False
         self.missed_exit = False
         self.exit_maneuver = None
+        self.exit_applied_lane_change_direction = 0
         self.ego_on_road = False
         self.teleport_transition = False
         self.observation_snapshot = None
@@ -980,6 +982,7 @@ class Merging(gym.Env):
                     now = self.traci.simulation.getTime()
                     self.traci.vehicle.changeLane(
                         self.ego_id, target, exit_config.LANE_CHANGE_TIME_SECONDS)
+                    self.exit_applied_lane_change_direction = int(direction)
                     # In E09 off mode this is non-blocking bookkeeping, retained
                     # for the existing urgency and exit-terminal contracts. Do
                     # not restart its clock on a repeated identical request.
@@ -1020,6 +1023,7 @@ class Merging(gym.Env):
             self.secrm_before = self._secrm_snapshot() if was_on_road else None
             self.boundary_diagnostic = road_boundary.observe(self)
         parsed_action = parseAction(action)
+        self.exit_applied_lane_change_direction = 0
         self.exit_actor_request_direction = (
             int(parsed_action[1]) if was_on_road and self.task == exit_config.TASK_ID
             and self.lane_name in ('E76', 'E77') else 0)
@@ -1162,6 +1166,7 @@ class Merging(gym.Env):
                      'exit_reward_profile': (self.exit_reward_profile
                                              if self.task == exit_config.TASK_ID else None),
                      'exit_actor_request_direction': self.exit_actor_request_direction,
+                     'exit_applied_lane_change_direction': self.exit_applied_lane_change_direction,
                      'directional_lane_change_event': self.directional_lane_event,
                      'secrm_diagnostic': getattr(self, 'secrm_before', None),
                      'road_boundary': getattr(self, 'boundary_diagnostic', None),

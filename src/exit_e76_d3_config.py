@@ -92,6 +92,15 @@ PHASES = {
         'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
         'road_speed_limit_mps': SPEED_LIMIT_120_KPH_MPS,
     },
+    'secrm_efficiency_directional_l1_speed120_no_pending_500k': {
+        'scenario': 'easy', 'total_timesteps': 500_000,
+        'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
+        'road_speed_limit_mps': SPEED_LIMIT_120_KPH_MPS,
+        # Reuse the already-tested E09 controller switch.  In off mode the
+        # maneuver record remains observational but never gates a new command.
+        'e09_pending_mode': 'off',
+    },
     'secrm_efficiency_directional_l1_speed120_1m': {
         'scenario': 'easy', 'total_timesteps': 1_000_000,
         'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,

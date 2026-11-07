@@ -329,6 +329,7 @@ def parse_args():
                        'secrm_efficiency_route_no_events', 'secrm_efficiency_directional',
                        'secrm_efficiency_directional_l1', 'secrm_efficiency_directional_l2',
                        'secrm_efficiency_directional_l1_speed120_500k',
+                       'secrm_efficiency_directional_l1_speed120_no_pending_500k',
                        'secrm_efficiency_directional_l1_speed120_1m',
                        'secrm_efficiency_directional_l1_speed120_2m')
     if args.exit_config and args.exit_phase not in progress_phases:
@@ -400,7 +401,8 @@ def parse_args():
     if args.exit_phase in ('nav_200k', 'control_134_200k',
                            'urgency_134_200k', 'urgency_134_300k',
                            'urgency_134_curriculum_500k',
-                           'secrm_efficiency_directional_l1_speed120_500k') and args.load_path:
+                           'secrm_efficiency_directional_l1_speed120_500k',
+                           'secrm_efficiency_directional_l1_speed120_no_pending_500k') and args.load_path:
         parser.error('This E76-to-D3 phase must start from random initialization')
     if args.exit_phase in exit_config.SPEED120_CONTINUATIONS and not args.load_path:
         parser.error('A speed120 continuation phase requires its frozen parent model and replay buffer')
@@ -727,7 +729,7 @@ def main():
                 args.progress_experiment)
         model.exit_control_profile = exit_config.CONTROL_PROFILE
         model.road_speed_limit_mps = config['road_speed_limit_mps']
-        if e09:
+        if config['e09_pending_mode'] is not None:
             model.e09_pending_mode = config['e09_pending_mode']
 
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
@@ -759,7 +761,8 @@ def main():
     if (args.exit_phase in ('secrm_efficiency_directional',
                             'secrm_efficiency_directional_l1',
                             'secrm_efficiency_directional_l2',
-                            'secrm_efficiency_directional_l1_speed120_500k')
+                            'secrm_efficiency_directional_l1_speed120_500k',
+                            'secrm_efficiency_directional_l1_speed120_no_pending_500k')
             or speed120_continuation):
         checkpoint_callback = IntermediateCheckpointCallback(
             final_step=args.total_timesteps, save_freq=args.checkpoint_freq,

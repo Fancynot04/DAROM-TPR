@@ -10,6 +10,28 @@ from train_sac_delay import parse_args
 
 
 class L1Speed120Tests(unittest.TestCase):
+    def test_e10_changes_controller_and_checkpoint_schedule_not_reward(self):
+        baseline_name = 'secrm_efficiency_directional_l1_speed120_500k'
+        e10_name = 'secrm_efficiency_directional_l1_speed120_no_pending_500k'
+        baseline = exit_progress_reward.load_experiment(phase=baseline_name)
+        e10 = exit_progress_reward.load_experiment(phase=e10_name)
+        for field in ('seed', 'scenario', 'timeout_seconds', 'total_timesteps', 'reward'):
+            self.assertEqual(e10[field], baseline[field], field)
+        self.assertEqual(e10['checkpoint_freq'], 100_000)
+        baseline_phase, e10_phase = exits.PHASES[baseline_name], exits.PHASES[e10_name]
+        for field in ('scenario', 'total_timesteps', 'gamma', 'nav_features',
+                      'reward_profile', 'road_speed_limit_mps'):
+            self.assertEqual(e10_phase[field], baseline_phase[field], field)
+        self.assertEqual(e10_phase['e09_pending_mode'], 'off')
+        with patch('sys.argv', ['train_sac_delay.py', '--exit_phase', e10_name,
+                                '--wandb_mode', 'online']):
+            args = parse_args()
+        self.assertEqual((args.seed, args.total_timesteps, args.checkpoint_freq),
+                         (42, 500_000, 100_000))
+        self.assertIsNone(args.load_path)
+        self.assertIsNone(args.replay_buffer_path)
+        self.assertEqual(args.wandb_mode, 'online')
+
     def test_phase_changes_only_budget_and_road_limit(self):
         base = exit_progress_reward.load_experiment(
             phase='secrm_efficiency_directional_l1')

@@ -544,6 +544,7 @@ class SeparateEgoTaskTests(unittest.TestCase):
                     env._apply_lane_change(-1)
                     self.assertEqual(fake.vehicle.changeLane.call_count, 1 if mode == 'on' else 2)
                     self.assertIs(env.exit_maneuver, first)
+                    self.assertEqual(env.exit_applied_lane_change_direction, -1)
                     fake.vehicle.changeLane.assert_called_with('ego', 1, 4.0)
                     env.lane_idx = 0
                     before = fake.vehicle.changeLane.call_count
@@ -556,6 +557,18 @@ class SeparateEgoTaskTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Merging(seed=1, task=exit_config.TASK_ID, e09_pending_mode='on',
                     runSafetyCheck=True)
+
+    def test_no_pending_mode_clears_passive_state_on_episode_reset(self):
+        env = Merging(seed=1, task=exit_config.TASK_ID, e09_pending_mode='off')
+        env.exit_maneuver = {'edge': 'E77', 'target': 0}
+        env.exit_applied_lane_change_direction = -1
+        env.directional_pending_request = -1
+        env.directional_seen_lateral_motion = True
+        env.reset_episode_state()
+        self.assertIsNone(env.exit_maneuver)
+        self.assertEqual(env.exit_applied_lane_change_direction, 0)
+        self.assertIsNone(env.directional_pending_request)
+        self.assertFalse(env.directional_seen_lateral_motion)
 
     def test_exit_maneuver_stays_latched_across_j105_until_stable(self):
         env = Merging(seed=1, task=exit_config.TASK_ID)
