@@ -3130,3 +3130,34 @@ SUMO's TraCI bitset semantics this disables autonomous lane changes and does not
 preserve target-lane safety-gap enforcement for external commands. Collision,
 emergency-stop, request, submitted-command, stable physical completion and
 one-second request-reversal statistics must therefore be reported separately.
+
+### E10 PbRL P0 trajectory export
+
+`evaluate_sac_delay.py --trajectory-export-dir NEW_DIRECTORY` enables an
+opt-in, read-only export for the final E10 no-Pending checkpoint. The option is
+off by default and refuses checkpoints whose recorded `e09_pending_mode` is not
+`off`; it never changes the action, reward, simulator step or terminal logic.
+The destination must not already exist. `--trajectory-neighbor-range-m` controls
+the full surrounding-vehicle snapshot radius and defaults to 150 m.
+The export also requires `--trajectory-source-commit` with the exact 40-hex
+commit deployed for evaluation; per-episode reset provenance records SUMO
+version, SUMO seed, command, scene hashes, route and lane-change mode.
+
+The new directory contains `episodes.csv`, one gzip JSONL transition file and
+one gzip policy-observation file per episode, versioned derived features,
+`lane_change_events.jsonl`, field completeness, a schema/unit document and a
+hash manifest. A transition records pre/post Ego and route states, candidate
+lane front/rear gaps and TTC, raw Actor action, the exact delayed policy input
+and action history, submitted TraCI commands, reward components and terminal
+events. A returned `changeLane` call is explicitly not treated as completion;
+completion uses only the existing stable physical event detector. Removed
+terminal vehicles have a null/invalid post-state while retaining the final
+valid pre-state and terminal event.
+
+Use `python -m src.trajectory_segments DATASET EPISODE_ID --start-step N
+--length 100|200 --output NEW_JSON` to join the files by `step_id` and extract
+a contiguous 10 s or 20 s comparison segment. Its summary is derived data,
+kept separate from raw transitions, and includes route demand, first direct
+exit-route distance, stable-route duration, completed/reverse changes, repeated
+requests, speed, jerk, minimum candidate-lane gap/TTC and segment events. This
+export creates no preference labels and does not infer quality from reward.

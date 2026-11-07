@@ -19,6 +19,7 @@ from src.merging import (ANTWERP_DIR, ANTWERP_ENV_VERSION, ANTWERP_TASKS,
 from src import exit_e76_d3_config as exit_config
 from src import exit_progress_reward
 from src.route_urgency import load_route_network, observe_route_urgency
+from src.trajectory_export import SCHEMA_VERSION, TrajectoryDatasetWriter
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
@@ -170,7 +171,7 @@ def diagnostic_reward_without_potential(reward, info, task):
 
 
 def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
-             urgency_trace=None, route_network=None):
+             urgency_trace=None, route_network=None, trajectory_writer=None):
     if episodes < 1:
         raise ValueError('episodes must be positive')
     counts = Counter()
@@ -178,6 +179,8 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
     records = []
     for episode in range(episodes):
         observation, reset_info = env.reset(seed=seed + episode)
+        if trajectory_writer is not None:
+            trajectory_writer.begin_episode(seed + episode, reset_info, env)
         base = env.unwrapped
         secrm = getattr(base, 'exit_reward_profile', None) in exit_config.secrm_reward.PROFILES
         directional = (getattr(base, 'exit_reward_profile', None)
@@ -257,7 +260,13 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                     env.unwrapped, route_network, LANE_CHANGE_EDGES,
                     lane_change_seconds=exit_config.LANE_CHANGE_TIME_SECONDS)
             action, _ = model.predict(observation, deterministic=True)
+            captured_transition = (trajectory_writer.capture_pre(
+                env, observation, action, steps) if trajectory_writer is not None else None)
             observation, reward, terminated, truncated, info = env.step(action)
+            if trajectory_writer is not None:
+                trajectory_writer.record_transition(
+                    captured_transition, env, observation, reward,
+                    terminated, truncated, info)
             if secrm:
                 boundary = info.get('road_boundary') or {'status': 'unknown'}
                 boundary_counts[boundary['status']] += 1
@@ -398,6 +407,8 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                 if urgency_trace is not None:
                     record['return_without_potential'] = unshaped_episode_return
                 records.append(record)
+                if trajectory_writer is not None:
+                    trajectory_writer.finish_episode(record)
                 break
     timeout_details = EXIT_TIMEOUT_DETAILS if ANTWERP_TASKS[task][2] == 'exit' else TIMEOUT_DETAILS
     result = {**{outcome: counts[outcome] for outcome in OUTCOMES},
@@ -487,7 +498,9 @@ def summarize_runs(runs, metrics=REPORT_METRICS):
 
 
 def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds,
-                  task='legacy_o3_d1', urgency_trace_path=None):
+                  task='legacy_o3_d1', urgency_trace_path=None,
+                  trajectory_export_dir=None, trajectory_metadata=None,
+                  trajectory_neighbor_range_m=150.0):
     """Repeat evaluation of ONE checkpoint; this is not training-seed variance."""
     validate_seed_ranges(episodes, seeds)
     setup = validate_checkpoint_setup(model, ablation, safety, task)
@@ -495,13 +508,25 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
         raise ValueError('Route urgency diagnostics require an exit task')
     network = (load_route_network(ANTWERP_DIR / 'Antwerp.net.xml')
                if urgency_trace_path is not None else None)
+    if trajectory_export_dir is not None and setup.get('e09_pending_mode') != 'off':
+        raise ValueError('P0 trajectory export currently requires a no-pending E10 checkpoint')
     runs = []
+    trajectory_writer = None
     with ExitStack() as stack:
         urgency_trace = None
         if urgency_trace_path is not None:
             urgency_trace_path = Path(urgency_trace_path)
             urgency_trace_path.parent.mkdir(parents=True, exist_ok=True)
             urgency_trace = stack.enter_context(urgency_trace_path.open('x'))
+        if trajectory_export_dir is not None:
+            metadata = {
+                'scenario': scenario, 'task': task, 'delay_mode': delay_mode,
+                'deterministic': True, 'evaluation_safety': bool(safety),
+                **(trajectory_metadata or {}), 'controller_mode': 'no_pending',
+            }
+            trajectory_writer = stack.enter_context(TrajectoryDatasetWriter(
+                trajectory_export_dir, metadata,
+                neighbor_range_m=trajectory_neighbor_range_m))
         for seed in seeds:
             env = make_env(seed, scenario, delay_mode, safety, ablation, task=task,
                            potential_gamma=setup.get('potential_gamma'),
@@ -513,7 +538,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
             try:
                 runs.append({'seed': seed, 'episodes': episodes,
                              **evaluate(model, env, episodes, seed, task=task,
-                                        urgency_trace=urgency_trace, route_network=network)})
+                                        urgency_trace=urgency_trace, route_network=network,
+                                        trajectory_writer=trajectory_writer)})
             finally:
                 env.close()
     report = {'protocol': 'antwerp-v2-evaluation-v1', 'scenario': scenario,
@@ -539,6 +565,14 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
         report['route_urgency_trace'] = str(urgency_trace_path)
         report['route_urgency_profile'] = 'lane_graph_minimax_v1'
         report['diagnostic_reward_profile'] = 'environment_reward_minus_potential_v1'
+    if trajectory_writer is not None:
+        report.update({key: trajectory_writer.metadata[key]
+                       for key in ('checkpoint', 'checkpoint_sha256', 'device',
+                                   'torch_threads')
+                       if key in trajectory_writer.metadata})
+        report['trajectory_dataset'] = str(Path(trajectory_export_dir))
+        report['trajectory_schema_version'] = SCHEMA_VERSION
+        trajectory_writer.finalize(report=report)
     return report
 
 
@@ -564,6 +598,12 @@ def parse_args(argv=None):
     parser.add_argument('--output', type=Path, help='Save a new JSON report; never overwrite')
     parser.add_argument('--urgency-trace', type=Path,
                         help='Write a new read-only per-step route-urgency JSONL trace')
+    parser.add_argument('--trajectory-export-dir', type=Path,
+                        help='Create a new PbRL P0 full-trajectory dataset directory')
+    parser.add_argument('--trajectory-neighbor-range-m', type=float, default=150.0,
+                        help='Radius for optional surrounding-vehicle snapshots')
+    parser.add_argument('--trajectory-source-commit',
+                        help='Exact 40-hex source commit recorded in the dataset manifest')
     args = parser.parse_args(argv)
     args.seeds = args.seeds if args.seeds is not None else [args.seed]
     try:
@@ -581,6 +621,20 @@ def parse_args(argv=None):
     if (args.output and args.urgency_trace
             and args.output.resolve() == args.urgency_trace.resolve()):
         parser.error('--output and --urgency-trace must be different files')
+    if args.trajectory_export_dir and args.trajectory_export_dir.exists():
+        parser.error(f'Trajectory export directory already exists: {args.trajectory_export_dir}')
+    if (args.trajectory_export_dir
+            and (args.trajectory_source_commit is None
+                 or len(args.trajectory_source_commit) != 40
+                 or any(character not in '0123456789abcdef'
+                        for character in args.trajectory_source_commit.lower()))):
+        parser.error('--trajectory-export-dir requires a full 40-hex '
+                     '--trajectory-source-commit')
+    if args.trajectory_source_commit and not args.trajectory_export_dir:
+        parser.error('--trajectory-source-commit requires --trajectory-export-dir')
+    if (not math.isfinite(args.trajectory_neighbor_range_m)
+            or args.trajectory_neighbor_range_m <= 0):
+        parser.error('--trajectory-neighbor-range-m must be finite and positive')
     return args
 
 
@@ -594,7 +648,17 @@ def main():
     model = SAC.load(checkpoint, device=args.device)
     report = evaluate_runs(model, args.scenario, args.delay_mode, args.safety,
                            args.ablation, args.episodes, args.seeds, task=args.task,
-                           urgency_trace_path=args.urgency_trace)
+                           urgency_trace_path=args.urgency_trace,
+                           trajectory_export_dir=args.trajectory_export_dir,
+                           trajectory_neighbor_range_m=args.trajectory_neighbor_range_m,
+                           trajectory_metadata={
+                               'checkpoint': str(checkpoint),
+                               'checkpoint_sha256': checkpoint_hash,
+                               'device': args.device,
+                               'torch_threads': args.torch_threads,
+                               'source_commit': args.trajectory_source_commit,
+                               'schema_version': SCHEMA_VERSION,
+                           })
     report.update(checkpoint=str(checkpoint), checkpoint_sha256=checkpoint_hash,
                   device=args.device, torch_threads=args.torch_threads)
     print(f"{args.scenario} | {args.delay_mode} | task={args.task} | ablation={args.ablation} | "
