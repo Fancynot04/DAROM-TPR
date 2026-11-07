@@ -57,7 +57,6 @@ SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_500k'] = {
 }
 SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_no_pending_500k'] = {
     **SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_500k'],
-    'checkpoint_freq': 100_000,
 }
 SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_1m'] = {
     **SECRM_DEFAULTS['secrm_efficiency_directional_l1_speed120_500k'],

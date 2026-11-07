@@ -17,7 +17,7 @@ class L1Speed120Tests(unittest.TestCase):
         e10 = exit_progress_reward.load_experiment(phase=e10_name)
         for field in ('seed', 'scenario', 'timeout_seconds', 'total_timesteps', 'reward'):
             self.assertEqual(e10[field], baseline[field], field)
-        self.assertEqual(e10['checkpoint_freq'], 100_000)
+        self.assertEqual(e10['checkpoint_freq'], 250_000)
         baseline_phase, e10_phase = exits.PHASES[baseline_name], exits.PHASES[e10_name]
         for field in ('scenario', 'total_timesteps', 'gamma', 'nav_features',
                       'reward_profile', 'road_speed_limit_mps'):
@@ -27,7 +27,7 @@ class L1Speed120Tests(unittest.TestCase):
                                 '--wandb_mode', 'online']):
             args = parse_args()
         self.assertEqual((args.seed, args.total_timesteps, args.checkpoint_freq),
-                         (42, 500_000, 100_000))
+                         (42, 500_000, 250_000))
         self.assertIsNone(args.load_path)
         self.assertIsNone(args.replay_buffer_path)
         self.assertEqual(args.wandb_mode, 'online')

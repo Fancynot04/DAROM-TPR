@@ -160,8 +160,6 @@ class SecrmTests(unittest.TestCase):
                       if phase == 'secrm_efficiency_directional_l1_speed120_2m'
                       else (1000000, 250000)
                       if phase == 'secrm_efficiency_directional_l1_speed120_1m'
-                      else (500000, 100000)
-                      if phase == 'secrm_efficiency_directional_l1_speed120_no_pending_500k'
                       else (500000, 250000)
                       if phase.startswith('secrm_efficiency_directional')
                       else (200000, 50000))

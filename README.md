@@ -3117,7 +3117,7 @@ cumulative 2M budget. It saves model/replay pairs at 1.25M, 1.5M, 1.75M and
 The `secrm_efficiency_directional_l1_speed120_no_pending_500k` phase is the E10
 request-lock ablation. It starts seed 42 from random weights and an empty replay,
 uses the exact L1 speed120 reward/environment contract, and saves model/replay
-pairs every 100,000 steps through 500,000. Its only controller change is
+pairs only at 250,000 and 500,000 steps. Its only controller change is
 `e09_pending_mode=off`: every in-bounds E76/E77 lateral action is submitted to
 SUMO even while an earlier request is still recorded. The custom remaining-lane
 distance gate is also bypassed. The passive maneuver record is retained for
