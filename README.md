@@ -3134,9 +3134,11 @@ one-second request-reversal statistics must therefore be reported separately.
 ### E10 PbRL P0 trajectory export
 
 `evaluate_sac_delay.py --trajectory-export-dir NEW_DIRECTORY` enables an
-opt-in, read-only export for the final E10 no-Pending checkpoint. The option is
-off by default and refuses checkpoints whose recorded `e09_pending_mode` is not
-`off`; it never changes the action, reward, simulator step or terminal logic.
+opt-in, read-only export for frozen E76-to-D3 checkpoints. The option is off by
+default and supports both the legacy Pending controller and E10 no-Pending
+controller without changing the action, reward, simulator step or terminal
+logic. Pending state is passive telemetry only (active state, target, timing and
+stability fields); it never gates an action in the exporter.
 The destination must not already exist. `--trajectory-neighbor-range-m` controls
 the full surrounding-vehicle snapshot radius and defaults to 150 m.
 The export also requires `--trajectory-source-commit` with the exact 40-hex

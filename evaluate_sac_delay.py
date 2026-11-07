@@ -518,8 +518,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
         raise ValueError('Route urgency diagnostics require an exit task')
     network = (load_route_network(ANTWERP_DIR / 'Antwerp.net.xml')
                if urgency_trace_path is not None else None)
-    if trajectory_export_dir is not None and setup.get('e09_pending_mode') != 'off':
-        raise ValueError('P0 trajectory export currently requires a no-pending E10 checkpoint')
+    controller_mode = ('no_pending' if setup.get('e09_pending_mode') == 'off'
+                       else 'pending')
     runs = []
     trajectory_writer = None
     with ExitStack() as stack:
@@ -532,7 +532,7 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
             metadata = {
                 'scenario': scenario, 'task': task, 'delay_mode': delay_mode,
                 'deterministic': True, 'evaluation_safety': bool(safety),
-                **(trajectory_metadata or {}), 'controller_mode': 'no_pending',
+                **(trajectory_metadata or {}), 'controller_mode': controller_mode,
             }
             trajectory_writer = stack.enter_context(TrajectoryDatasetWriter(
                 trajectory_export_dir, metadata,

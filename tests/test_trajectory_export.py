@@ -9,6 +9,7 @@ import numpy as np
 
 from evaluate_sac_delay import parse_args
 from src.trajectory_export import TrajectoryDatasetWriter, TrajectoryDigestProbe
+from src.trajectory_preferences import select_seeds
 from src.trajectory_segments import extract_segment, load_episode
 
 
@@ -100,6 +101,21 @@ def _removed_bundle():
 
 
 class TrajectoryExportTests(unittest.TestCase):
+    def test_pair_seed_selection_prioritizes_balanced_conversions(self):
+        first = [
+            {"seed": 1, "success": False}, {"seed": 2, "success": False},
+            {"seed": 3, "success": True}, {"seed": 4, "success": True},
+            {"seed": 5, "success": True}, {"seed": 6, "success": False},
+        ]
+        second = [
+            {"seed": 1, "success": True}, {"seed": 2, "success": True},
+            {"seed": 3, "success": False}, {"seed": 4, "success": False},
+            {"seed": 5, "success": True}, {"seed": 6, "success": False},
+        ]
+        self.assertEqual(select_seeds(
+            first, second, count=5, conversion_each=2, both_success=1),
+            [1, 2, 3, 4, 5])
+
     def test_cli_export_is_opt_in(self):
         default = parse_args(["model", "--episodes", "1"])
         self.assertIsNone(default.trajectory_export_dir)
@@ -195,6 +211,44 @@ class TrajectoryExportTests(unittest.TestCase):
             self.assertEqual(twenty["summary"]["duration_s"], 20.0)
             self.assertEqual(twenty["summary"]["completed_lane_changes"], 2)
             self.assertEqual(twenty["summary"]["repeated_actor_requests"], 199)
+
+    def test_terminal_transition_never_queries_closed_simulation_clock(self):
+        env = _Env()
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "dataset"
+            writer = TrajectoryDatasetWriter(output, {
+                "checkpoint": "model.zip", "checkpoint_sha256": "abc",
+                "scenario": "easy", "controller_mode": "pending"})
+            with patch("src.trajectory_export._state_bundle",
+                       return_value=_removed_bundle()), \
+                    patch("src.trajectory_export._observation_record",
+                          return_value={
+                              "step_id": "step", "episode_id": "episode",
+                              "eval_seed": 200051, "step": 0,
+                              "policy_observation": [],
+                              "policy_observation_shape": [0],
+                              "policy_observation_sha256": "hash",
+                              "delay_steps": None, "delay_seconds": None,
+                              "received_entity_observation": None,
+                              "raw_action_history": None,
+                              "masked_action_history": None, "nav_dim": None,
+                          }), \
+                    patch("src.trajectory_export._controller_record",
+                          return_value={"controller_mode": "pending"}):
+                with writer:
+                    writer.begin_episode(200051, {}, env)
+                    env.unwrapped.traci.simulation.time = 12.3
+                    captured = writer.capture_pre(
+                        env, np.array([], dtype=np.float32),
+                        np.array([0.0, 0.0], dtype=np.float32), 0)
+                    env.unwrapped.traci.simulation.getTime = unittest.mock.Mock(
+                        side_effect=RuntimeError("Connection already closed"))
+                    transition = writer.record_transition(
+                        captured, env, np.array([], dtype=np.float32), 0.0,
+                        True, False, {"message": "Arrived"})
+                    self.assertAlmostEqual(transition["sim_time_post_s"], 12.4)
+                    self.assertEqual(transition["sim_time_post_source"],
+                                     "pre_plus_fixed_step")
 
     def test_existing_dataset_is_never_overwritten(self):
         with tempfile.TemporaryDirectory() as temporary:

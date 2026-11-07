@@ -296,6 +296,35 @@ def _state_bundle(base, neighbor_range_m):
             "surroundings": _neighbors(base, state, neighbor_range_m)}
 
 
+def _pending_snapshot(base, sim_time_s):
+    """Read passive Pending bookkeeping without issuing a TraCI query."""
+    maneuver = getattr(base, "exit_maneuver", None)
+    if not isinstance(maneuver, dict):
+        return {
+            "active": False,
+            "edge_id": None,
+            "target_lane_index": None,
+            "start_time_s": None,
+            "duration_s": None,
+            "last_progress_time_s": None,
+            "stable_steps": None,
+        }
+    start = _valid_number(maneuver.get("start_time"))
+    now = _valid_number(sim_time_s)
+    duration = max(0.0, now - start) if now is not None and start is not None else None
+    return {
+        "active": True,
+        "edge_id": maneuver.get("edge"),
+        "target_lane_index": (int(maneuver["target"])
+                              if maneuver.get("target") is not None else None),
+        "start_time_s": start,
+        "duration_s": _valid_number(duration),
+        "last_progress_time_s": _valid_number(maneuver.get("last_progress_time")),
+        "stable_steps": (int(maneuver["stable_steps"])
+                         if maneuver.get("stable_steps") is not None else None),
+    }
+
+
 class TrajectoryDigestProbe:
     """Validation-only in-memory Ego trace; it writes no dataset files."""
 
@@ -391,7 +420,7 @@ def _observation_record(env, observation, step_id, episode_id, eval_seed, step):
     return record
 
 
-def _controller_record(pre, actor_action, info):
+def _controller_record(pre, actor_action, info, controller_mode):
     parsed = parseAction(actor_action)
     ego = pre["ego"]
     direction = int(parsed[1])
@@ -408,8 +437,9 @@ def _controller_record(pre, actor_action, info):
                     if direction else None)
     applied = int(info.get("exit_applied_lane_change_direction", 0))
     called = applied != 0
+    pending_active = bool(pre.get("pending", {}).get("active", False))
     return {
-        "controller_mode": "no_pending",
+        "controller_mode": controller_mode,
         "longitudinal": {
             "command": "setAcceleration",
             "called": bool(ego["valid"]),
@@ -428,6 +458,8 @@ def _controller_record(pre, actor_action, info):
             "target_lane_valid": target_valid,
             "boundary_limited": bool(direction and eligible_edge and target_valid is False),
             "ineligible_edge": bool(direction and not eligible_edge),
+            "blocked_by_pending": bool(
+                direction and controller_mode == "pending" and pending_active and not called),
             "traci_command": "changeLane" if called else None,
             "traci_command_called": called,
             "command_direction": applied,
@@ -472,8 +504,8 @@ class TrajectoryDatasetWriter:
     def __init__(self, output_dir, metadata, neighbor_range_m=150.0):
         self.output_dir = Path(output_dir)
         self.metadata = _json_value(metadata)
-        if self.metadata.get("controller_mode") != "no_pending":
-            raise ValueError("PbRL P0 writer requires controller_mode=no_pending")
+        if self.metadata.get("controller_mode") not in ("pending", "no_pending"):
+            raise ValueError("controller_mode must be pending or no_pending")
         self.neighbor_range_m = float(neighbor_range_m)
         if not math.isfinite(self.neighbor_range_m) or self.neighbor_range_m <= 0:
             raise ValueError("neighbor_range_m must be finite and positive")
@@ -541,11 +573,13 @@ class TrajectoryDatasetWriter:
         eval_seed = self.current["eval_seed"]
         step_id = f"{episode_id}-step-{step:05d}"
         pre = _state_bundle(base, self.neighbor_range_m)
+        sim_time_s = _valid_number(base.traci.simulation.getTime())
+        pre["pending"] = _pending_snapshot(base, sim_time_s)
         observation_record = _observation_record(
             env, observation, step_id, episode_id, eval_seed, step)
         return {"step_id": step_id, "episode_id": episode_id,
                 "eval_seed": eval_seed, "step": int(step),
-                "sim_time_s": _valid_number(base.traci.simulation.getTime()),
+                "sim_time_s": sim_time_s,
                 "pre": pre, "observation": observation_record,
                 "actor_action": np.asarray(actor_action, dtype=float).tolist()}
 
@@ -555,6 +589,9 @@ class TrajectoryDatasetWriter:
             raise RuntimeError("Trajectory transition does not match active episode")
         base = env.unwrapped
         post = _state_bundle(base, self.neighbor_range_m)
+        post_time_s = (captured["sim_time_s"] + SUMO_STEP_LENGTH
+                       if captured["sim_time_s"] is not None else None)
+        post["pending"] = _pending_snapshot(base, post_time_s)
         info_for_controller = dict(info)
         info_for_controller["_base"] = base
         actor_action = captured["actor_action"]
@@ -574,9 +611,14 @@ class TrajectoryDatasetWriter:
             "checkpoint_sha256": self.metadata.get("checkpoint_sha256"),
             "step": captured["step"],
             "sim_time_pre_s": captured["sim_time_s"],
-            "sim_time_post_s": _valid_number(base.traci.simulation.getTime()),
+            # collect_step may have closed TraCI on a terminal transition.  The
+            # simulator uses a fixed 0.1 s step, so derive t+1 from the last
+            # successfully observed pre-step clock instead of querying a closed
+            # connection.  Keep the provenance explicit rather than inventing 0.
+            "sim_time_post_s": _valid_number(post_time_s),
+            "sim_time_post_source": "pre_plus_fixed_step",
             "scenario": self.metadata.get("scenario"),
-            "controller_mode": "no_pending",
+            "controller_mode": self.metadata.get("controller_mode"),
             "observation_step_id": captured["step_id"],
             "pre": captured["pre"],
             "post": post,
@@ -588,8 +630,9 @@ class TrajectoryDatasetWriter:
                 "delay_seconds": captured["observation"]["delay_seconds"],
                 "action_history_step_id": captured["step_id"],
             },
-            "controller": _controller_record(captured["pre"], actor_action,
-                                               info_for_controller),
+            "controller": _controller_record(
+                captured["pre"], actor_action, info_for_controller,
+                self.metadata.get("controller_mode")),
             "execution": {
                 "nominal_lane_index_delta": nominal_lane_delta,
                 "pre_lateral_motion": bool(
@@ -756,7 +799,7 @@ class TrajectoryDatasetWriter:
                     "total_episodes") if report is not None and key in report
             } if report is not None else None),
             "episode_provenance": self.episode_provenance,
-            "controller_mode": "no_pending",
+            "controller_mode": self.metadata.get("controller_mode"),
             "simulation_step_seconds": SUMO_STEP_LENGTH,
             "episode_count": self.episode_index,
             "total_steps": self.total_steps,
@@ -805,6 +848,11 @@ fields explain state/route/neighbor absence. No missing number is replaced by 0.
   returned. It is not SUMO acceptance and not physical lane-change completion.
 - `lane_change_completed` is emitted only by the existing stable physical
   completion detector; no fixed four-second completion inference is used.
+- `pre.pending` and `post.pending` are passive snapshots of the legacy Pending
+  bookkeeping. They do not infer completion and never alter controller logic.
+- `sim_time_post_s` is derived from the observed pre-step SUMO clock plus the
+  fixed simulation step; `sim_time_post_source` records that provenance. This
+  avoids querying TraCI after a terminal transition has closed the connection.
 - candidate-lane `*_min_gap_available` compares geometric bumper gap with the
   trailing vehicle's configured `minGap`. It is a diagnostic, not a SUMO
   safety-controller decision; E10 evaluates with `laneChangeMode=0`.
