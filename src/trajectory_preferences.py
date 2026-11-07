@@ -155,15 +155,33 @@ def build_pairs(dataset_a, dataset_b, seeds, output_dir, assets_dir, blind_salt)
     output.mkdir(parents=True, exist_ok=False)
     (output / "segments").mkdir()
     episodes_a, episodes_b = _episode_by_seed(dataset_a), _episode_by_seed(dataset_b)
-    public, provenance = [], []
-    for index, seed in enumerate(seeds, 1):
+    public, provenance, skipped = [], [], []
+    for seed in seeds:
         if seed not in episodes_a or seed not in episodes_b:
             raise ValueError(f"Seed {seed} is missing from one dataset")
-        score, start, source_a, source_b = _best_window(
-            dataset_a, episodes_a[seed], dataset_b, episodes_b[seed])
+        short = [
+            {"dataset": name, "episode_id": episode["episode_id"],
+             "steps": int(episode["steps"]), "required_steps": 100}
+            for name, episode in (("dataset_a", episodes_a[seed]),
+                                  ("dataset_b", episodes_b[seed]))
+            if int(episode["steps"]) < 100
+        ]
+        if short:
+            skipped.append({"eval_seed": seed, "reason": "short_episode",
+                            "short_trajectories": short})
+            continue
+        try:
+            score, start, source_a, source_b = _best_window(
+                dataset_a, episodes_a[seed], dataset_b, episodes_b[seed])
+        except ValueError as error:
+            if str(error) != "No 100-step window has sufficiently similar initial state":
+                raise
+            skipped.append({"eval_seed": seed,
+                            "reason": "no_similar_initial_window"})
+            continue
         swap = int(hashlib.sha256(f"{blind_salt}:{seed}".encode()).hexdigest(), 16) % 2
         ordered = (source_b, source_a) if swap else (source_a, source_b)
-        pair_id = f"pair-{index:02d}"
+        pair_id = f"pair-{len(public) + 1:02d}"
         segment_paths = []
         for side, segment in zip(("A", "B"), ordered):
             path = output / "segments" / f"{pair_id}-{side}.json.gz"
@@ -193,7 +211,14 @@ def build_pairs(dataset_a, dataset_b, seeds, output_dir, assets_dir, blind_salt)
         json.dumps(payload, ensure_ascii=False, allow_nan=False) + "\n", encoding="utf-8")
     (output / "pair_provenance.json").write_text(json.dumps({
         "version": PAIR_VERSION, "dataset_a": str(dataset_a),
-        "dataset_b": str(dataset_b), "pairs": provenance,
+        "dataset_b": str(dataset_b), "pairs": provenance, "skipped": skipped,
+        "counts": {
+            "requested_pairs": len(seeds),
+            "candidate_pairs": len(public),
+            "skipped_pairs": len(skipped),
+            "short_trajectories": sum(
+                len(row.get("short_trajectories", [])) for row in skipped),
+        },
         "selection_note": "No reward, terminal outcome, or source identity enters a label.",
     }, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     for name in ("index.html", "app.js", "styles.css"):

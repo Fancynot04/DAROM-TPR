@@ -9,6 +9,7 @@ import numpy as np
 
 from evaluate_sac_delay import parse_args
 from src.trajectory_export import TrajectoryDatasetWriter, TrajectoryDigestProbe
+from src import trajectory_preferences
 from src.trajectory_preferences import select_seeds
 from src.trajectory_segments import extract_segment, load_episode
 
@@ -115,6 +116,47 @@ class TrajectoryExportTests(unittest.TestCase):
         self.assertEqual(select_seeds(
             first, second, count=5, conversion_each=2, both_success=1),
             [1, 2, 3, 4, 5])
+
+    def test_pair_builder_skips_short_episode_without_padding_or_abort(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets = root / "assets"
+            assets.mkdir()
+            for name in ("index.html", "app.js", "styles.css"):
+                (assets / name).write_text(name, encoding="utf-8")
+            episodes_a = {
+                1: {"episode_id": "a-short", "steps": "80"},
+                2: {"episode_id": "a-valid", "steps": "120"},
+            }
+            episodes_b = {
+                1: {"episode_id": "b-valid", "steps": "110"},
+                2: {"episode_id": "b-valid-2", "steps": "130"},
+            }
+            segment = {"summary": {}, "transitions": [],
+                       "observations": [], "derived": []}
+            with patch("src.trajectory_preferences._episode_by_seed",
+                       side_effect=[episodes_a, episodes_b]), \
+                    patch("src.trajectory_preferences._best_window",
+                          return_value=(3.0, 10, segment, segment)) as best, \
+                    patch("src.trajectory_preferences._compact",
+                          return_value={"summary": {}, "steps": []}):
+                count = trajectory_preferences.build_pairs(
+                    root / "a", root / "b", [1, 2], root / "output",
+                    assets, "blind")
+            self.assertEqual(count, 1)
+            best.assert_called_once()
+            provenance = json.loads(
+                (root / "output/pair_provenance.json").read_text())
+            self.assertEqual(provenance["counts"], {
+                "requested_pairs": 2, "candidate_pairs": 1,
+                "skipped_pairs": 1, "short_trajectories": 1,
+            })
+            self.assertEqual(provenance["skipped"][0]["reason"],
+                             "short_episode")
+            self.assertEqual(
+                provenance["skipped"][0]["short_trajectories"][0]["steps"], 80)
+            self.assertEqual(len(list(
+                (root / "output/segments").glob("*.json.gz"))), 2)
 
     def test_cli_export_is_opt_in(self):
         default = parse_args(["model", "--episodes", "1"])
