@@ -3142,6 +3142,12 @@ the full surrounding-vehicle snapshot radius and defaults to 150 m.
 The export also requires `--trajectory-source-commit` with the exact 40-hex
 commit deployed for evaluation; per-episode reset provenance records SUMO
 version, SUMO seed, command, scene hashes, route and lane-change mode.
+Before a formal export, `python -m src.validate_trajectory_export` evaluates 3--5 paired
+seeds once with full export disabled and once enabled. Both runs use the same
+validation-only in-memory Ego digest probe; episode results and every key-step
+digest must match exactly. The enabled run additionally exercises full route,
+neighbor and file export. A failed comparison exits nonzero and must block the
+100-episode export.
 
 The new directory contains `episodes.csv`, one gzip JSONL transition file and
 one gzip policy-observation file per episode, versioned derived features,

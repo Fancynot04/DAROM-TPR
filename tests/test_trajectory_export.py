@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 
 from evaluate_sac_delay import parse_args
-from src.trajectory_export import TrajectoryDatasetWriter
+from src.trajectory_export import TrajectoryDatasetWriter, TrajectoryDigestProbe
 from src.trajectory_segments import extract_segment, load_episode
 
 
@@ -204,6 +204,28 @@ class TrajectoryExportTests(unittest.TestCase):
                 with TrajectoryDatasetWriter(
                         output, {"controller_mode": "no_pending"}):
                     pass
+
+    def test_validation_probe_keeps_stepwise_ego_digest_in_memory(self):
+        env = _Env()
+        probe = TrajectoryDigestProbe()
+        probe.begin_episode(200051)
+        with patch("src.trajectory_export._ego_state",
+                   side_effect=[_bundle(0)["ego"], _bundle(1)["ego"]]):
+            captured = probe.capture_pre(
+                env, np.array([1.0, 2.0], dtype=np.float32),
+                np.array([0.5, -5.0], dtype=np.float32), 0)
+            probe.record_transition(captured, env, 1.0, True, False, {
+                "reward_components": {"efficiency": 1.0},
+                "exit_actor_request_direction": -1,
+                "exit_applied_lane_change_direction": -1,
+                "directional_lane_change_event": None,
+                "message": "Arrived",
+            })
+        probe.finish_episode()
+        summary = probe.summary()
+        self.assertEqual(summary[0]["eval_seed"], 200051)
+        self.assertEqual(summary[0]["steps"], 1)
+        self.assertEqual(len(summary[0]["sha256"]), 64)
 
 
 if __name__ == "__main__":

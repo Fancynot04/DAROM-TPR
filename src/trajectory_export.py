@@ -296,6 +296,63 @@ def _state_bundle(base, neighbor_range_m):
             "surroundings": _neighbors(base, state, neighbor_range_m)}
 
 
+class TrajectoryDigestProbe:
+    """Validation-only in-memory Ego trace; it writes no dataset files."""
+
+    def __init__(self):
+        self.episodes = []
+        self.current = None
+
+    def begin_episode(self, eval_seed):
+        if self.current is not None:
+            raise RuntimeError("Previous validation-probe episode is unfinished")
+        self.current = {"eval_seed": int(eval_seed), "steps": []}
+
+    def capture_pre(self, env, observation, actor_action, step):
+        if self.current is None:
+            raise RuntimeError("Validation probe has no active episode")
+        policy = np.asarray(observation, dtype=np.float32)
+        return {
+            "step": int(step),
+            "ego": _ego_state(env.unwrapped),
+            "policy_observation_sha256": hashlib.sha256(policy.tobytes()).hexdigest(),
+            "actor_action": np.asarray(actor_action, dtype=np.float32).tolist(),
+        }
+
+    def record_transition(self, captured, env, reward, terminated, truncated, info):
+        row = {
+            "step": captured["step"],
+            "pre_ego": captured["ego"],
+            "post_ego": _ego_state(env.unwrapped),
+            "policy_observation_sha256": captured["policy_observation_sha256"],
+            "actor_action": captured["actor_action"],
+            "reward": float(reward),
+            "reward_components": _json_value(info.get("reward_components", {})),
+            "actor_request_direction": int(info.get("exit_actor_request_direction", 0)),
+            "command_direction": int(info.get("exit_applied_lane_change_direction", 0)),
+            "lane_change_completion_event": _json_value(
+                info.get("directional_lane_change_event")),
+            "terminated": bool(terminated),
+            "truncated": bool(truncated),
+            "terminal_reason": info.get("message") if terminated or truncated else None,
+        }
+        self.current["steps"].append(row)
+
+    def finish_episode(self):
+        if self.current is None:
+            raise RuntimeError("Validation probe has no active episode")
+        self.current["sha256"] = _sha256_json(self.current["steps"])
+        self.current["step_count"] = len(self.current["steps"])
+        self.episodes.append(self.current)
+        self.current = None
+
+    def summary(self):
+        if self.current is not None:
+            raise RuntimeError("Validation probe has an unfinished episode")
+        return [{"eval_seed": row["eval_seed"], "steps": row["step_count"],
+                 "sha256": row["sha256"]} for row in self.episodes]
+
+
 def _observation_record(env, observation, step_id, episode_id, eval_seed, step):
     delay = _delay_wrapper(env)
     policy = np.asarray(observation, dtype=np.float32)

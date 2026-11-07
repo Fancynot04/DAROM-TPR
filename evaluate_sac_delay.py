@@ -171,7 +171,8 @@ def diagnostic_reward_without_potential(reward, info, task):
 
 
 def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
-             urgency_trace=None, route_network=None, trajectory_writer=None):
+             urgency_trace=None, route_network=None, trajectory_writer=None,
+             trajectory_probe=None):
     if episodes < 1:
         raise ValueError('episodes must be positive')
     counts = Counter()
@@ -181,6 +182,8 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
         observation, reset_info = env.reset(seed=seed + episode)
         if trajectory_writer is not None:
             trajectory_writer.begin_episode(seed + episode, reset_info, env)
+        if trajectory_probe is not None:
+            trajectory_probe.begin_episode(seed + episode)
         base = env.unwrapped
         secrm = getattr(base, 'exit_reward_profile', None) in exit_config.secrm_reward.PROFILES
         directional = (getattr(base, 'exit_reward_profile', None)
@@ -262,11 +265,16 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
             action, _ = model.predict(observation, deterministic=True)
             captured_transition = (trajectory_writer.capture_pre(
                 env, observation, action, steps) if trajectory_writer is not None else None)
+            captured_probe = (trajectory_probe.capture_pre(
+                env, observation, action, steps) if trajectory_probe is not None else None)
             observation, reward, terminated, truncated, info = env.step(action)
             if trajectory_writer is not None:
                 trajectory_writer.record_transition(
                     captured_transition, env, observation, reward,
                     terminated, truncated, info)
+            if trajectory_probe is not None:
+                trajectory_probe.record_transition(
+                    captured_probe, env, reward, terminated, truncated, info)
             if secrm:
                 boundary = info.get('road_boundary') or {'status': 'unknown'}
                 boundary_counts[boundary['status']] += 1
@@ -409,6 +417,8 @@ def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
                 records.append(record)
                 if trajectory_writer is not None:
                     trajectory_writer.finish_episode(record)
+                if trajectory_probe is not None:
+                    trajectory_probe.finish_episode()
                 break
     timeout_details = EXIT_TIMEOUT_DETAILS if ANTWERP_TASKS[task][2] == 'exit' else TIMEOUT_DETAILS
     result = {**{outcome: counts[outcome] for outcome in OUTCOMES},
@@ -500,7 +510,7 @@ def summarize_runs(runs, metrics=REPORT_METRICS):
 def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds,
                   task='legacy_o3_d1', urgency_trace_path=None,
                   trajectory_export_dir=None, trajectory_metadata=None,
-                  trajectory_neighbor_range_m=150.0):
+                  trajectory_neighbor_range_m=150.0, trajectory_probe=None):
     """Repeat evaluation of ONE checkpoint; this is not training-seed variance."""
     validate_seed_ranges(episodes, seeds)
     setup = validate_checkpoint_setup(model, ablation, safety, task)
@@ -539,7 +549,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
                 runs.append({'seed': seed, 'episodes': episodes,
                              **evaluate(model, env, episodes, seed, task=task,
                                         urgency_trace=urgency_trace, route_network=network,
-                                        trajectory_writer=trajectory_writer)})
+                                        trajectory_writer=trajectory_writer,
+                                        trajectory_probe=trajectory_probe)})
             finally:
                 env.close()
     report = {'protocol': 'antwerp-v2-evaluation-v1', 'scenario': scenario,
