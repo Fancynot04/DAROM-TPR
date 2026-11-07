@@ -3177,6 +3177,14 @@ vehicle-envelope clearance, not Euclidean distance: a negative value means the
 two vehicles overlap longitudinally on the current/adjacent lane projection.
 Such rows retain vehicle, lane and time provenance but have invalid/null TTC;
 TTC is valid only for nonnegative gap with positive closing speed. The labeler
-shows the minimum nonnegative clearance separately and flags materially
-different start conditions as insufficiently comparable without choosing a
-preferred trajectory.
+shows the minimum nonnegative clearance separately from the minimum valid TTC;
+when no minimum TTC exists it distinguishes a complete record with no closing
+event from missing raw gap/speed/TTC fields. A completed lane change is linked
+only to the accepted request row containing the exact-time TraCI `changeLane`
+call. Actor requests blocked by Pending on the completion step are reported as
+new requests and are not treated as the request that caused the completed
+maneuver. The start-condition audit includes Pending target lane, elapsed
+duration, stable-step count and time since progress. Materially different start
+conditions are flagged as insufficiently comparable; comparable pairs are then
+screened as clearly different or similar from route demand, lane ownership and
+completed/reversed lane changes, without choosing a preferred trajectory.

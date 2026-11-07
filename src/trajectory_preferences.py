@@ -62,7 +62,7 @@ def _gap_observations(row):
             vehicle = lane.get(f"{relative_position}_vehicle")
             gap = lane.get(f"{relative_position}_gap_m")
             ttc = lane.get(f"{relative_position}_ttc_s")
-            if vehicle is None or gap is None:
+            if vehicle is None:
                 continue
             if relative_position == "front":
                 closing = (ego.get("speed_mps") - vehicle.get("speed_mps")
@@ -74,7 +74,10 @@ def _gap_observations(row):
                            if ego.get("speed_mps") is not None
                            and vehicle.get("speed_mps") is not None else None)
                 formula = "ego_front_position - ego_length - other_front_position"
-            if gap < 0:
+            if gap is None:
+                ttc_valid, invalid_reason = False, "gap_missing"
+                longitudinal_relation = relative_position
+            elif gap < 0:
                 ttc_valid, invalid_reason = False, "negative_gap_longitudinal_overlap"
                 longitudinal_relation = "overlap"
             elif closing is None:
@@ -101,7 +104,7 @@ def _gap_observations(row):
                 "relative_position": relative_position,
                 "longitudinal_relation": longitudinal_relation,
                 "signed_gap_m": gap,
-                "overlap_m": -gap if gap < 0 else None,
+                "overlap_m": -gap if gap is not None and gap < 0 else None,
                 "closing_speed_mps": closing,
                 "ttc_s": ttc if ttc_valid else None,
                 "ttc_valid": ttc_valid,
@@ -115,9 +118,25 @@ def _gap_observations(row):
 def _gap_audit(segment):
     events = [event for row in segment["transitions"]
               for event in _gap_observations(row)]
-    signed = min(events, key=lambda item: item["signed_gap_m"], default=None)
-    nonnegative = min((item for item in events if item["signed_gap_m"] >= 0),
+    with_gap = [item for item in events if item["signed_gap_m"] is not None]
+    signed = min(with_gap, key=lambda item: item["signed_gap_m"], default=None)
+    nonnegative = min((item for item in with_gap if item["signed_gap_m"] >= 0),
                       key=lambda item: item["signed_gap_m"], default=None)
+    valid_ttc = min((item for item in events if item["ttc_valid"]),
+                    key=lambda item: item["ttc_s"], default=None)
+    missing_reasons = {"gap_missing", "closing_speed_missing", "ttc_missing"}
+    raw_missing = [item for item in events
+                   if item["ttc_invalid_reason"] in missing_reasons]
+    if valid_ttc is not None:
+        ttc_status = "valid"
+        ttc_status_reason = None
+    elif raw_missing:
+        ttc_status = "raw_field_missing"
+        ttc_status_reason = sorted({item["ttc_invalid_reason"]
+                                    for item in raw_missing})
+    else:
+        ttc_status = "no_valid_closing_event"
+        ttc_status_reason = ["no_nonnegative_gap_with_positive_closing_speed"]
     return {
         "derivation_version": GAP_DERIVATION_VERSION,
         "definition": ("Signed longitudinal envelope clearance on current and adjacent "
@@ -125,7 +144,13 @@ def _gap_audit(segment):
                        "negative Euclidean distance."),
         "minimum_signed_gap": signed,
         "minimum_nonnegative_gap": nonnegative,
-        "negative_gap_event_count": sum(item["signed_gap_m"] < 0 for item in events),
+        "minimum_valid_ttc": valid_ttc,
+        "minimum_valid_ttc_status": ttc_status,
+        "minimum_valid_ttc_status_reason": ttc_status_reason,
+        "negative_gap_event_count": sum(
+            item["signed_gap_m"] is not None and item["signed_gap_m"] < 0
+            for item in events),
+        "raw_missing_event_count": len(raw_missing),
         "ttc_validity": "gap >= 0 and closing_speed > 0; otherwise TTC is null",
     }
 
@@ -147,6 +172,11 @@ def _initial_conditions(segment):
             "rear_relative_speed_mps": lane.get("rear_relative_speed_mps"),
             "rear_ttc_s": lane.get("rear_ttc_s"),
         })
+    pending = row["pre"].get("pending") or {}
+    progress_age = None
+    if (row.get("sim_time_pre_s") is not None
+            and pending.get("last_progress_time_s") is not None):
+        progress_age = row["sim_time_pre_s"] - pending["last_progress_time_s"]
     return {
         "eval_seed": row.get("eval_seed"), "sim_time_s": row.get("sim_time_pre_s"),
         "road": ego.get("road_id"), "lane_id": ego.get("lane_id"),
@@ -154,7 +184,13 @@ def _initial_conditions(segment):
         "distance_d3_m": route.get("distance_to_d3_start_m"),
         "speed_mps": ego.get("speed_mps"),
         "route_requirement_n_changes": route.get("route_requirement_n_changes"),
-        "pending": row["pre"].get("pending"),
+        "pending": pending,
+        "pending_progress": {
+            "target_lane_index": pending.get("target_lane_index"),
+            "duration_s": pending.get("duration_s"),
+            "stable_steps": pending.get("stable_steps"),
+            "last_progress_age_s": progress_age,
+        },
         "surroundings": surroundings,
     }
 
@@ -169,10 +205,14 @@ def _route_change_events(segment):
             continue
         actual_change = bool(row["execution"].get("lane_change_completed"))
         road_connection = (before["ego"].get("road_id") != after["ego"].get("road_id"))
+        lane_ownership_change = (
+            before["ego"].get("lane_index") != after["ego"].get("lane_index"))
         if actual_change:
             cause = "actual_lane_change"
         elif road_connection:
             cause = "road_connection_transition"
+        elif lane_ownership_change:
+            cause = "lane_ownership_transition_before_stable_completion"
         else:
             cause = "route_state_change_without_completion_event"
         events.append({
@@ -188,6 +228,7 @@ def _route_change_events(segment):
                       "distance_d3_m": after["route"].get("distance_to_d3_start_m")},
             "actual_lane_change_completed": actual_change,
             "road_connection_transition": road_connection,
+            "lane_ownership_transition": lane_ownership_change,
             "associated_change_direction": row["execution"].get("completed_direction"),
             "cause": cause,
         })
@@ -207,9 +248,20 @@ def _lane_change_events(segment):
         request_row = next((candidate for candidate in rows
                             if request_time is not None
                             and candidate.get("sim_time_pre_s") is not None
-                            and abs(candidate["sim_time_pre_s"] - request_time) <= 0.11
-                            and candidate["sac"].get("lateral_direction") == request_direction),
-                           None)
+                            and abs(candidate["sim_time_pre_s"] - request_time) <= 1e-6
+                            and candidate["controller"]["lateral"].get(
+                                "traci_command_called")
+                            and candidate["controller"]["lateral"].get(
+                                "command_direction") == request_direction), None)
+        ownership_row = next((candidate for candidate in rows
+                              if request_time is not None
+                              and completion_time is not None
+                              and candidate.get("sim_time_pre_s") is not None
+                              and request_time <= candidate["sim_time_pre_s"] <= completion_time
+                              and (candidate["pre"]["ego"].get("road_id"),
+                                   candidate["pre"]["ego"].get("lane_index")) !=
+                                  (candidate["post"]["ego"].get("road_id"),
+                                   candidate["post"]["ego"].get("lane_index"))), None)
         blocked = [candidate for candidate in rows
                    if request_time is not None
                    and completion_time is not None
@@ -222,6 +274,7 @@ def _lane_change_events(segment):
             "request_time_s": request_time,
             "completion_time_s": completion_time,
             "request_distance_d3_m": completion.get("request_distance_to_d3_start_m"),
+            "accepted_request_in_segment": request_row is not None,
             "request_in_segment": request_row is not None,
             "request_actor_direction": (request_row["sac"].get("lateral_direction")
                                         if request_row is not None else None),
@@ -229,6 +282,21 @@ def _lane_change_events(segment):
                 "traci_command_called") if request_row is not None else None),
             "request_blocked_by_pending": (request_row["controller"]["lateral"].get(
                 "blocked_by_pending") if request_row is not None else None),
+            "request_target_lane_index": (request_row["controller"]["lateral"].get(
+                "target_lane_index") if request_row is not None else None),
+            "lane_ownership_change_time_s": (
+                ownership_row.get("sim_time_post_s") if ownership_row is not None else None),
+            "lane_ownership_before": (
+                ownership_row["pre"]["ego"].get("lane_index")
+                if ownership_row is not None else None),
+            "lane_ownership_after": (
+                ownership_row["post"]["ego"].get("lane_index")
+                if ownership_row is not None else None),
+            "completion_step_actor_direction": row["sac"].get("lateral_direction"),
+            "completion_step_command_sent": row["controller"]["lateral"].get(
+                "traci_command_called"),
+            "completion_step_request_blocked_by_pending": row["controller"][
+                "lateral"].get("blocked_by_pending"),
             "pending_start_time_s": completion.get("request_time_s"),
             "pending_duration_s": ((completion_time - request_time)
                                    if completion_time is not None
@@ -270,6 +338,15 @@ def _comparability(left, right):
             b.get("route_requirement_n_changes"), exact=True)
     compare("pending_active", (a.get("pending") or {}).get("active"),
             (b.get("pending") or {}).get("active"), exact=True)
+    pending_a, pending_b = a.get("pending_progress") or {}, b.get("pending_progress") or {}
+    compare("pending_target_lane_index", pending_a.get("target_lane_index"),
+            pending_b.get("target_lane_index"), exact=True)
+    compare("pending_duration_s", pending_a.get("duration_s"),
+            pending_b.get("duration_s"), threshold=0.5)
+    compare("pending_stable_steps", pending_a.get("stable_steps"),
+            pending_b.get("stable_steps"), exact=True)
+    compare("pending_last_progress_age_s", pending_a.get("last_progress_age_s"),
+            pending_b.get("last_progress_age_s"), threshold=0.2)
     lanes_a = {row["relation"]: row for row in a.get("surroundings", [])}
     lanes_b = {row["relation"]: row for row in b.get("surroundings", [])}
     for relation in sorted(lanes_a.keys() | lanes_b.keys()):
@@ -286,6 +363,54 @@ def _comparability(left, right):
         "large_difference_fields": critical,
         "differences": differences,
         "note": "Comparability only; this does not rank A or B.",
+    }
+
+
+def _behavior_screening(left, right, comparability):
+    """Classify annotation utility without ranking either trajectory."""
+    if comparability["status"] != "comparable":
+        return {
+            "classification": "condition_incomparable",
+            "message": "条件不可比",
+            "recommended_for_labeling": False,
+            "reasons": comparability["large_difference_fields"],
+        }
+    paired = list(zip(left["steps"], right["steps"]))
+    route_mismatch_steps = sum(a["route_n"] != b["route_n"] for a, b in paired)
+    lane_mismatch_steps = sum(a["lane"] != b["lane"] for a, b in paired)
+    completed_difference = abs(
+        left["summary"]["completed_lane_changes"]
+        - right["summary"]["completed_lane_changes"])
+    reversal_difference = abs(
+        left["summary"]["completed_direction_reversals"]
+        - right["summary"]["completed_direction_reversals"])
+    end_route_difference = (
+        left["summary"]["end_route_requirement_n_changes"]
+        != right["summary"]["end_route_requirement_n_changes"])
+    reasons = []
+    if end_route_difference:
+        reasons.append("end_route_requirement_differs")
+    if completed_difference:
+        reasons.append("completed_lane_change_count_differs")
+    if reversal_difference:
+        reasons.append("lane_change_reversal_count_differs")
+    if route_mismatch_steps >= 10:
+        reasons.append("route_requirement_differs_for_at_least_1s")
+    if lane_mismatch_steps >= 10:
+        reasons.append("lane_ownership_differs_for_at_least_1s")
+    different = bool(reasons)
+    return {
+        "classification": "clearly_different" if different else "similar",
+        "message": "驾驶行为明显不同" if different else "驾驶行为相近",
+        "recommended_for_labeling": different,
+        "reasons": reasons,
+        "metrics": {
+            "route_requirement_mismatch_steps": route_mismatch_steps,
+            "lane_ownership_mismatch_steps": lane_mismatch_steps,
+            "completed_lane_change_count_difference": completed_difference,
+            "lane_change_reversal_count_difference": reversal_difference,
+        },
+        "note": "Screening only; this does not rank A or B.",
     }
 
 
@@ -439,11 +564,14 @@ def build_pairs(dataset_a, dataset_b, seeds, output_dir, assets_dir, blind_salt)
                 json.dump(segment, stream, ensure_ascii=False, allow_nan=False)
             segment_paths.append(str(path.relative_to(output)))
         compact_a, compact_b = _compact(ordered[0]), _compact(ordered[1])
+        comparability = _comparability(compact_a, compact_b)
+        screening = _behavior_screening(compact_a, compact_b, comparability)
         public.append({
             "pair_id": pair_id,
             "initial_condition": {"eval_seed": seed, "start_step": start,
                                   "duration_s": 10.0},
-            "comparability": _comparability(compact_a, compact_b),
+            "comparability": comparability,
+            "behavior_screening": screening,
             "A": compact_a,
             "B": compact_b,
         })
@@ -456,6 +584,7 @@ def build_pairs(dataset_a, dataset_b, seeds, output_dir, assets_dir, blind_salt)
             "dataset_b_episode": episodes_b[seed]["episode_id"],
             "A_segment_file": segment_paths[0],
             "B_segment_file": segment_paths[1],
+            "behavior_screening": screening,
         })
     payload = {"version": PAIR_VERSION, "label_options": [
         "A_better", "B_better", "similar", "cannot_judge"], "pairs": public}

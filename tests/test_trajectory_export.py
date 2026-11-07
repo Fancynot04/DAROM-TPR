@@ -141,7 +141,9 @@ class TrajectoryExportTests(unittest.TestCase):
                     patch("src.trajectory_preferences._compact",
                           return_value={"summary": {}, "steps": []}), \
                     patch("src.trajectory_preferences._comparability",
-                          return_value={"status": "comparable"}):
+                          return_value={"status": "comparable"}), \
+                    patch("src.trajectory_preferences._behavior_screening",
+                          return_value={"classification": "similar"}):
                 count = trajectory_preferences.build_pairs(
                     root / "a", root / "b", [1, 2], root / "output",
                     assets, "blind")
@@ -186,12 +188,45 @@ class TrajectoryExportTests(unittest.TestCase):
         self.assertIsNone(audit["minimum_signed_gap"]["ttc_s"])
         self.assertEqual(audit["minimum_nonnegative_gap"]["signed_gap_m"], 8.0)
         self.assertEqual(audit["minimum_nonnegative_gap"]["ttc_s"], 2.0)
+        self.assertEqual(audit["minimum_valid_ttc"]["ttc_s"], 2.0)
+        self.assertEqual(audit["minimum_valid_ttc_status"], "valid")
+
+    def test_ttc_audit_distinguishes_no_closing_event_from_missing_raw_field(self):
+        def segment(front_gap, front_speed, front_ttc):
+            return {"transitions": [{
+                "sim_time_pre_s": 1.0,
+                "pre": {
+                    "ego": {"road_id": "E76", "lane_index": 1,
+                            "speed_mps": 20.0},
+                    "surroundings": {"candidate_lanes": [{
+                        "lane_id": "E76_1", "lane_index": 1,
+                        "relation": "current",
+                        "front_vehicle": {"vehicle_id": "front",
+                                          "lane_id": "E76_1",
+                                          "speed_mps": front_speed},
+                        "front_gap_m": front_gap, "front_ttc_s": front_ttc,
+                        "rear_vehicle": None, "rear_gap_m": None,
+                        "rear_ttc_s": None,
+                    }]},
+                },
+            }]}
+        not_closing = trajectory_preferences._gap_audit(
+            segment(10.0, 22.0, None))
+        self.assertEqual(not_closing["minimum_valid_ttc_status"],
+                         "no_valid_closing_event")
+        missing = trajectory_preferences._gap_audit(
+            segment(None, 18.0, None))
+        self.assertEqual(missing["minimum_valid_ttc_status"],
+                         "raw_field_missing")
+        self.assertEqual(missing["raw_missing_event_count"], 1)
 
     def test_route_and_lane_change_events_keep_request_completion_distinct(self):
         request = {
             "sim_time_pre_s": 10.0,
             "sac": {"lateral_direction": -1},
             "controller": {"lateral": {"traci_command_called": True,
+                                         "command_direction": -1,
+                                         "target_lane_index": 1,
                                          "blocked_by_pending": False}},
             "execution": {"lane_change_completed": False,
                           "lane_change_completion_event": None},
@@ -233,14 +268,96 @@ class TrajectoryExportTests(unittest.TestCase):
         }
         segment = {"transitions": [request, completion]}
         lane_event = trajectory_preferences._lane_change_events(segment)[0]
-        self.assertTrue(lane_event["request_in_segment"])
+        self.assertTrue(lane_event["accepted_request_in_segment"])
         self.assertTrue(lane_event["request_command_sent"])
         self.assertFalse(lane_event["request_blocked_by_pending"])
+        self.assertEqual(lane_event["request_target_lane_index"], 1)
+        self.assertTrue(lane_event["completion_step_request_blocked_by_pending"])
         self.assertEqual(lane_event["blocked_actor_requests_during_pending"], 1)
         route_event = trajectory_preferences._route_change_events(segment)[0]
         self.assertEqual(route_event["cause"], "actual_lane_change")
         self.assertTrue(route_event["actual_lane_change_completed"])
         self.assertFalse(route_event["road_connection_transition"])
+
+    def test_lane_event_does_not_link_nearby_blocked_actor_request(self):
+        blocked = {
+            "sim_time_pre_s": 9.9,
+            "sac": {"lateral_direction": -1},
+            "controller": {"lateral": {"traci_command_called": False,
+                                         "command_direction": 0,
+                                         "blocked_by_pending": True}},
+            "execution": {"lane_change_completion_event": None},
+            "pre": {"ego": {"road_id": "E76", "lane_index": 2}},
+            "post": {"ego": {"road_id": "E76", "lane_index": 2}},
+        }
+        command = {
+            "sim_time_pre_s": 10.0,
+            "sac": {"lateral_direction": -1},
+            "controller": {"lateral": {"traci_command_called": True,
+                                         "command_direction": -1,
+                                         "target_lane_index": 1,
+                                         "blocked_by_pending": False}},
+            "execution": {"lane_change_completion_event": None},
+            "pre": {"ego": {"road_id": "E76", "lane_index": 2}},
+            "post": {"ego": {"road_id": "E76", "lane_index": 2}},
+        }
+        completion = {
+            "sim_time_pre_s": 14.9, "sim_time_post_s": 15.0,
+            "sac": {"lateral_direction": -1},
+            "controller": {"lateral": {"traci_command_called": False,
+                                         "blocked_by_pending": True}},
+            "execution": {"lane_change_completion_event": {
+                "request_direction": -1, "actual_direction": -1,
+                "request_time_s": 10.0, "completion_time_s": 15.0}},
+            "pre": {"ego": {"road_id": "E76", "lane_index": 1}},
+            "post": {"ego": {"road_id": "E76", "lane_index": 1}},
+        }
+        event = trajectory_preferences._lane_change_events(
+            {"transitions": [blocked, command, completion]})[0]
+        self.assertTrue(event["accepted_request_in_segment"])
+        self.assertTrue(event["request_command_sent"])
+        self.assertFalse(event["request_blocked_by_pending"])
+
+    def test_pending_progress_enters_comparability_and_behavior_screening(self):
+        base = {
+            "eval_seed": 1, "sim_time_s": 10.0, "road": "E76",
+            "lane_index": 2, "distance_d3_m": 900.0, "speed_mps": 20.0,
+            "route_requirement_n_changes": 2,
+            "pending": {"active": True}, "surroundings": [],
+        }
+        left = {"initial": {**base, "pending_progress": {
+            "target_lane_index": 1, "duration_s": 1.0,
+            "stable_steps": 0, "last_progress_age_s": 0.0}}}
+        right = {"initial": {**base, "pending_progress": {
+            "target_lane_index": 3, "duration_s": 1.0,
+            "stable_steps": 0, "last_progress_age_s": 0.0}}}
+        comparison = trajectory_preferences._comparability(left, right)
+        self.assertEqual(comparison["status"], "insufficient")
+        self.assertIn("pending_target_lane_index",
+                      comparison["large_difference_fields"])
+        screening = trajectory_preferences._behavior_screening(
+            left, right, comparison)
+        self.assertEqual(screening["classification"], "condition_incomparable")
+
+    def test_behavior_screening_separates_different_from_similar(self):
+        comparable = {"status": "comparable", "large_difference_fields": []}
+        summary = {
+            "completed_lane_changes": 1,
+            "completed_direction_reversals": 0,
+            "end_route_requirement_n_changes": 1,
+        }
+        left = {"summary": summary, "steps": [
+            {"route_n": 1, "lane": 1} for _ in range(100)]}
+        same = {"summary": dict(summary), "steps": [
+            {"route_n": 1, "lane": 1} for _ in range(100)]}
+        different = {"summary": {**summary, "completed_lane_changes": 2},
+                     "steps": [{"route_n": 2, "lane": 2}
+                               for _ in range(100)]}
+        self.assertEqual(trajectory_preferences._behavior_screening(
+            left, same, comparable)["classification"], "similar")
+        self.assertEqual(trajectory_preferences._behavior_screening(
+            left, different, comparable)["classification"],
+            "clearly_different")
 
     def test_cli_export_is_opt_in(self):
         default = parse_args(["model", "--episodes", "1"])
