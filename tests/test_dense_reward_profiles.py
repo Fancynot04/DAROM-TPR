@@ -6,6 +6,7 @@ from src.rewards.config import load_hydra_config, load_reward_file, validate_rew
 from src.rewards.registry import RewardContext, settle_terms
 from src.rewards.secrm_efficiency import efficiency
 from src.rewards.secrm_route import executable_distance, route_penalty
+from src.rewards.terms import RewardTracker
 from src.route_urgency import load_route_network
 
 
@@ -90,6 +91,19 @@ class DenseRewardProfileTests(unittest.TestCase):
         required, _ = executable_distance(self.network, self.route, 0, 0, 10.0,
                                           LANE_CHANGE_EDGES)
         self.assertEqual(required, 0)
+
+    def test_tracker_accepts_event_only_terminal_after_dense_steps(self):
+        _, config, _, _ = load_hydra_config(overrides=['reward=e76_d3_b3_combined'])
+        tracker = RewardTracker(0.999)
+        dense = settle_terms('e76_d3_dense_v1', RewardContext(None, config,
+                                                               efficiency_raw=-0.5, route_raw=-0.2))
+        tracker.add(dense, sum(term.weighted for term in dense))
+        terminal = settle_terms('e76_d3_dense_v1', RewardContext('Missed Exit', config))
+        tracker.add(terminal, sum(term.weighted for term in terminal))
+        summary = tracker.summary(terminated=True)
+        self.assertAlmostEqual(summary['_meta']['weighted_total'], -100.0035)
+        self.assertEqual(summary['efficiency']['active_ratio'], 0.5)
+        self.assertEqual(summary['route']['active_ratio'], 0.5)
         required, _ = executable_distance(self.network, self.route, 1, 0, 10.0,
                                           LANE_CHANGE_EDGES)
         self.assertEqual(required, 0)

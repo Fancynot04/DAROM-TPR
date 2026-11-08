@@ -71,13 +71,16 @@ class RewardTracker:
             raise ValueError('Invalid reward summary window')
         rows = self._rows[start:end]
         rewards = self._rewards[start:end]
-        names = tuple(rows[0]) if rows else ()
+        # Terminal E76-D3 steps deliberately contain only event terms.  A
+        # dense term absent on that step is a non-active zero contribution,
+        # rather than a malformed episode ledger.
+        names = tuple(dict.fromkeys(name for row in rows for name in row))
         count = len(rows)
         result = {}
         discounts = self.gamma ** np.arange(count, dtype=np.float64)
         for name in names:
-            raw = np.asarray([row[name].raw for row in rows], dtype=np.float64)
-            weighted = np.asarray([row[name].weighted for row in rows], dtype=np.float64)
+            raw = np.asarray([row[name].raw if name in row else 0.0 for row in rows], dtype=np.float64)
+            weighted = np.asarray([row[name].weighted if name in row else 0.0 for row in rows], dtype=np.float64)
             abs_values = np.abs(weighted)
             nonzero = abs_values[abs_values > 0]
             result[name] = {
@@ -90,7 +93,7 @@ class RewardTracker:
                 'nonzero_abs_p95': self._percentile(nonzero, 95),
                 'nonzero_abs_p99': self._percentile(nonzero, 99),
                 'max_abs': float(abs_values.max()) if count else 0.0,
-                'clipped_ratio': float(sum(row[name].clipped for row in rows) / count) if count else 0.0,
+                'clipped_ratio': float(sum(row[name].clipped for row in rows if name in row) / count) if count else 0.0,
             }
         result['_meta'] = {'steps': count, 'gamma': self.gamma,
                            'terminated': bool(terminated), 'truncated': bool(truncated),
