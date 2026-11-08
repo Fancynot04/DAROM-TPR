@@ -1,0 +1,6 @@
+defaults:
+  - reward: e76_d3
+  - experiment: baseline
+  - _self_
+
+task: exit_e76_d3

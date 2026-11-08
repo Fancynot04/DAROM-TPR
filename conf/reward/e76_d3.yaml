@@ -1,0 +1,23 @@
+name: events_only_v1
+terms:
+  success:
+    enabled: true
+    weight: 1.0
+    value: 50.0
+  collision:
+    enabled: true
+    weight: 1.0
+    value: -100.0
+  missed_exit:
+    enabled: true
+    weight: 1.0
+    value: -100.0
+  teleport:
+    enabled: true
+    weight: 1.0
+    value: -100.0
+  timeout:
+    enabled: true
+    weight: 1.0
+    value: -100.0
+nonterminal_dense: false

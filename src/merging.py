@@ -11,7 +11,8 @@ from .utils import *
 from .geometry import TrafficSnapshot, driving_axes, world_velocity
 from . import exit_e76_d3_config as exit_config
 from . import exit_progress_reward, secrm_reward, road_boundary
-from .rewards.registry import RewardContext, settle
+from .rewards.registry import RewardContext, settle_terms
+from .rewards.terms import RewardTracker
 from .rewards.directional_lane import adaptive_lane_reward
 from .route_urgency import load_route_network, observe_route_urgency, route_urgency
 
@@ -87,7 +88,8 @@ class Merging(gym.Env):
     metadata = {"render_modes": ["human", "none"], "render_fps": 10}
     def __init__(self, seed, mode='all', radius=50, render_mode=None, runSafetyCheck=False,
                  scenario='medium', task=exit_config.TASK_ID, potential_gamma=None,
-                 exit_reward_profile=None, progress_experiment=None, reward_config=None):
+                 exit_reward_profile=None, progress_experiment=None, reward_config=None,
+                 reward_gamma=0.99):
         if scenario not in ('easy', 'medium', 'hard'):
             raise ValueError(f'Unknown Antwerp scenario: {scenario}')
         if task not in ANTWERP_TASKS:
@@ -96,13 +98,15 @@ class Merging(gym.Env):
         self.task = task
         self.exit_reward_profile = exit_config.REWARD_PROFILE if exit_reward_profile is None else exit_reward_profile
         self.reward_config = exit_progress_reward.load_experiment(reward_config)
-        if self.exit_reward_profile != self.reward_config['version']:
+        if self.exit_reward_profile != self.reward_config['name']:
             raise ValueError('Unknown or mismatched E76-to-D3 reward configuration')
         if task != exit_config.TASK_ID:
             raise ValueError('Only the E76-to-D3 task is supported')
         self.progress_experiment = None
         self.episode_limit_steps = exit_config.TIMEOUT_STEPS
         self.potential_gamma = 0.0
+        self.reward_tracker = RewardTracker(reward_gamma)
+        self.reward_terms = []
         self.route_network = None
         self.origin, self.destination, self.stage_name = ANTWERP_TASKS[task]
         self.ego_id = None
@@ -201,6 +205,8 @@ class Merging(gym.Env):
         """Clear per-vehicle state without owning or advancing a simulation."""
         self.reward = 0.0
         self.reward_components = {}
+        self.reward_terms = []
+        self.reward_tracker.reset()
         self.merged = False
         self.stage_reached = False
         self.last_stage_reward = 0.0
@@ -690,7 +696,10 @@ class Merging(gym.Env):
             context = RewardContext(
                 outcome=self.terminal_reason, config=self.reward_config,
                 teleported=self.teleport_transition or self.ego_teleported)
-            total, self.reward_components = settle(self.exit_reward_profile, context)
+            self.reward_terms = settle_terms(self.exit_reward_profile, context)
+            total = float(sum(term.weighted for term in self.reward_terms))
+            self.reward_components = {term.name: term.weighted for term in self.reward_terms}
+            self.reward_tracker.add(self.reward_terms, total)
             self.last_stage_reward = 0.0
             return total
 
@@ -1024,8 +1033,14 @@ class Merging(gym.Env):
             except Exception:
                 pass
         
+        reward_summary = self.reward_tracker.summary(terminated, truncated) if self.done else None
         info.update({'lane': self.lane_id, 'action': self.action, 'merged': bool(self.merged),
                      'reward_components': self.reward_components.copy(),
+                     'reward_terms': [{'name': term.name, 'raw': term.raw,
+                                       'weight': term.weight, 'enabled': term.enabled,
+                                       'weighted': term.weighted, 'active': term.active,
+                                       'clipped': term.clipped} for term in self.reward_terms],
+                     'reward_episode_summary': reward_summary,
                      'stage_reached': bool(self.stage_reached), 'stage_name': self.stage_name,
                      'stage_reward': self.last_stage_reward,
                      'stage_reward_paid': bool(self.given_merge_reward),

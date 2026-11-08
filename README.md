@@ -24,6 +24,8 @@ src/geometry.py            traffic geometry helpers
 src/utils.py               shared utilities
 src/road_boundary.py       road-boundary diagnostics
 src/rewards/events.py      terminal-event rewards
+src/rewards/config.py      Hydra/OmegaConf reward configuration
+src/rewards/terms.py       RewardTerm and RewardTracker accounting
 sumo_new/Antwerp.net.xml   Antwerp network with the fixed corridor limit
 sumo_new/Antwerp_*_exit_e76_d3.rou.xml
                             Easy/Medium/Hard E76→D3 routes
@@ -65,9 +67,26 @@ python3 train_sac_delay.py \
 ```
 
 The command-line values are final; no historical Phase or reward file can
-override seed, scenario, budget, checkpoint interval, or gamma. The B0 reward
-is zero on non-terminal steps and settles exactly one event: success `+50`,
-collision/missed-exit/teleport/timeout `-100`.
+override seed, scenario, budget, checkpoint interval, or gamma. The default
+resolved reward configuration is `conf/config.yaml` → `conf/reward/e76_d3.yaml`.
+The B0 reward is zero on non-terminal steps and settles exactly one event:
+success `+50`, collision/missed-exit/teleport/timeout `-100`.
+
+Reward terms can be disabled or reweighted with Hydra-style overrides. These
+change only payment, not termination or SUMO control:
+
+```bash
+python3 train_sac_delay.py \
+  --hydra-override reward.terms.collision.enabled=false \
+  --hydra-override reward.terms.timeout.weight=0.5 \
+  --total_timesteps 200000 --checkpoint_freq 200000 \
+  --wandb_mode disabled
+```
+
+Each run records the resolved reward YAML, configuration hashes and Git SHA in
+the episode-log manifest. Episode-level raw, weighted, discounted, active,
+tail-quantile and clipping statistics use the training gamma and are emitted
+under `reward/episode/*` and `reward/total/*`.
 
 ## Evaluation
 

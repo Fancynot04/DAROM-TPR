@@ -17,6 +17,12 @@
 # Only the two distributed pretrained models are allowed under models/.
 /models/*
 # AI workspace files and temporary output, including inside allowed directories.
+!/conf/
+!/conf/config.yaml
+!/conf/reward/
+!/conf/reward/e76_d3.yaml
+!/conf/experiment/
+!/conf/experiment/baseline.yaml
 .codex/
 .claude/
 .cursor/

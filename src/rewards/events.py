@@ -4,4 +4,8 @@ EVENTS = {'Arrived': 'success', 'Collision': 'collision', 'Missed Exit': 'missed
 
 def event_reward(outcome, config):
     key = EVENTS.get(outcome)
-    return (key, float(config['events'][key])) if key is not None else (None, 0.0)
+    values = config.get('terms', config.get('events', {}))
+    if key is None:
+        return None, 0.0
+    value = values[key]['value'] if 'terms' in config else values[key]
+    return key, float(value)

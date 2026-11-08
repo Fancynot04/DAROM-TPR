@@ -26,6 +26,7 @@ from wandb.integration.sb3 import WandbCallback
 from src.merging import ANTWERP_ENV_VERSION, Merging
 from src import exit_e76_d3_config as exit_config
 from src import exit_progress_reward
+from src.rewards.config import load_hydra_config, load_reward_file
 from src.wrapper import ABLATION_MODES, DelayWrapper, ExitStartLaneCurriculum
 
 class IntermediateCheckpointCallback(CheckpointCallback):
@@ -179,6 +180,25 @@ class EpisodeRewardCallback(BaseCallback):
             if info.get('curriculum_stage') is not None:
                 metrics['train/curriculum_stage'] = int(info['curriculum_stage'])
                 metrics['train/curriculum_reset_step'] = int(info['curriculum_reset_step'])
+            ledger = info.get('reward_episode_summary') or {}
+            for term, stats in ledger.items():
+                if term == '_meta':
+                    metrics['reward/total/weighted_sum'] = stats['weighted_total']
+                    continue
+                for name in ('raw_sum', 'weighted_sum', 'discounted_sum', 'active_ratio',
+                             'abs_p95', 'abs_p99', 'nonzero_abs_p95',
+                             'nonzero_abs_p99', 'max_abs', 'clipped_ratio'):
+                    metric = f'reward/episode/{term}/{name}'
+                    value = float(stats[name])
+                    metrics[metric] = value
+                    self.logger.record(metric, value)
+            if '_meta' in ledger:
+                self.logger.record('reward/total/weighted_sum',
+                                   float(ledger['_meta']['weighted_total']))
+                total_discounted = float(sum(stats['discounted_sum'] for name, stats in ledger.items()
+                                             if name != '_meta'))
+                metrics['reward/total/discounted_sum'] = total_discounted
+                self.logger.record('reward/total/discounted_sum', total_discounted)
             wandb.log(metrics)
             self._write({'event': 'episode', 'steps': self.num_timesteps,
                          'outcome': outcome, **{k: float(v) for k, v in metrics.items()}})
@@ -267,12 +287,12 @@ def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None
              ablation='full', task=exit_config.TASK_ID, potential_gamma=None,
              nav_features=False, exit_reward_profile=None,
              curriculum_stages=None, curriculum_route_dir=None,
-             progress_experiment=None):
+             progress_experiment=None, reward_config=None, reward_gamma=0.99):
     env = DelayWrapper(
         Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
                 potential_gamma=potential_gamma, exit_reward_profile=exit_reward_profile,
                 progress_experiment=progress_experiment,
-                reward_config=getattr(make_env, 'reward_config', None)),
+                reward_config=reward_config, reward_gamma=reward_gamma),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation, nav_features=nav_features,
     )
@@ -303,7 +323,12 @@ def parse_args():
     parser.add_argument('--scenario', choices=['easy', 'medium', 'hard'], default=exit_config.DEFAULT_SCENARIO)
     parser.add_argument('--task', choices=(exit_config.TASK_ID,), default=exit_config.TASK_ID,
                         help='The single supported task: E76 to D3')
-    parser.add_argument('--reward-config', default='configs/rewards/events_only_v1.json')
+    parser.add_argument('--reward-config', default=None,
+                        help='Explicit YAML/JSON reward file; otherwise use Hydra conf/')
+    parser.add_argument('--config-path', default='conf')
+    parser.add_argument('--config-name', default='config')
+    parser.add_argument('--hydra-override', action='append', default=[],
+                        help='Hydra override, e.g. reward.terms.collision.enabled=false')
     parser.add_argument('--safety', dest='use_safety', action='store_true')
     parser.add_argument('--save_dir', type=str, default='models_experiments')
     parser.add_argument('--wandb_mode', type=str, default='online', choices=['online', 'offline', 'disabled'])
@@ -315,11 +340,16 @@ def parse_args():
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
     try:
-        args.reward_config = exit_progress_reward.load_experiment(args.reward_config)
-    except ValueError as error:
-        parser.error(str(error))
+        if args.reward_config:
+            args.reward_config, args.reward_config_hash, args.reward_config_yaml = load_reward_file(
+                args.reward_config)
+        else:
+            composed, args.reward_config, args.reward_config_hash, args.reward_config_yaml = load_hydra_config(
+                args.config_path, args.config_name, args.hydra_override)
+    except (OSError, ValueError) as error:
+        parser.error(f'Invalid Hydra reward configuration: {error}')
     args.nav_features = False
-    args.exit_reward_profile = args.reward_config['version']
+    args.exit_reward_profile = args.reward_config['name']
     args.progress_experiment = None
     args.exit_phase = None
     args.project = args.project or exit_config.WANDB_PROJECT
@@ -387,7 +417,8 @@ def main():
         exit_phase=args.exit_phase,
         ego_depart_lane=exit_config.DEPART_LANE,
         reward_config=args.reward_config,
-        reward_config_sha256=exit_progress_reward.reward_identity(args.reward_config),
+        reward_config_sha256=args.reward_config_hash,
+        reward_config_yaml=args.reward_config_yaml,
         checkpoint_freq=args.checkpoint_freq,
         gamma=args.gamma,
         ego_depart_time=exit_config.EGO_DEPART_TIME,
@@ -421,10 +452,12 @@ def main():
             json.dump({'sha256': config_sha256, 'config': config}, manifest,
                       sort_keys=True, indent=2)
             manifest.write('\n')
+        with open(args.episode_log + '.reward.yaml', 'x') as reward_manifest:
+            reward_manifest.write(args.reward_config_yaml)
+            reward_manifest.write('\n')
     print(json.dumps(config, sort_keys=True, indent=2), flush=True)
     print(f'Experiment config SHA-256: {config_sha256}', flush=True)
     # Create env
-    make_env.reward_config = args.reward_config
     def _fn():
         return make_env(args.seed, args.scenario, args.delay_mode, max_delay,
                         args.use_safety, args.render_mode, args.ablation, args.task,
@@ -434,7 +467,7 @@ def main():
                         (os.path.join('tmp', 'ai', 'e76-d3', args.exit_phase,
                                       args.run_name, 'routes')
                          if config['curriculum_stages'] is not None else None),
-                        args.progress_experiment)
+                        args.progress_experiment, args.reward_config, args.gamma)
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
