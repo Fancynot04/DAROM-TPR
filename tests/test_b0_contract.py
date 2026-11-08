@@ -12,7 +12,7 @@ from gymnasium import spaces
 from src import exit_e76_d3_config as cfg
 from src import exit_progress_reward
 from src.rewards.registry import RewardContext, settle
-from src.merging import Merging
+from src.merging import Merging, control_step_timeout, select_terminal_event
 
 
 class B0ContractTests(unittest.TestCase):
@@ -51,7 +51,10 @@ class B0ContractTests(unittest.TestCase):
 
     def test_timeout_and_emergency_contract_is_encoded_in_environment(self):
         source = inspect.getsource(Merging.collect_step)
-        self.assertIn("info['message'] = 'Timeout'", source)
+        self.assertEqual(select_terminal_event(
+            collision=False, ego_teleported=False, missed_exit=False,
+            arrived=False, timeout=True), 'Timeout')
+        self.assertTrue(control_step_timeout(4000, 4000))
         self.assertIn('terminated = True', source)
         self.assertIn('self.emergency_stopping_steps += 1', source)
         self.assertNotIn("info['message'] = 'Emergency Stopping'", source)

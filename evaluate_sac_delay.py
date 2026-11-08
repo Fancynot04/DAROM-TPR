@@ -29,19 +29,57 @@ EXIT_TIMEOUT_DETAILS = ('No Exit Timeout', 'Exit Reached Timeout')
 ARRIVAL_DETAILS = ('Uninterrupted Arrived', 'Teleported Arrived', 'Ego Teleported')
 REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout_rate',
                   'no_merge_rate', 'emergency_stopping_rate', 'ego_teleport_rate',
-                  'missed_exit_rate', 'mean_return')
+                  'missed_exit_rate', 'mean_policy_reward_return',
+                  'mean_b0_reference_return')
+B0_REFERENCE_REWARDS = {
+    'Arrived': 50.0,
+    'Collision': -100.0,
+    'Ego Teleported': -100.0,
+    'Missed Exit': -100.0,
+    'Timeout': -100.0,
+}
 
 
 def make_env(seed, scenario, delay_mode, safety, ablation, task=exit_config.TASK_ID,
              potential_gamma=None, nav_features=False, exit_reward_profile=None,
-             progress_experiment=None):
+             progress_experiment=None, reward_config=None, reward_gamma=0.99):
     env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
                                potential_gamma=potential_gamma,
                                exit_reward_profile=exit_reward_profile,
-                               progress_experiment=progress_experiment),
+                               progress_experiment=progress_experiment,
+                               reward_config=reward_config,
+                               reward_gamma=reward_gamma),
                        max_delay=20, mode='all', delay_mode=delay_mode,
                        seed=seed, ablation=ablation, nav_features=nav_features)
     return SafetyWrapper(env) if safety else env
+
+
+def b0_reference_reward(outcome, ego_teleported=False):
+    """Compute the common B0 terminal-event score without affecting execution."""
+    if outcome in (None, '', 'Emergency Stopping'):
+        return 0.0
+    if outcome == 'Arrived' and ego_teleported:
+        return -100.0
+    if outcome not in B0_REFERENCE_REWARDS:
+        raise ValueError(f'Unknown B0 terminal event: {outcome!r}')
+    return B0_REFERENCE_REWARDS[outcome]
+
+
+def checkpoint_reward_setup(model):
+    """Load and authenticate the complete reward contract embedded in a checkpoint."""
+    required = ('exit_reward_profile', 'exit_reward_config',
+                'exit_reward_config_sha256')
+    missing = [name for name in required if not hasattr(model, name)]
+    if missing:
+        raise ValueError('Checkpoint is missing required reward provenance: '
+                         + ', '.join(missing))
+    reward_config = exit_progress_reward.load_experiment(model.exit_reward_config)
+    reward_hash = exit_progress_reward.reward_identity(reward_config)
+    if model.exit_reward_config_sha256 != reward_hash:
+        raise ValueError('Checkpoint reward configuration hash mismatch')
+    if model.exit_reward_profile != reward_config['name']:
+        raise ValueError('Checkpoint reward profile and configuration disagree')
+    return model.exit_reward_profile, reward_config, reward_hash
 
 
 def validate_checkpoint_setup(model, ablation, safety, task=exit_config.TASK_ID):
@@ -59,14 +97,9 @@ def validate_checkpoint_setup(model, ablation, safety, task=exit_config.TASK_ID)
     checkpoint_task = getattr(model, 'antwerp_task', exit_config.TASK_ID)
     if checkpoint_task != task:
         raise ValueError(f'Checkpoint task={checkpoint_task!r}, requested {task!r}')
-    reward_profile = getattr(model, 'exit_reward_profile', exit_config.REWARD_PROFILE)
+    reward_profile, reward_config, reward_config_hash = checkpoint_reward_setup(model)
     if reward_profile != exit_config.REWARD_PROFILE:
         raise ValueError('Checkpoint does not use the E76-to-D3 B0 reward profile')
-    reward_config = exit_progress_reward.load_experiment(
-        getattr(model, 'exit_reward_config', None))
-    if getattr(model, 'exit_reward_config_sha256',
-               exit_progress_reward.reward_identity(reward_config)) != exit_progress_reward.reward_identity(reward_config):
-        raise ValueError('Checkpoint reward configuration hash mismatch')
     progress_experiment = None
     potential_gamma = None
     nav_features = False
@@ -82,13 +115,16 @@ def validate_checkpoint_setup(model, ablation, safety, task=exit_config.TASK_ID)
             raise ValueError('Checkpoint E76-to-D3 GRU navigation split disagrees')
         potential_gamma = None
     setup = {'training_safety': getattr(model, 'training_safety', None),
-             'evaluation_safety': bool(safety)}
+             'evaluation_safety': bool(safety),
+             'exit_reward_profile': reward_profile,
+             'reward_config': reward_config,
+             'reward_config_sha256': reward_config_hash,
+             'reward_config_source': 'checkpoint',
+             'reward_gamma': float(model.gamma)}
     if potential_gamma is not None:
         setup['potential_gamma'] = potential_gamma
         setup['exit_observation_profile'] = getattr(model, 'exit_observation_profile', None)
         setup['nav_features'] = nav_features
-        setup['exit_reward_profile'] = reward_profile
-        setup['reward_config'] = reward_config
     return setup
 
 
@@ -121,7 +157,8 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
     if episodes < 1:
         raise ValueError('episodes must be positive')
     counts = Counter()
-    returns = []
+    policy_returns = []
+    b0_reference_returns = []
     records = []
     for episode in range(episodes):
         observation, reset_info = env.reset(seed=seed + episode)
@@ -131,6 +168,7 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
         boundary_counts = Counter()
         boundary_max_area = 0.0
         reward_totals = Counter()
+        reward_term_totals = Counter()
         lane_events = Counter()
         first_direct_exit_lane_remaining = None
         previous_lane_direction = None
@@ -204,6 +242,8 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                     lane_change_seconds=exit_config.LANE_CHANGE_TIME_SECONDS)
             action, _ = model.predict(observation, deterministic=True)
             observation, reward, terminated, truncated, info = env.step(action)
+            for term in info.get('reward_terms', ()):
+                reward_term_totals[term['name']] += float(term['weighted'])
             if secrm:
                 boundary = info.get('road_boundary') or {'status': 'unknown'}
                 boundary_counts[boundary['status']] += 1
@@ -291,7 +331,9 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                     else:
                         counts['Merged Timeout' if info.get('merged')
                                else 'No Merge Timeout'] += 1
-                returns.append(episode_return)
+                b0_return = b0_reference_reward(outcome, teleported)
+                policy_returns.append(episode_return)
+                b0_reference_returns.append(b0_return)
                 record = {'seed': seed + episode, 'steps': steps, 'outcome': outcome,
                                 'merged': bool(info.get('merged')), 'ego_teleported': teleported,
                                 'stage_reached': bool(info.get('stage_reached', info.get('merged'))),
@@ -309,6 +351,9 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                                                          / (steps * 0.1)),
                                 'mean_speed_mps': (float(np.mean(speed_samples))
                                                    if speed_samples else None),
+                                'policy_reward_return': episode_return,
+                                'b0_reference_return': b0_return,
+                                'reward_term_totals': dict(reward_term_totals),
                                 'return': episode_return, 'reset_info': reset_info}
                 if secrm:
                     record['road_boundary'] = {'sample_counts': dict(boundary_counts),
@@ -356,7 +401,12 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
             'timeout_rate': 100 * counts['Timeout'] / episodes,
             'emergency_stopping_rate': 100 * counts['Emergency Stopping'] / episodes,
             'missed_exit_rate': 100 * counts['Missed Exit'] / episodes,
-            'mean_return': float(np.mean(returns)), 'episode_results': records}
+            'mean_policy_reward_return': float(np.mean(policy_returns)),
+            'mean_b0_reference_return': float(np.mean(b0_reference_returns)),
+            # Compatibility alias; new comparisons must use the explicit fields above.
+            'mean_return': float(np.mean(policy_returns)),
+            'mean_return_alias': 'mean_policy_reward_return',
+            'episode_results': records}
     if ANTWERP_TASKS[task][2] != 'exit':
         result['no_merge_rate'] = result['timeout_rate']  # historical report field
     else:
@@ -453,7 +503,9 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
                            potential_gamma=setup.get('potential_gamma'),
                            nav_features=setup.get('nav_features', False),
                            exit_reward_profile=setup.get('exit_reward_profile'),
-                           progress_experiment=setup.get('progress_experiment'))
+                           progress_experiment=setup.get('progress_experiment'),
+                           reward_config=setup['reward_config'],
+                           reward_gamma=setup['reward_gamma'])
             try:
                 runs.append({'seed': seed, 'episodes': episodes,
                              **evaluate(model, env, episodes, seed, task=task,
@@ -473,6 +525,13 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
             'episodes_per_seed': episodes, 'total_episodes': episodes * len(seeds),
             'std_ddof': 1, 'ci_method': '1.96 * sample_std / sqrt(evaluation_runs)',
             'aggregation_unit': 'evaluation_run_of_one_checkpoint',
+            'return_definitions': {
+                'policy_reward_return': ('Undiscounted environment return computed with the '
+                                         'checkpoint-authenticated reward configuration.'),
+                'b0_reference_return': ('Common terminal-event reference: Arrived without '
+                                        'collision/teleport +50; Collision, Ego Teleported, '
+                                        'Missed Exit, or Timeout -100; all other steps 0.'),
+            },
             'runs': runs, 'aggregate': summarize_runs(
                 runs, tuple(key for key in REPORT_METRICS
                             if ANTWERP_TASKS[task][2] != 'exit' or key != 'no_merge_rate'))}
@@ -558,6 +617,8 @@ def main():
                   f"CI95 half-width={values['ci95_half_width']:.4f}")
     print('success_rate is SUMO route completion; timeout_rate counts terminal '
           'Timeout events. Road-boundary and emergency-stop values remain diagnostics.')
+    print('policy_reward_return uses the checkpoint-authenticated reward configuration; '
+          'b0_reference_return uses the common B0 terminal-event reference only.')
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open('x') as output:

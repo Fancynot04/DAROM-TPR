@@ -83,6 +83,27 @@ def set_ego_lane_mode(vehicle_name):
     traci.vehicle.setLaneChangeMode(vehicle_name, 0)
 
 
+def control_step_timeout(counter, episode_limit_steps):
+    """Task timeout is counted from Ego takeover, independent of SUMO time."""
+    return int(counter) >= int(episode_limit_steps)
+
+
+def select_terminal_event(*, collision, ego_teleported, missed_exit, arrived,
+                          timeout):
+    """Apply the fixed E76-to-D3 terminal-event priority."""
+    if collision:
+        return 'Collision'
+    if ego_teleported:
+        return 'Ego Teleported'
+    if missed_exit:
+        return 'Missed Exit'
+    if arrived:
+        return 'Arrived'
+    if timeout:
+        return 'Timeout'
+    return None
+
+
 
 class Merging(gym.Env):
     metadata = {"render_modes": ["human", "none"], "render_fps": 10}
@@ -986,20 +1007,15 @@ class Merging(gym.Env):
             self._ahead_state = self._behind_state = [0.0, 0.0, 0.0]
             self.exit_maneuver = None
 
-        if self.ego_id in self.traci.simulation.getCollidingVehiclesIDList():
-            info['message'] = 'Collision'
-            terminated = True
-        elif started or ended or self.ego_teleported:
-            info['message'] = 'Ego Teleported'
-            terminated = True
-        elif self.missed_exit:
-            info['message'] = 'Missed Exit'
-            terminated = True
-        elif self.ego_id in self.traci.simulation.getArrivedIDList():
-            info['message'] = 'Arrived'
-            terminated = True
-        elif self.counter >= self.episode_limit_steps:
-            info['message'] = 'Timeout'
+        terminal_event = select_terminal_event(
+            collision=self.ego_id in self.traci.simulation.getCollidingVehiclesIDList(),
+            ego_teleported=started or ended or self.ego_teleported,
+            missed_exit=self.missed_exit,
+            arrived=self.ego_id in self.traci.simulation.getArrivedIDList(),
+            timeout=control_step_timeout(self.counter, self.episode_limit_steps),
+        )
+        if terminal_event is not None:
+            info['message'] = terminal_event
             terminated = True
         if self.ego_id in self.traci.simulation.getEmergencyStoppingVehiclesIDList():
             self.emergency_stopping_steps += 1

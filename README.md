@@ -54,6 +54,8 @@ speed limits through TraCI.
 
 Every run starts from fresh random weights and an empty replay buffer. Models
 and logs should use a new run name and remain in ignored output directories.
+The E76→D3 training contract always keeps custom Safety interception off;
+passing `--safety` is rejected rather than creating a `SafetyWrapper`.
 
 ```bash
 python3 train_sac_delay.py \
@@ -86,7 +88,9 @@ python3 train_sac_delay.py \
 Each run records the resolved reward YAML, configuration hashes and Git SHA in
 the episode-log manifest. Episode-level raw, weighted, discounted, active,
 tail-quantile and clipping statistics use the training gamma and are emitted
-under `reward/episode/*` and `reward/total/*`.
+under `reward/episode/*` and `reward/total/*`. W&B training, reward and
+diagnostic series all use monotonic `env_steps`; TensorBoard remains a separate
+local log and is not auto-synchronized into W&B.
 
 ## Evaluation
 
@@ -99,9 +103,19 @@ python3 evaluate_sac_delay.py \
   --output tmp/ai/e76-d3/eval.json
 ```
 
-Evaluation uses the checkpoint's E76→D3 reward metadata and the selected
-scenario. Safety is off for the matched task contract unless explicitly
-requested for a separate diagnostic.
+Evaluation requires the checkpoint's complete E76→D3 reward configuration,
+profile and matching configuration hash; missing or inconsistent provenance is
+an error and never falls back to B0. Reports distinguish
+`policy_reward_return` (the checkpoint reward configuration) from
+`b0_reference_return` (common terminal-event scoring: success `+50`, failure
+`-100`, non-terminal `0`) and retain per-term totals. Safety is off for the
+matched task contract unless explicitly requested for a separate diagnostic.
+
+The network lane speed is 120 km/h, but SUMO computes vehicle `allowedSpeed`
+using the vehicle speed factor. Until the Ego vType is fixed to
+`speedFactor=1.0`, an unmodified route can therefore permit a small amount
+above the nominal lane value; do not describe the lane XML value alone as a
+verified hard Ego cap.
 
 ## GUI inspection
 

@@ -10,7 +10,6 @@ from pathlib import Path
 from collections import deque
 import torch
 from typing import Optional
-from src.wrapper import SafetyWrapper
 
 import numpy as np
 
@@ -62,6 +61,7 @@ class EpisodeRewardCallback(BaseCallback):
         self.away_requests = 0
         self.started = time.monotonic()
         self.starting_timesteps = 0
+        self.last_logged_env_steps = -1
         self.log_file = None
         if log_path:
             os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
@@ -71,6 +71,15 @@ class EpisodeRewardCallback(BaseCallback):
         if self.log_file:
             self.log_file.write(json.dumps(record) + '\n')
             self.log_file.flush()
+
+    def _log_metrics(self, metrics):
+        """Log every W&B series against the same monotonic environment-step axis."""
+        metrics = dict(metrics)
+        step = int(metrics.setdefault('env_steps', self.num_timesteps))
+        if step < self.last_logged_env_steps:
+            raise RuntimeError('env_steps must be globally monotonic')
+        self.last_logged_env_steps = step
+        wandb.log(metrics)
 
     def _on_training_end(self):
         if self.log_file:
@@ -199,7 +208,7 @@ class EpisodeRewardCallback(BaseCallback):
                                              if name != '_meta'))
                 metrics['reward/total/discounted_sum'] = total_discounted
                 self.logger.record('reward/total/discounted_sum', total_discounted)
-            wandb.log(metrics)
+            self._log_metrics(metrics)
             self._write({'event': 'episode', 'steps': self.num_timesteps,
                          'outcome': outcome, **{k: float(v) for k, v in metrics.items()}})
             
@@ -222,7 +231,7 @@ class EpisodeRewardCallback(BaseCallback):
                        if name in latest and np.isfinite(latest[name])}
             if scalars:
                 record = {'env_steps': self.num_timesteps, **scalars}
-                wandb.log(record)
+                self._log_metrics(record)
                 self._write({'event': 'scalars', 'steps': self.num_timesteps, **record})
 
         if self.num_timesteps % 1000 == 0:
@@ -236,7 +245,7 @@ class EpisodeRewardCallback(BaseCallback):
                 if total_requests:
                     request_metrics['train/away_request_fraction_1k'] = (
                         self.away_requests / total_requests)
-                wandb.log(request_metrics)
+                self._log_metrics(request_metrics)
                 self._write({'event': 'request_window', 'steps': self.num_timesteps,
                              **request_metrics})
                 self.toward_requests = self.away_requests = 0
@@ -288,6 +297,8 @@ def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None
              nav_features=False, exit_reward_profile=None,
              curriculum_stages=None, curriculum_route_dir=None,
              progress_experiment=None, reward_config=None, reward_gamma=0.99):
+    if use_safety:
+        raise ValueError('E76-to-D3 training requires Safety off; SafetyWrapper is forbidden')
     env = DelayWrapper(
         Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
                 potential_gamma=potential_gamma, exit_reward_profile=exit_reward_profile,
@@ -299,7 +310,14 @@ def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None
     if curriculum_stages is not None:
         env = ExitStartLaneCurriculum(env, curriculum_stages, seed,
                                       curriculum_route_dir)
-    return SafetyWrapper(env) if use_safety else env
+    return env
+
+
+def configure_wandb_metrics(run):
+    """Bind all manually logged training series to the environment-step axis."""
+    run.define_metric('env_steps')
+    for namespace in ('train/*', 'reward/*', 'diagnostic/*'):
+        run.define_metric(namespace, step_metric='env_steps')
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -339,6 +357,8 @@ def parse_args():
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
+    if args.use_safety:
+        parser.error('Current E76-to-D3 experiments require Safety off; --safety is forbidden')
     try:
         if args.reward_config:
             args.reward_config, args.reward_config_hash, args.reward_config_yaml = load_reward_file(
@@ -430,11 +450,11 @@ def main():
         exit_observation_profile=None,
         observation_dim=(136 if args.nav_features else 134),
         nav_distance_scale_meters=None,
-        metric_schema=('env_steps_v2' if args.exit_phase else None),
+        metric_schema='env_steps_v3',
         wandb_project=args.project,
         wandb_entity=args.entity,
-        use_safety=args.use_safety,
-        training_safety=args.use_safety,
+        use_safety=False,
+        training_safety=False,
         antwerp_env_version=ANTWERP_ENV_VERSION,
         device=args.device,
         torch_threads=args.torch_threads,
@@ -475,7 +495,7 @@ def main():
     wrapped_env = vec_env.envs[0]
     if config['curriculum_stages'] is not None:
         wrapped_env = wrapped_env.env
-    delay_env = wrapped_env.env if args.use_safety else wrapped_env
+    delay_env = wrapped_env
     entity_seq_len, entity_feat_dim = delay_env.orig_shape
     act_dim = delay_env.action_space.shape[0]
     encoder_mode = args.encoder_mode
@@ -514,7 +534,7 @@ def main():
     model.ablation = args.ablation
     model.antwerp_env_version = ANTWERP_ENV_VERSION
     model.antwerp_task = args.task
-    model.training_safety = args.use_safety
+    model.training_safety = False
     model.gru_input_mode = args.gru_input_mode if args.encoder_mode == 'GRU' else None
     model.experiment_id = args.run_name
     model.experiment_config_sha256 = config_sha256
@@ -544,20 +564,18 @@ def main():
 
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
                      mode=args.wandb_mode, dir=args.log_dir,
-                     sync_tensorboard=not args.exit_phase,
+                     sync_tensorboard=False,
                      save_code=not args.exit_phase, resume=args.resume, id=args.run_id,
                      group=(f'e76-d3-{args.exit_phase}-{args.exit_reward_profile}'
                             f'-{exit_config.CONTROL_PROFILE}')
                      if args.exit_phase else None,
                      job_type=args.exit_phase,
-                     tags=['E76-D3', 'single-ego', 'metric-schema-v2',
+                     tags=['E76-D3', 'single-ego', 'metric-schema-v3',
                            args.exit_reward_profile, exit_config.CONTROL_PROFILE]
                      if args.exit_phase else None)
+    configure_wandb_metrics(run)
     if not args.exit_phase:
         run.log_code('src')
-    else:
-        run.define_metric('env_steps')
-        run.define_metric('train/*', step_metric='env_steps')
 
     ensure_dirs(args.save_dir)
 
@@ -576,7 +594,8 @@ def main():
             save_path=checkpoint_dir, name_prefix=args.run_name, verbose=2,
             save_replay_buffer=args.save_replay_buffer)
     wandb_callback = WandbCallback(
-        gradient_save_freq=0 if args.exit_phase else 1000,
+        # Gradient watches use W&B's implicit step and would diverge from env_steps.
+        gradient_save_freq=0,
         verbose=2,
     )
 

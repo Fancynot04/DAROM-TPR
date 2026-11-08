@@ -84,5 +84,19 @@ class SumoIntegrationTests(unittest.TestCase):
         self.assertFalse(info['ego_teleported'])
         self.assertGreater(reward, 49)
 
+    def test_real_sumo_timeout_and_reward_tracker_reset(self):
+        env = Merging(seed=43, scenario='easy')
+        env.episode_limit_steps = 1
+        env.reset(seed=43)
+        _, reward, terminated, truncated, info = env.step([0, 0])
+        self.assertTrue(terminated)
+        self.assertFalse(truncated)
+        self.assertEqual(info['message'], 'Timeout')
+        self.assertEqual(reward, -100.0)
+        self.assertEqual(info['reward_episode_summary']['_meta']['steps'], 1)
+        env.reset(seed=43)
+        self.assertEqual(env.reward_tracker.summary()['_meta']['steps'], 0)
+        env.close()
+
 if __name__ == '__main__':
     unittest.main()
