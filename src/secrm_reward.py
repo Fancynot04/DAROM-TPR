@@ -15,7 +15,7 @@ FORMULA_VERSION = 'secrm_eq2_prestate_geometry_v2'
 
 
 from .rewards.secrm_efficiency import lateral_relation, efficiency
-from .rewards.secrm_route import route_penalty, minimum_changes
+from .rewards.secrm_route import executable_distance, route_penalty, minimum_changes
 
 
 def stamp_replay(buffer, experiment):

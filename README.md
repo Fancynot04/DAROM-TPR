@@ -74,6 +74,26 @@ resolved reward configuration is `conf/config.yaml` → `conf/reward/e76_d3.yaml
 The B0 reward is zero on non-terminal steps and settles exactly one event:
 success `+50`, collision/missed-exit/teleport/timeout `-100`.
 
+The B0–B3 reward ablations use Hydra reward groups; these are candidate
+calibration settings, not claims of optimal weights.  B1 enables clipped SECRM
+efficiency, B2 enables clipped topology route guidance, and B3 enables both.
+All preserve the terminal-event values and environment contract.
+
+```bash
+# B1 / B2 / B3 respectively
+python3 train_sac_delay.py --hydra-override reward=e76_d3_b1_efficiency
+python3 train_sac_delay.py --hydra-override reward=e76_d3_b2_route
+python3 train_sac_delay.py --hydra-override reward=e76_d3_b3_combined
+```
+
+Both dense components have candidate `weight=0.005` and clip their raw value
+to `[-1, 0]`.  Efficiency uses the existing SECRM safe-speed formula with a
+2 m/s denominator floor.  Route guidance computes the minimum legal lane
+changes and applies `-min(1, n*200/max(d,200))`, where `d` is the remaining
+distance through the final on-route edge that can still host a required lane
+change; it is not distance to the D3 endpoint.  Internal connectors are marked
+unavailable and pay no route term, rather than being treated as `n=0`.
+
 Reward terms can be disabled or reweighted with Hydra-style overrides. These
 change only payment, not termination or SUMO control:
 

@@ -100,7 +100,7 @@ class TrainingSafetyAndMetricTests(unittest.TestCase):
             args = training.parse_args()
         self.assertEqual((args.scenario, args.seed, args.gamma,
                           args.total_timesteps, args.checkpoint_freq),
-                         ('easy', 42, 0.999, 200_000, 50_000))
+                      ('easy', 42, 0.999, 200_000, 200_000))
         composed, reward, _, _ = load_hydra_config()
         self.assertEqual((composed.experiment.scenario, composed.experiment.seed,
                           composed.experiment.gamma,

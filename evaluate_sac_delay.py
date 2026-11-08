@@ -99,8 +99,8 @@ def validate_checkpoint_setup(model, ablation, safety, task=exit_config.TASK_ID)
     if checkpoint_task != task:
         raise ValueError(f'Checkpoint task={checkpoint_task!r}, requested {task!r}')
     reward_profile, reward_config, reward_config_hash = checkpoint_reward_setup(model)
-    if reward_profile != exit_config.REWARD_PROFILE:
-        raise ValueError('Checkpoint does not use the E76-to-D3 B0 reward profile')
+    if reward_profile not in ('events_only_v1', 'e76_d3_dense_v1'):
+        raise ValueError(f'Checkpoint has unsupported E76-to-D3 reward profile: {reward_profile!r}')
     progress_experiment = None
     potential_gamma = None
     nav_features = False

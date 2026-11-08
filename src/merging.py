@@ -126,8 +126,9 @@ class Merging(gym.Env):
             raise ValueError(f'Unknown Antwerp task: {task}')
         self.scenario = scenario
         self.task = task
-        self.exit_reward_profile = exit_config.REWARD_PROFILE if exit_reward_profile is None else exit_reward_profile
         self.reward_config = exit_progress_reward.load_experiment(reward_config)
+        self.exit_reward_profile = (self.reward_config['name'] if exit_reward_profile is None
+                                    else exit_reward_profile)
         if self.exit_reward_profile != self.reward_config['name']:
             raise ValueError('Unknown or mismatched E76-to-D3 reward configuration')
         if task != exit_config.TASK_ID:
@@ -188,6 +189,7 @@ class Merging(gym.Env):
         self.secrm_before = None
         self.boundary_diagnostic = None
         self.network_path = ANTWERP_DIR / 'Antwerp.net.xml'
+        self.route_network = load_route_network(self.network_path)
         self.directional_settled_lane = None
         self.directional_pending_request = None
         self.directional_request_distance = None
@@ -381,10 +383,10 @@ class Merging(gym.Env):
             raise ValueError(f'Invalid SECRM allowed speed: {allowed_speed!r}')
         eff, diagnostic = secrm_reward.efficiency(
             float(v.getSpeed(e)), min(allowed_speed, exit_config.ROAD_SPEED_LIMIT_MPS), SUMO_STEP_LENGTH,
-            epsilon=self.progress_experiment['reward']['speed_epsilon'], **params)
+            epsilon=float(self.reward_config['terms']['efficiency']['epsilon']), **params)
         diagnostic.update(ego_braking=ego_braking, leader_selection=leader_info)
         road = v.getRoadID(e)
-        route_value = 0.0
+        route_value = None
         route_info = {'status': 'connector_excluded', 'required_changes': None,
                       'remaining_section_m': None}
         if road == 'D3':
@@ -393,6 +395,7 @@ class Merging(gym.Env):
                 raise ValueError(f'Invalid SECRM D3 remaining distance: {remaining!r}')
             route_info = {'status': 'at_destination', 'required_changes': 0,
                           'remaining_section_m': max(0.0, remaining)}
+            route_value = 0.0
         elif not road.startswith(':'):
             stable = self.exit_maneuver is None and self._exit_laterally_settled()
             route = tuple(v.getRoute(e))
@@ -402,13 +405,12 @@ class Merging(gym.Env):
             if (route_index < 0 or route_index >= len(route) or route[route_index] != road
                     or lane_id != f'{road}_{lane}'):
                 raise ValueError(f'SECRM road/route/lane mismatch: {road!r}, {route!r}, {route_index}, {lane_id!r}, {lane}')
-            required = secrm_reward.minimum_changes(
-                self.route_network, route, route_index, lane, LANE_CHANGE_EDGES)
-            remaining = float(self.traci.lane.getLength(lane_id)) - float(v.getLanePosition(e))
-            if not math.isfinite(remaining):
-                raise ValueError(f'Invalid SECRM section distance: road={road!r}, lane={lane}, distance={remaining!r}')
-            remaining = max(0.0, remaining)
-            route_value = secrm_reward.route_penalty(required, remaining)
+            required, remaining = secrm_reward.executable_distance(
+                self.route_network, route, route_index, lane,
+                float(v.getLanePosition(e)), LANE_CHANGE_EDGES)
+            route_value = secrm_reward.route_penalty(
+                required, remaining,
+                float(self.reward_config['terms']['route']['distance_scale_m']))
             route_info = {'road': road, 'lane': lane, 'required_changes': required,
                           'status': 'settled' if stable else 'pending_current_lane',
                           'remaining_section_m': remaining}
@@ -690,7 +692,7 @@ class Merging(gym.Env):
                         self.potential_distance_scale = sum(
                             self.traci.lane.getLength(f'{edge}_0')
                             for edge in exit_config.DISTANCE_SCALE_EDGES)
-                        if self.exit_reward_profile == exit_config.REWARD_PROFILE:
+                        if self.exit_reward_profile in ('events_only_v1', 'e76_d3_dense_v1'):
                             self.potential_previous = 0.0
                             self.initial_potential = 0.0
                         elif self.exit_reward_profile == exit_config.URGENCY_REWARD_PROFILE:
@@ -727,13 +729,20 @@ class Merging(gym.Env):
 
     def getReward(self):
 
-        if self.exit_reward_profile == exit_config.REWARD_PROFILE:
+        if self.exit_reward_profile in ('events_only_v1', 'e76_d3_dense_v1'):
+            snapshot = None
+            if self.exit_reward_profile == 'e76_d3_dense_v1' and not self.terminal_reason:
+                snapshot = self._secrm_snapshot()
             context = RewardContext(
                 outcome=self.terminal_reason, config=self.reward_config,
-                teleported=self.teleport_transition or self.ego_teleported)
+                teleported=self.teleport_transition or self.ego_teleported,
+                efficiency_raw=None if snapshot is None else snapshot['efficiency'],
+                route_raw=None if snapshot is None else snapshot['route_reward'],
+                diagnostics=None if snapshot is None else snapshot)
             self.reward_terms = settle_terms(self.exit_reward_profile, context)
             total = float(sum(term.weighted for term in self.reward_terms))
             self.reward_components = {term.name: term.weighted for term in self.reward_terms}
+            self.secrm_before = None if snapshot is None else snapshot
             self.reward_tracker.add(self.reward_terms, total)
             self.last_stage_reward = 0.0
             return total
@@ -1078,7 +1087,8 @@ class Merging(gym.Env):
                      'reward_terms': [{'name': term.name, 'raw': term.raw,
                                        'weight': term.weight, 'enabled': term.enabled,
                                        'weighted': term.weighted, 'active': term.active,
-                                       'clipped': term.clipped} for term in self.reward_terms],
+                                       'clipped': term.clipped,
+                                       'clipped_value': term.clipped_value} for term in self.reward_terms],
                      'reward_episode_summary': reward_summary,
                      'stage_reached': bool(self.stage_reached), 'stage_name': self.stage_name,
                      'stage_reward': self.last_stage_reward,

@@ -89,7 +89,7 @@ class E76D3ContractTests(unittest.TestCase):
         self.assertEqual(exit_config.DEFAULT_SEED, 42)
         self.assertEqual(exit_config.DEFAULT_GAMMA, 0.999)
         self.assertEqual(exit_config.DEFAULT_TOTAL_TIMESTEPS, 200_000)
-        self.assertEqual(exit_config.DEFAULT_CHECKPOINT_FREQ, 50_000)
+        self.assertEqual(exit_config.DEFAULT_CHECKPOINT_FREQ, 200_000)
 
 
 if __name__ == '__main__':

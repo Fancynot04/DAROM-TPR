@@ -21,6 +21,9 @@
 !/conf/config.yaml
 !/conf/reward/
 !/conf/reward/e76_d3.yaml
+!/conf/reward/e76_d3_b1_efficiency.yaml
+!/conf/reward/e76_d3_b2_route.yaml
+!/conf/reward/e76_d3_b3_combined.yaml
 !/conf/experiment/
 !/conf/experiment/baseline.yaml
 .codex/

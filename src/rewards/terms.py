@@ -16,15 +16,19 @@ class RewardTerm:
     enabled: bool
     active: bool = True
     clipped: bool = False
+    clipped_value: float | None = None
 
     def __post_init__(self):
         for value in (self.raw, self.weight):
             if not math.isfinite(float(value)):
                 raise ValueError(f'Non-finite reward term value: {self.name}')
+        if self.clipped_value is not None and not math.isfinite(float(self.clipped_value)):
+            raise ValueError(f'Non-finite clipped reward term value: {self.name}')
 
     @property
     def weighted(self) -> float:
-        value = self.raw * self.weight if self.enabled else 0.0
+        payable = self.raw if self.clipped_value is None else self.clipped_value
+        value = payable * self.weight if self.enabled else 0.0
         if not math.isfinite(value):
             raise ValueError(f'Non-finite weighted reward term: {self.name}')
         return float(value)
