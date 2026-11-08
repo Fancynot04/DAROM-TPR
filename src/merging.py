@@ -16,14 +16,13 @@ from .rewards.directional_lane import adaptive_lane_reward
 from .route_urgency import load_route_network, observe_route_urgency, route_urgency
 
 
-maxSteps = 6000
+maxSteps = 4000
 ANTWERP_DIR = Path(__file__).resolve().parents[1] / 'sumo_new'
 EGO_DEPART_TIME = 120.0
 EGO_DEPARTURE_DEADLINE = 1200.0
 SUMO_STEP_LENGTH = 0.1
-EGO_SPEED_CAP_MPS = 32.0
 LANE_CHANGE_EDGES = frozenset(('E75', 'E76', 'E77', 'E78', 'E82'))
-ANTWERP_ENV_VERSION = 3
+ANTWERP_ENV_VERSION = 4
 
 
 def curriculum_route_file(source, lane, output_dir):
@@ -49,37 +48,7 @@ def curriculum_route_file(source, lane, output_dir):
     return target
 
 
-def e09_evaluation_route_file(source, origin, lane, output_dir):
-    """Change only ego origin and lane in the existing easy traffic route."""
-    lane_counts = {'E76': 5, 'E77': 6, 'O1': 3}
-    if origin not in lane_counts or type(lane) is not int or not 0 <= lane < lane_counts[origin]:
-        raise ValueError('Invalid E09 evaluation origin or departure lane')
-    source, output_dir = Path(source), Path(output_dir)
-    original = source.read_bytes()
-    matches = list(re.finditer(rb'<trip\s+id="ego"(?=\s)[^>]*/>', original))
-    if len(matches) != 1:
-        raise ValueError('Expected exactly one ego trip')
-    ego = matches[0]
-    trip = ego.group()
-    if trip.count(b'from="E76"') != 1 or trip.count(b'departLane="random"') != 1:
-        raise ValueError('Unexpected ego trip contract')
-    selected = trip.replace(b'from="E76"', f'from="{origin}"'.encode('ascii'))
-    selected = selected.replace(b'departLane="random"', f'departLane="{lane}"'.encode('ascii'))
-    variant = original[:ego.start()] + selected + original[ego.end():]
-    output_dir.mkdir(parents=True, exist_ok=True)
-    target = output_dir / f'{source.stem}_e09_{origin}_{lane}.rou.xml'
-    if target.exists():
-        if target.read_bytes() != variant:
-            raise FileExistsError(f'Existing E09 evaluation route differs: {target}')
-    else:
-        target.write_bytes(variant)
-    return target
-
-
 ANTWERP_TASKS = {
-    'legacy_o3_d1': ('O3', 'D1', 'merge'),
-    'entry': ('O3', 'E76', 'merge'),
-    'exit': ('O1', 'D3', 'exit'),
     exit_config.TASK_ID: (exit_config.ORIGIN, exit_config.DESTINATION, 'exit'),
 }
 
@@ -116,32 +85,19 @@ def set_ego_lane_mode(vehicle_name):
 
 class Merging(gym.Env):
     metadata = {"render_modes": ["human", "none"], "render_fps": 10}
-    def __init__(self, seed, mode='all', radius = 50, render_mode= None, runSafetyCheck=False,
-                 scenario='medium', task='legacy_o3_d1', potential_gamma=None,
-                 exit_reward_profile=None, e09_pending_mode=None,
-                 progress_experiment=None, road_speed_limit_mps=None):
+    def __init__(self, seed, mode='all', radius=50, render_mode=None, runSafetyCheck=False,
+                 scenario='medium', task=exit_config.TASK_ID, potential_gamma=None,
+                 exit_reward_profile=None, progress_experiment=None):
         if scenario not in ('easy', 'medium', 'hard'):
             raise ValueError(f'Unknown Antwerp scenario: {scenario}')
         if task not in ANTWERP_TASKS:
             raise ValueError(f'Unknown Antwerp task: {task}')
-        if e09_pending_mode not in (None, 'on', 'off'):
-            raise ValueError('Invalid E09 pending mode')
-        if e09_pending_mode is not None and (task != exit_config.TASK_ID or runSafetyCheck):
-            raise ValueError('E09 requires the E76-D3 task with custom safety disabled')
-        self.e09_pending_mode = e09_pending_mode
         self.scenario = scenario
         self.task = task
         self.exit_reward_profile = (exit_config.REWARD_PROFILE if exit_reward_profile is None
                                     else exit_reward_profile)
         self.progress_experiment = (exit_progress_reward.validate_experiment(progress_experiment)
                                     if progress_experiment is not None else None)
-        if road_speed_limit_mps is not None:
-            road_speed_limit_mps = float(road_speed_limit_mps)
-            if not math.isfinite(road_speed_limit_mps) or road_speed_limit_mps <= 0:
-                raise ValueError('Road speed limit must be a positive finite value')
-            if task != exit_config.TASK_ID:
-                raise ValueError('Road speed-limit override is only defined for E76-to-D3')
-        self.road_speed_limit_mps = road_speed_limit_mps
         if self.exit_reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
                                         exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES):
             if task != exit_config.TASK_ID or self.progress_experiment is None:
@@ -200,9 +156,6 @@ class Merging(gym.Env):
         self.ego_start_lane = None
         self.curriculum_depart_lane = None
         self.curriculum_route_dir = None
-        self.e09_evaluation_origin = None
-        self.e09_evaluation_lane = None
-        self.e09_evaluation_route_dir = None
         self.potential_distance_scale = None
         self.potential_previous = 0.0
         self.initial_potential = 0.0
@@ -252,25 +205,6 @@ class Merging(gym.Env):
 
         self.render_mode = render_mode
         self._connection = None
-
-    def _apply_exit_road_speed_limit(self):
-        """Apply a run-scoped corridor limit before any simulated vehicle departs."""
-        if self.road_speed_limit_mps is None:
-            return ()
-        lane_ids = tuple(self.traci.lane.getIDList())
-        selected = tuple(
-            lane_id for lane_id in lane_ids
-            if lane_id.split('_', 1)[0] in exit_config.SPEED_LIMIT_CORRIDOR_EDGES
-            or lane_id.startswith(exit_config.SPEED_LIMIT_CORRIDOR_INTERNAL_PREFIXES)
-        )
-        expected = {f'{edge}_0' for edge in exit_config.SPEED_LIMIT_CORRIDOR_EDGES}
-        if (not expected.issubset(selected)
-                or not any(lane.startswith(':J105_') for lane in selected)
-                or not any(lane.startswith(':J106_') for lane in selected)):
-            raise RuntimeError('E76-to-D3 speed-limit corridor is incomplete')
-        for lane_id in selected:
-            self.traci.lane.setMaxSpeed(lane_id, self.road_speed_limit_mps)
-        return selected
 
     @property
     def traci(self):
@@ -418,7 +352,7 @@ class Merging(gym.Env):
         if not math.isfinite(allowed_speed) or allowed_speed < 0:
             raise ValueError(f'Invalid SECRM allowed speed: {allowed_speed!r}')
         eff, diagnostic = secrm_reward.efficiency(
-            float(v.getSpeed(e)), min(allowed_speed, EGO_SPEED_CAP_MPS), SUMO_STEP_LENGTH,
+            float(v.getSpeed(e)), min(allowed_speed, exit_config.ROAD_SPEED_LIMIT_MPS), SUMO_STEP_LENGTH,
             epsilon=self.progress_experiment['reward']['speed_epsilon'], **params)
         diagnostic.update(ego_braking=ego_braking, leader_selection=leader_info)
         road = v.getRoadID(e)
@@ -681,16 +615,8 @@ class Merging(gym.Env):
             pass
 
         # Load the Antwerp network and one scenario route without detector output files.
-        route_suffix = '' if self.task == 'legacy_o3_d1' else f'_{self.task}'
-        source_routes = ANTWERP_DIR / f'Antwerp_{self.scenario}{route_suffix}.rou.xml'
-        if self.e09_evaluation_origin is not None:
-            if self.e09_pending_mode is None or self.e09_evaluation_route_dir is None:
-                raise ValueError('E09 evaluation origin requires an explicit E09 mode and route directory')
-            self.origin = self.e09_evaluation_origin
-            routes = e09_evaluation_route_file(source_routes, self.origin,
-                                                self.e09_evaluation_lane,
-                                                self.e09_evaluation_route_dir)
-        elif self.curriculum_depart_lane is not None:
+        source_routes = ANTWERP_DIR / f'Antwerp_{self.scenario}_exit_e76_d3.rou.xml'
+        if self.curriculum_depart_lane is not None:
             if self.task != exit_config.TASK_ID or self.curriculum_route_dir is None:
                 raise ValueError('Curriculum departure requires E76-to-D3 and a route output directory')
             routes = curriculum_route_file(source_routes, self.curriculum_depart_lane,
@@ -707,15 +633,13 @@ class Merging(gym.Env):
             self.sumoBinary,
             '--net-file', str(scene_paths['network']),
             '--route-files', str(scene_paths['routes']),
-            '--begin', '0', '--end', '3600',
+            '--begin', '0', '--end', str(self.episode_limit_steps * SUMO_STEP_LENGTH),
             '--step-length', str(SUMO_STEP_LENGTH), '--lateral-resolution', '0.8',
             '--seed', str(sumo_seed),
             '--no-step-log', '--collision.check-junctions',
             '--collision.action', 'remove', '-Q',
         ]
         self.traci.start(sumo_cmd)
-        self._apply_exit_road_speed_limit()
-
         # Stop one step before the scheduled departure so TraCI observes its ID.
         self.traci.simulationStep(EGO_DEPART_TIME - SUMO_STEP_LENGTH)
         while not self.ego_inserted and self.traci.simulation.getTime() < EGO_DEPARTURE_DEADLINE:
@@ -757,8 +681,7 @@ class Merging(gym.Env):
         self.state = self.observation
         return self.state, {
             'ego_id': self.ego_id, 'ego_depart_time': self.ego_depart_time,
-            'task': ('antwerp-o3-d1' if self.task == 'legacy_o3_d1'
-                     else f'antwerp-{self.origin.lower()}-{self.destination.lower()}'),
+            'task': f'antwerp-{self.origin.lower()}-{self.destination.lower()}',
             'task_id': self.task, 'origin': self.origin, 'destination': self.destination,
             'stage_name': self.stage_name, 'scenario': self.scenario,
             'antwerp_env_version': ANTWERP_ENV_VERSION,
@@ -971,14 +894,9 @@ class Merging(gym.Env):
 
     def _apply_lane_change(self, direction):
         if direction and self.lane_name in LANE_CHANGE_EDGES:
-            if (self.task == exit_config.TASK_ID and self.exit_maneuver is not None
-                    and self.e09_pending_mode != 'off'):
-                return
             target = self.lane_idx + direction
             if 0 <= target < self.traci.edge.getLaneNumber(self.lane_name):
                 if self.task == exit_config.TASK_ID and self.lane_name in ('E76', 'E77'):
-                    if self.e09_pending_mode is None and not self._exit_change_has_room():
-                        return
                     now = self.traci.simulation.getTime()
                     self.traci.vehicle.changeLane(
                         self.ego_id, target, exit_config.LANE_CHANGE_TIME_SECONDS)
@@ -1037,8 +955,6 @@ class Merging(gym.Env):
         if was_on_road:
             self._apply_lane_change(parsed_action[1])
             self.traci.vehicle.setAcceleration(self.ego_id, parsed_action[0], 1)
-            if self.traci.vehicle.getSpeed(self.ego_id) > EGO_SPEED_CAP_MPS:
-                self.traci.vehicle.setSpeed(self.ego_id, EGO_SPEED_CAP_MPS)
         self.counter += 1
         self.parsed_action = parsed_action
         return was_on_road

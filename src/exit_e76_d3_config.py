@@ -19,9 +19,7 @@ URGENCY_CLIP = 1.5
 URGENCY_WEIGHT = 0.10
 CONTROL_PROFILE = 'tracked_lane_change_v2'
 DISTANCE_SCALE_EDGES = ('E76', 'E77', 'D3')
-SPEED_LIMIT_CORRIDOR_EDGES = ('E76', 'E77', 'D3')
-SPEED_LIMIT_CORRIDOR_INTERNAL_PREFIXES = (':J105_', ':J106_')
-SPEED_LIMIT_120_KPH_MPS = 120.0 / 3.6
+ROAD_SPEED_LIMIT_MPS = 120.0 / 3.6
 NAV_OBSERVATION_PROFILE = 'nav_d3_required_lanes_v1'
 NAV_DISTANCE_SCALE_METERS = 1260.74
 NAV_DIM = 2
@@ -56,68 +54,7 @@ URGENCY_CURRICULUM_STAGES = (
     (200_000, (0, 1, 2, 3, 4)),
 )
 
-# A paired continuation from one frozen seed-43 parent, not a fresh run.
-CURRICULUM_BRANCH_START = 100_000
-CURRICULUM_BRANCH_CHECKPOINTS = (110_000, 125_000, 150_000)
-CURRICULUM_BRANCH_MODEL_SHA256 = '83d9b67170220c33672f8ceaeb4e19685b014cbf8e89c77ba7135178af30064f'
-CURRICULUM_BRANCH_REPLAY_SHA256 = '10fdd7430ab1cab71af17b2093a6a469372a96e06006facd7066ce2a19a4120e'
-SPEED120_500K_MODEL_SHA256 = '2ad93cfe603a905d121c7d97fa9ec582ab9ecbfd0ffea055c019d82aaa072f8f'
-SPEED120_500K_REPLAY_SHA256 = 'a57641dc72efe1fd30bb935852483524fd825c73d36f78c86205c5e849b4ce0b'
-SPEED120_1M_MODEL_SHA256 = 'db25464892250a5667251ce93ebefa033a8ba5b2d60f27d55570b45481d89d86'
-SPEED120_1M_REPLAY_SHA256 = '0edc1e3b1ffe4ae5dfaacdcfc903382616c2663c58928935085669e771b0d259'
-CURRICULUM_BRANCH_PHASES = {
-    'urgency_curriculum_hold2_150k': URGENCY_CURRICULUM_STAGES[:2],
-    'urgency_curriculum_expand3_150k': URGENCY_CURRICULUM_STAGES[:3],
-}
-
 PHASES = {
-    **{name: {'scenario': 'easy', 'total_timesteps': 200_000,
-              'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
-              'nav_features': False, 'reward_profile': profile}
-       for name, profile in zip(('secrm_efficiency', 'secrm_efficiency_route'),
-                                secrm_reward.PROFILES)},
-    'secrm_efficiency_directional': {
-        'scenario': 'easy', 'total_timesteps': 500_000,
-        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.DIRECTIONAL_PROFILE,
-    },
-    **{f'secrm_efficiency_directional_{mode}': {
-        'scenario': 'easy', 'total_timesteps': 500_000,
-        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
-    } for mode in ('l1', 'l2')},
-    'secrm_efficiency_directional_l1_speed120_500k': {
-        'scenario': 'easy', 'total_timesteps': 500_000,
-        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
-        'road_speed_limit_mps': SPEED_LIMIT_120_KPH_MPS,
-    },
-    'secrm_efficiency_directional_l1_speed120_no_pending_500k': {
-        'scenario': 'easy', 'total_timesteps': 500_000,
-        'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
-        'road_speed_limit_mps': SPEED_LIMIT_120_KPH_MPS,
-        # Reuse the already-tested E09 controller switch.  In off mode the
-        # maneuver record remains observational but never gates a new command.
-        'e09_pending_mode': 'off',
-    },
-    'secrm_efficiency_directional_l1_speed120_1m': {
-        'scenario': 'easy', 'total_timesteps': 1_000_000,
-        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
-        'road_speed_limit_mps': SPEED_LIMIT_120_KPH_MPS,
-    },
-    'secrm_efficiency_directional_l1_speed120_2m': {
-        'scenario': 'easy', 'total_timesteps': 2_000_000,
-        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
-        'road_speed_limit_mps': SPEED_LIMIT_120_KPH_MPS,
-    },
-    'secrm_efficiency_route_no_events': {
-        'scenario': 'easy', 'total_timesteps': 200_000,
-        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.ROUTE_PROFILE,
-    },
     'progress_events': {
         'scenario': 'easy', 'total_timesteps': 200_000,
         'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
@@ -128,72 +65,31 @@ PHASES = {
         'checkpoint_freq': 200_000, 'gamma': POTENTIAL_GAMMA,
         'nav_features': False, 'reward_profile': DIRECTIONAL_REWARD_PROFILE,
     },
-    **{f'e09_pending_{mode}': {
-        'scenario': 'easy', 'total_timesteps': 250_000,
-        'checkpoint_freq': 150_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'allowed_seeds': (43,),
-        'reward_profile': URGENCY_REWARD_PROFILE,
-        'curriculum_stages': URGENCY_CURRICULUM_STAGES,
-        'e09_pending_mode': mode,
-    } for mode in ('on', 'off')},
-    **{phase: {
-        'scenario': 'easy', 'total_timesteps': 150_000,
-        'checkpoint_freq': 5_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'allowed_seeds': (43,),
-        'reward_profile': URGENCY_REWARD_PROFILE,
-        'curriculum_stages': stages,
-    } for phase, stages in CURRICULUM_BRANCH_PHASES.items()},
-    'urgency_134_curriculum_500k': {
-        'scenario': 'easy', 'total_timesteps': 500_000,
-        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'allowed_seeds': (42, 43),
-        'reward_profile': URGENCY_REWARD_PROFILE,
-        'curriculum_stages': URGENCY_CURRICULUM_STAGES,
-    },
-    'urgency_134_300k': {'scenario': 'easy', 'total_timesteps': 300_000,
-                         'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
-                         'nav_features': False, 'allowed_seeds': (43,),
-                         'reward_profile': URGENCY_REWARD_PROFILE},
-    'urgency_134_200k': {'scenario': 'easy', 'total_timesteps': 200_000,
-                         'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
-                         'nav_features': False, 'allowed_seeds': (42, 43),
-                         'reward_profile': URGENCY_REWARD_PROFILE},
-    'nav_300k': {'scenario': 'easy', 'total_timesteps': 300_000,
-                 'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
-                 'nav_features': True},
-    'control_134_200k': {'scenario': 'easy', 'total_timesteps': 200_000,
-                         'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
-                         'nav_features': False, 'allowed_seeds': (42, 43)},
-    'nav_200k': {'scenario': 'easy', 'total_timesteps': 200_000,
-                 'checkpoint_freq': 100_000, 'gamma': POTENTIAL_GAMMA,
-                 'nav_features': True, 'allowed_seeds': (42, 43)},
-    'easy_pilot': {'scenario': 'easy', 'total_timesteps': 20_000,
-                   'checkpoint_freq': 10_000, 'gamma': POTENTIAL_GAMMA},
-    'easy_1m': {'scenario': 'easy', 'total_timesteps': 1_000_000,
-                'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA},
-    'exp005_gamma0999_200k': {
+    'secrm_efficiency': {
         'scenario': 'easy', 'total_timesteps': 200_000,
-        'checkpoint_freq': 100_000, 'gamma': 0.999,
+        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': secrm_reward.EFFICIENCY_PROFILE,
     },
-    'gamma099_baseline_800k': {
-        'scenario': 'easy', 'total_timesteps': 800_000,
-        'checkpoint_freq': 200_000, 'gamma': POTENTIAL_GAMMA,
+    'secrm_efficiency_route': {
+        'scenario': 'easy', 'total_timesteps': 200_000,
+        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': secrm_reward.ROUTE_PROFILE,
     },
-}
-
-SPEED120_CONTINUATIONS = {
-    'secrm_efficiency_directional_l1_speed120_1m': {
-        'start_step': 500_000,
-        'parent_model_sha256': SPEED120_500K_MODEL_SHA256,
-        'parent_replay_sha256': SPEED120_500K_REPLAY_SHA256,
-        'checkpoint_steps': (750_000, 1_000_000),
+    'secrm_efficiency_route_no_events': {
+        'scenario': 'easy', 'total_timesteps': 200_000,
+        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': secrm_reward.ROUTE_PROFILE,
     },
-    'secrm_efficiency_directional_l1_speed120_2m': {
-        'start_step': 1_000_000,
-        'parent_model_sha256': SPEED120_1M_MODEL_SHA256,
-        'parent_replay_sha256': SPEED120_1M_REPLAY_SHA256,
-        'checkpoint_steps': (1_250_000, 1_500_000, 1_750_000, 2_000_000),
+    'secrm_efficiency_directional': {
+        'scenario': 'easy', 'total_timesteps': 500_000,
+        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': secrm_reward.DIRECTIONAL_PROFILE,
     },
+    **{f'secrm_efficiency_directional_{mode}': {
+        'scenario': 'easy', 'total_timesteps': 500_000,
+        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
+        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
+    } for mode in ('l1', 'l2')},
 }
 
 

@@ -44,12 +44,12 @@ class AdaptiveLaneRewardTests(unittest.TestCase):
 
     def test_latched_request_distance_pending_and_once(self):
         e,c=self.make_env()
-        with patch('src.merging.observe_route_urgency') as observe, patch.object(e,'_exit_change_has_room',return_value=True):
+        with patch('src.merging.observe_route_urgency') as observe:
             observe.return_value=self.estimate(1,1);e._update_directional_lane_reward()
             e._apply_lane_change(-1);self.assertEqual(e.directional_request_distance,100.)
             e._connection.vehicle.getDrivingDistance.return_value=10.
             e._apply_lane_change(-1)
-            self.assertEqual(e._connection.vehicle.changeLane.call_count,1)
+            self.assertEqual(e._connection.vehicle.changeLane.call_count,2)
             observe.return_value=self.estimate(0,0,pending=True);e.directional_seen_lateral_motion=True
             e._update_directional_lane_reward();self.assertEqual(e.directional_lane_reward,0.)
             e.exit_maneuver=None;observe.return_value=self.estimate(0,0)
@@ -62,10 +62,11 @@ class AdaptiveLaneRewardTests(unittest.TestCase):
 
     def test_rejected_and_failed_request_do_not_pay(self):
         e,c=self.make_env()
-        with patch('src.merging.observe_route_urgency') as observe, patch.object(e,'_exit_change_has_room',return_value=False):
+        with patch('src.merging.observe_route_urgency') as observe:
             observe.return_value=self.estimate(1,1);e._update_directional_lane_reward();e._apply_lane_change(-1)
-            e._connection.vehicle.changeLane.assert_not_called();self.assertIsNone(e.directional_pending_request)
-        with patch('src.merging.observe_route_urgency') as observe, patch.object(e,'_exit_change_has_room',return_value=True):
+            e._connection.vehicle.changeLane.assert_called_once_with('ego', 0, 4.0)
+            self.assertEqual(e.directional_pending_request, -1)
+        with patch('src.merging.observe_route_urgency') as observe:
             observe.return_value=self.estimate(1,1);e._apply_lane_change(-1)
             e.exit_maneuver=None;e._update_directional_lane_reward()
             self.assertEqual(e.directional_lane_reward,0.)

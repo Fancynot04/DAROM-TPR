@@ -189,15 +189,17 @@ class OptionalEvaluatorTraceTests(unittest.TestCase):
                     'message': 'Arrived' if self.steps == 2 else '',
                     'ego_teleported': False, 'merged': True,
                     'stage_reached': True, 'lane': 'D3_0',
+                    'potential_reward': 0.0,
+                    'reward_components': {'potential': 0.0},
                 }
 
         model = Mock()
         model.predict.return_value = (np.zeros(2, np.float32), None)
-        baseline = evaluate(model, Env(), 1, 200004, task='exit')
+        baseline = evaluate(model, Env(), 1, 200004, task='exit_e76_d3')
         trace = io.StringIO()
         with patch('evaluate_sac_delay.observe_route_urgency',
                    return_value={'status': 'ok', 'urgency': 0.5}):
-            observed = evaluate(model, Env(), 1, 200004, task='exit',
+            observed = evaluate(model, Env(), 1, 200004, task='exit_e76_d3',
                                 urgency_trace=trace, route_network=object())
         self.assertEqual(observed['mean_return'], baseline['mean_return'])
         self.assertEqual(observed['success_rate'], baseline['success_rate'])

@@ -32,23 +32,19 @@ REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout
                   'missed_exit_rate', 'mean_return')
 
 
-def make_env(seed, scenario, delay_mode, safety, ablation, task='legacy_o3_d1',
+def make_env(seed, scenario, delay_mode, safety, ablation, task=exit_config.TASK_ID,
              potential_gamma=None, nav_features=False, exit_reward_profile=None,
-             e09_pending_mode=None, progress_experiment=None,
-             road_speed_limit_mps=None):
+             progress_experiment=None):
     env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
                                potential_gamma=potential_gamma,
                                exit_reward_profile=exit_reward_profile,
-                               e09_pending_mode=e09_pending_mode,
-                               progress_experiment=progress_experiment,
-                               road_speed_limit_mps=road_speed_limit_mps),
+                               progress_experiment=progress_experiment),
                        max_delay=20, mode='all', delay_mode=delay_mode,
                        seed=seed, ablation=ablation, nav_features=nav_features)
     return SafetyWrapper(env) if safety else env
 
 
-def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
-                              e09_pending_mode=None):
+def validate_checkpoint_setup(model, ablation, safety, task=exit_config.TASK_ID):
     """Validate policy compatibility; evaluation safety is an intervention.
 
     Training safety remains checkpoint provenance, not a restriction on which
@@ -60,16 +56,9 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
         raise ValueError(f'Checkpoint ablation={model.ablation!r}, requested {ablation!r}')
     if task not in ANTWERP_TASKS:
         raise ValueError(f'Unknown Antwerp task: {task}')
-    checkpoint_task = getattr(model, 'antwerp_task', 'legacy_o3_d1')
+    checkpoint_task = getattr(model, 'antwerp_task', exit_config.TASK_ID)
     if checkpoint_task != task:
         raise ValueError(f'Checkpoint task={checkpoint_task!r}, requested {task!r}')
-    trained_e09 = getattr(model, 'e09_pending_mode', None)
-    if e09_pending_mode is None:
-        e09_pending_mode = trained_e09
-    if trained_e09 is not None and e09_pending_mode not in ('on', 'off'):
-        raise ValueError('Pending-mode checkpoints require an explicit valid evaluation mode')
-    if e09_pending_mode is not None and (e09_pending_mode not in ('on', 'off') or safety):
-        raise ValueError('E09 evaluation requires a valid mode and custom safety off')
     reward_profile = getattr(model, 'exit_reward_profile', None)
     progress_experiment = None
     if reward_profile in exit_config.secrm_reward.PROFILES:
@@ -123,8 +112,6 @@ def validate_checkpoint_setup(model, ablation, safety, task='legacy_o3_d1',
         setup['exit_observation_profile'] = getattr(model, 'exit_observation_profile', None)
         setup['nav_features'] = nav_features
         setup['exit_reward_profile'] = reward_profile
-        setup['road_speed_limit_mps'] = getattr(model, 'road_speed_limit_mps', None)
-        setup['e09_pending_mode'] = e09_pending_mode
         if progress_experiment is not None:
             setup['progress_experiment'] = progress_experiment
             setup['progress_reward_identity'] = exit_progress_reward.reward_identity(
@@ -169,7 +156,7 @@ def diagnostic_reward_without_potential(reward, info, task):
     return potential, unshaped
 
 
-def evaluate(model, env, episodes, seed, task='legacy_o3_d1',
+def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
              urgency_trace=None, route_network=None):
     if episodes < 1:
         raise ValueError('episodes must be positive')
@@ -487,7 +474,7 @@ def summarize_runs(runs, metrics=REPORT_METRICS):
 
 
 def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds,
-                  task='legacy_o3_d1', urgency_trace_path=None):
+                  task=exit_config.TASK_ID, urgency_trace_path=None):
     """Repeat evaluation of ONE checkpoint; this is not training-seed variance."""
     validate_seed_ranges(episodes, seeds)
     setup = validate_checkpoint_setup(model, ablation, safety, task)
@@ -507,9 +494,7 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
                            potential_gamma=setup.get('potential_gamma'),
                            nav_features=setup.get('nav_features', False),
                            exit_reward_profile=setup.get('exit_reward_profile'),
-                           e09_pending_mode=setup.get('e09_pending_mode'),
-                           progress_experiment=setup.get('progress_experiment'),
-                           road_speed_limit_mps=setup.get('road_speed_limit_mps'))
+                           progress_experiment=setup.get('progress_experiment'))
             try:
                 runs.append({'seed': seed, 'episodes': episodes,
                              **evaluate(model, env, episodes, seed, task=task,
@@ -546,7 +531,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('checkpoint', help='Antwerp SAC checkpoint (.zip)')
     parser.add_argument('--scenario', choices=('easy', 'medium', 'hard'), default='medium')
-    parser.add_argument('--task', choices=tuple(ANTWERP_TASKS), default='legacy_o3_d1')
+    parser.add_argument('--task', choices=(exit_config.TASK_ID,), default=exit_config.TASK_ID)
     parser.add_argument('--delay-mode', choices=('uniform', 'exponential', 'triangular', 'bursty', 'bimodal'), default='uniform')
     parser.add_argument('--episodes', type=int, default=51)
     seed_options = parser.add_mutually_exclusive_group()

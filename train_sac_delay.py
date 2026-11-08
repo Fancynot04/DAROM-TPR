@@ -22,7 +22,7 @@ from src.delay_encoder import DelayAwareEncoder, DelayAwareGRUEncoder, TinyTrans
 import wandb
 from wandb.integration.sb3 import WandbCallback
 
-from src.merging import ANTWERP_ENV_VERSION, ANTWERP_TASKS, Merging
+from src.merging import ANTWERP_ENV_VERSION, Merging
 from src import exit_e76_d3_config as exit_config
 from src import exit_progress_reward
 from src.wrapper import ABLATION_MODES, DelayWrapper, ExitStartLaneCurriculum
@@ -262,20 +262,15 @@ def save_model(model: SAC, path: str) -> str:
     model.save(path)
     return path
 
-def load_model(path: str, env: gym.Env) -> SAC:
-    return SAC.load(path, env=env)
-
 def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
-             ablation='full', task='legacy_o3_d1', potential_gamma=None,
+             ablation='full', task=exit_config.TASK_ID, potential_gamma=None,
              nav_features=False, exit_reward_profile=None,
-             curriculum_stages=None, curriculum_route_dir=None, e09_pending_mode=None,
-             progress_experiment=None, road_speed_limit_mps=None):
+             curriculum_stages=None, curriculum_route_dir=None,
+             progress_experiment=None):
     env = DelayWrapper(
         Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
                 potential_gamma=potential_gamma, exit_reward_profile=exit_reward_profile,
-                e09_pending_mode=e09_pending_mode,
-                progress_experiment=progress_experiment,
-                road_speed_limit_mps=road_speed_limit_mps),
+                progress_experiment=progress_experiment),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation, nav_features=nav_features,
     )
@@ -304,18 +299,16 @@ def parse_args():
     parser.add_argument('--episode_log', default=None)
     parser.add_argument('--render_mode', type=str, default=None)
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--scenario', choices=['easy', 'medium', 'hard'], default='medium')
-    parser.add_argument('--task', choices=tuple(ANTWERP_TASKS), default='legacy_o3_d1',
-                        help='Single-ego task; legacy default preserves existing O3-to-D1 runs')
-    parser.add_argument('--exit_phase', choices=tuple(exit_config.PHASES), default=None,
-                        help='Dedicated E76-to-D3 Easy pilot or Easy 1M configuration')
+    parser.add_argument('--scenario', choices=['easy', 'medium', 'hard'], default=None)
+    parser.add_argument('--task', choices=(exit_config.TASK_ID,), default=exit_config.TASK_ID,
+                        help='The single supported task: E76 to D3')
+    parser.add_argument('--exit_phase', choices=tuple(exit_config.PHASES),
+                        default='secrm_efficiency_directional_l1',
+                        help='E76-to-D3 reward/training configuration')
     parser.add_argument('--exit_config', default=None,
                         help='JSON run/reward configuration for a progress_events phase')
     parser.add_argument('--safety', dest='use_safety', action='store_true')
     parser.add_argument('--save_dir', type=str, default='models_experiments')
-    parser.add_argument('--load_path', type=str, default=None)
-    parser.add_argument('--replay_buffer_path', type=str, default=None,
-                        help='Required with --load_path for E76-to-D3 continuation')
     parser.add_argument('--wandb_mode', type=str, default='online', choices=['online', 'offline', 'disabled'])
     parser.add_argument('--encoder_mode', type=str, default='GRU', choices=['Transformer', 'GRU', 'MLP', 'None'])
     parser.add_argument('--gru_input_mode', choices=DelayAwareGRUEncoder.INPUT_MODES,
@@ -324,14 +317,8 @@ def parse_args():
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
-    progress_phases = ('progress_events', 'progress_events_directional_lc',
-                       'secrm_efficiency', 'secrm_efficiency_route',
-                       'secrm_efficiency_route_no_events', 'secrm_efficiency_directional',
-                       'secrm_efficiency_directional_l1', 'secrm_efficiency_directional_l2',
-                       'secrm_efficiency_directional_l1_speed120_500k',
-                       'secrm_efficiency_directional_l1_speed120_no_pending_500k',
-                       'secrm_efficiency_directional_l1_speed120_1m',
-                       'secrm_efficiency_directional_l1_speed120_2m')
+    requested_scenario = args.scenario
+    progress_phases = tuple(exit_config.PHASES)
     if args.exit_config and args.exit_phase not in progress_phases:
         parser.error('--exit_config requires a progress_events phase')
     args.progress_experiment = None
@@ -349,22 +336,21 @@ def parse_args():
     if args.exit_phase:
         phase = exit_config.PHASES[args.exit_phase]
         allowed_seeds = tuple(phase.get('allowed_seeds', (args.seed,) if args.progress_experiment else (42,)))
-        if args.task not in ('legacy_o3_d1', exit_config.TASK_ID):
-            parser.error('--exit_phase cannot be combined with another task')
         if (args.seed not in allowed_seeds or args.radius != 50 or args.use_safety
                 or args.encoder_mode != 'GRU' or args.gru_input_mode != 'paper_raw'
                 or args.ablation != 'full' or args.delay_mode != 'uniform'):
             parser.error('E76-to-D3 phase requires an approved seed, radius 50, '
                          'safety-off, full paper_raw GRU and uniform delay settings')
         args.task = exit_config.TASK_ID
-        args.scenario = phase['scenario']
+        args.scenario = requested_scenario or phase['scenario']
         args.total_timesteps = phase['total_timesteps']
         args.checkpoint_freq = phase['checkpoint_freq']
         args.gamma = phase['gamma']
         args.nav_features = phase.get('nav_features', False)
         args.exit_reward_profile = phase.get('reward_profile', exit_config.REWARD_PROFILE)
         if args.progress_experiment is not None:
-            args.scenario = args.progress_experiment['scenario']
+            if requested_scenario is None:
+                args.scenario = args.progress_experiment['scenario']
             args.total_timesteps = args.progress_experiment['total_timesteps']
             args.checkpoint_freq = args.progress_experiment['checkpoint_freq']
         args.save_replay_buffer = True
@@ -386,30 +372,10 @@ def parse_args():
             args.run_name = f'e76-d3-{args.exit_phase}-{time.strftime("%Y%m%d-%H%M%S")}'
         if args.episode_log is None:
             args.episode_log = f'tmp/ai/e76-d3/{args.exit_phase}/{args.run_name}.jsonl'
-    elif args.task == exit_config.TASK_ID:
-        parser.error('Use --exit_phase for the E76-to-D3 task')
-    else:
-        args.project = args.project or 'merging-SAC_experiments'
-        args.gamma = 0.99
-        args.nav_features = False
-        args.exit_reward_profile = None
-    e09 = bool(args.exit_phase and args.exit_phase.startswith('e09_pending_'))
-    if e09 and (not args.load_path or args.replay_buffer_path):
-        parser.error('E09 requires the frozen parent model and an empty new replay buffer')
-    if args.exit_phase and not e09 and bool(args.load_path) != bool(args.replay_buffer_path):
-        parser.error('E76-to-D3 continuation requires both model and replay-buffer paths')
-    if args.exit_phase in ('nav_200k', 'control_134_200k',
-                           'urgency_134_200k', 'urgency_134_300k',
-                           'urgency_134_curriculum_500k',
-                           'secrm_efficiency_directional_l1_speed120_500k',
-                           'secrm_efficiency_directional_l1_speed120_no_pending_500k') and args.load_path:
-        parser.error('This E76-to-D3 phase must start from random initialization')
-    if args.exit_phase in exit_config.SPEED120_CONTINUATIONS and not args.load_path:
-        parser.error('A speed120 continuation phase requires its frozen parent model and replay buffer')
-    if args.exit_phase == 'nav_300k' and not args.load_path:
-        parser.error('NAV136 300k continuation requires the 200k model and replay buffer')
-    if args.exit_phase in exit_config.CURRICULUM_BRANCH_PHASES and not args.load_path:
-        parser.error('Curriculum branch requires the frozen seed43 100k model and replay')
+    args.project = args.project or exit_config.WANDB_PROJECT
+    args.entity = args.entity or exit_config.WANDB_ENTITY
+    args.nav_features = False
+    args.exit_reward_profile = args.exit_reward_profile or exit_config.REWARD_PROFILE
     if args.ablation != 'full' and args.encoder_mode != 'GRU':
         parser.error('Table IV ablations require --encoder_mode GRU')
     if args.encoder_mode != 'GRU' and args.gru_input_mode != 'paper_raw':
@@ -423,31 +389,6 @@ def ensure_dirs(path: str):
 
 def main():
     args = parse_args()
-    curriculum_branch = args.exit_phase in exit_config.CURRICULUM_BRANCH_PHASES
-    e09 = bool(args.exit_phase and args.exit_phase.startswith('e09_pending_'))
-    speed120_continuation = exit_config.SPEED120_CONTINUATIONS.get(args.exit_phase)
-    parent_hashes = None
-    if e09:
-        from src.curriculum_branch import sha256_file
-        parent_hashes = {'parent_model_sha256': sha256_file(args.load_path)}
-        if parent_hashes['parent_model_sha256'] != exit_config.CURRICULUM_BRANCH_MODEL_SHA256:
-            raise ValueError('E09 requires the frozen seed43 100k parent model')
-    if curriculum_branch:
-        from src.curriculum_branch import validate_parent_files
-        parent_hashes = validate_parent_files(args.load_path, args.replay_buffer_path)
-    if speed120_continuation:
-        from src.curriculum_branch import sha256_file
-        parent_hashes = {
-            'parent_model_sha256': sha256_file(args.load_path),
-            'parent_replay_sha256': sha256_file(args.replay_buffer_path),
-        }
-        expected = {
-            'parent_model_sha256': speed120_continuation['parent_model_sha256'],
-            'parent_replay_sha256': speed120_continuation['parent_replay_sha256'],
-        }
-        if parent_hashes != expected:
-            raise ValueError('Speed120 continuation requires the exact frozen parent model and replay')
-
     if args.run_name is None:
         args.run_name = f"SAC-merging-delay-wrapper-{time.strftime('%Y%m%d-%H%M%S')}"
 
@@ -522,14 +463,11 @@ def main():
         wandb_entity=args.entity,
         use_safety=args.use_safety,
         training_safety=args.use_safety,
-        road_speed_limit_mps=(exit_config.PHASES[args.exit_phase].get('road_speed_limit_mps')
-                              if args.exit_phase else None),
         antwerp_env_version=ANTWERP_ENV_VERSION,
         device=args.device,
         torch_threads=args.torch_threads,
         checkpoint_freq=args.checkpoint_freq,
         save_replay_buffer=args.save_replay_buffer,
-        replay_buffer_path=args.replay_buffer_path,
         urgency_reward=(dict(weight=exit_config.URGENCY_WEIGHT,
                              threshold=exit_config.URGENCY_THRESHOLD,
                              clip=exit_config.URGENCY_CLIP)
@@ -537,25 +475,7 @@ def main():
                         else None),
         curriculum_stages=(exit_config.PHASES[args.exit_phase].get('curriculum_stages')
                            if args.exit_phase else None),
-        e09_pending_mode=(exit_config.PHASES[args.exit_phase].get('e09_pending_mode')
-                          if args.exit_phase else None),
     )
-    if e09:
-        config.update(parent_hashes, resume_start_step=100_000,
-                      continuation_budget=150_000, empty_replay=True,
-                      relative_warmup_steps=100,
-                      reset_protocol='fresh_episode_common_seed43_rng_v1')
-    if curriculum_branch:
-        config.update(parent_hashes, resume_start_step=100_000,
-                      continuation_budget=50_000,
-                      checkpoint_steps=exit_config.CURRICULUM_BRANCH_CHECKPOINTS,
-                      reset_protocol='fresh_episode_common_seed43_rng_v1')
-    if speed120_continuation:
-        start_step = speed120_continuation['start_step']
-        config.update(parent_hashes, resume_start_step=start_step,
-                      continuation_budget=args.total_timesteps - start_step,
-                      checkpoint_steps=speed120_continuation['checkpoint_steps'],
-                      reset_protocol='fresh_episode_seed42_rng_v1')
     config_bytes = json.dumps(config, sort_keys=True, separators=(',', ':')).encode('utf-8')
     config_sha256 = hashlib.sha256(config_bytes).hexdigest()
     if args.episode_log:
@@ -575,8 +495,7 @@ def main():
                         (os.path.join('tmp', 'ai', 'e76-d3', args.exit_phase,
                                       args.run_name, 'routes')
                          if config['curriculum_stages'] is not None else None),
-                        config['e09_pending_mode'], args.progress_experiment,
-                        config['road_speed_limit_mps'])
+                        args.progress_experiment)
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -620,89 +539,6 @@ def main():
     
     
 
-    # Optionally load existing weights
-    if args.load_path:
-        if not os.path.exists(args.load_path):
-            raise FileNotFoundError(f'Checkpoint does not exist: {args.load_path}')
-        try:
-            loaded_model = SAC.load(args.load_path, env=vec_env, device=args.device,
-                                    force_reset=True)
-        except Exception as e:
-            raise RuntimeError(f'Failed to load checkpoint at {args.load_path}') from e
-        else:
-            if getattr(loaded_model, 'antwerp_env_version', None) != ANTWERP_ENV_VERSION:
-                raise ValueError('Loaded model uses an older Antwerp observation/reward contract; retrain it')
-            if (hasattr(loaded_model, 'ablation') and
-                    loaded_model.ablation != args.ablation):
-                raise ValueError('Loaded model ablation does not match --ablation')
-            if (hasattr(loaded_model, 'training_safety') and
-                    loaded_model.training_safety != args.use_safety):
-                raise ValueError('Loaded model safety does not match --safety')
-            loaded_task = getattr(loaded_model, 'antwerp_task', 'legacy_o3_d1')
-            if loaded_task != args.task:
-                raise ValueError(f'Loaded model task is {loaded_task!r}; requested {args.task!r}')
-            if args.encoder_mode == 'GRU':
-                if loaded_model.policy_kwargs.get('features_extractor_class') is not DelayAwareGRUEncoder:
-                    raise ValueError('Loaded model does not use the DAROM-GRU encoder')
-                loaded_mode = loaded_model.policy_kwargs.get('features_extractor_kwargs', {}).get(
-                    'input_mode', 'antwerp_scaled_reversed')
-                if loaded_mode != args.gru_input_mode:
-                    raise ValueError(f'Loaded model GRU input mode is {loaded_mode!r}; '
-                                     f'requested {args.gru_input_mode!r}')
-            if args.exit_phase:
-                expected_profile = (exit_config.NAV_OBSERVATION_PROFILE
-                                    if args.nav_features else None)
-                if getattr(loaded_model, 'exit_observation_profile', None) != expected_profile:
-                    raise ValueError('Loaded model E76-to-D3 observation profile does not match')
-                if loaded_model.observation_space.shape != vec_env.observation_space.shape:
-                    raise ValueError('Loaded model observation shape does not match')
-                if (getattr(loaded_model, 'exit_potential_beta', None)
-                        != exit_config.potential_beta_for_profile(args.exit_reward_profile)):
-                    raise ValueError('Loaded model has a different E76-to-D3 potential profile')
-                if (getattr(loaded_model, 'exit_reward_profile', None)
-                        != args.exit_reward_profile):
-                    raise ValueError('Loaded model has a different E76-to-D3 reward profile')
-                if args.exit_reward_profile in exit_config.secrm_reward.PROFILES:
-                    if getattr(loaded_model, 'secrm_formula_version', None) != exit_config.secrm_reward.FORMULA_VERSION:
-                        raise ValueError('Loaded model has different SECRM formula version')
-                if args.progress_experiment is not None:
-                    saved_experiment = getattr(loaded_model, 'exit_progress_experiment', None)
-                    if saved_experiment is None:
-                        raise ValueError('Loaded model has no progress reward configuration')
-                    for field in ('seed', 'scenario', 'timeout_seconds', 'reward'):
-                        if saved_experiment[field] != args.progress_experiment[field]:
-                            raise ValueError(f'Loaded progress experiment differs in {field}')
-                    if (getattr(loaded_model, 'exit_progress_reward_identity', None)
-                            != exit_progress_reward.reward_identity(args.progress_experiment['reward'])):
-                        raise ValueError('Loaded model has a different progress reward identity')
-                if (getattr(loaded_model, 'exit_control_profile', None)
-                        != exit_config.CONTROL_PROFILE):
-                    raise ValueError('Loaded model has a different E76-to-D3 control profile')
-                loaded_gamma = getattr(loaded_model, 'exit_potential_gamma',
-                                       getattr(loaded_model, 'gamma', None))
-                if (not np.isclose(float(loaded_gamma), args.gamma, rtol=0.0, atol=1e-12)
-                        or not np.isclose(float(loaded_model.gamma), args.gamma,
-                                          rtol=0.0, atol=1e-12)):
-                    raise ValueError('Loaded model has a different E76-to-D3 discount factor')
-                if args.exit_phase == 'nav_300k' and loaded_model.num_timesteps != 200_000:
-                    raise ValueError('NAV136 300k continuation requires a 200k checkpoint')
-                if not e09:
-                    loaded_model.load_replay_buffer(args.replay_buffer_path)
-                    if args.exit_reward_profile in exit_config.secrm_reward.PROFILES:
-                        exit_config.secrm_reward.validate_replay(
-                            loaded_model.replay_buffer, saved_experiment)
-                else:
-                    from src.curriculum_branch import prepare_empty_replay_branch
-                    prepare_empty_replay_branch(loaded_model, vec_env)
-                if curriculum_branch:
-                    from src.curriculum_branch import prepare_branch
-                    prepare_branch(loaded_model, vec_env)
-                if loaded_model.num_timesteps >= args.total_timesteps:
-                    raise ValueError('Checkpoint already reached the configured total step budget')
-                loaded_model.tensorboard_log = os.path.join(args.log_dir, args.run_name)
-            model = loaded_model
-            print(f"Loaded model from {args.load_path}")
-
     model.ablation = args.ablation
     model.antwerp_env_version = ANTWERP_ENV_VERSION
     model.antwerp_task = args.task
@@ -728,9 +564,6 @@ def main():
             model.exit_progress_experiment_identity = exit_progress_reward.experiment_identity(
                 args.progress_experiment)
         model.exit_control_profile = exit_config.CONTROL_PROFILE
-        model.road_speed_limit_mps = config['road_speed_limit_mps']
-        if config['e09_pending_mode'] is not None:
-            model.e09_pending_mode = config['e09_pending_mode']
 
     run = wandb.init(project=args.project, entity=args.entity, name=args.run_name, config=config,
                      mode=args.wandb_mode, dir=args.log_dir,
@@ -758,41 +591,13 @@ def main():
         name_prefix=args.run_name, verbose=2,
         save_replay_buffer=args.save_replay_buffer,
     )
-    if (args.exit_phase in ('secrm_efficiency_directional',
-                            'secrm_efficiency_directional_l1',
-                            'secrm_efficiency_directional_l2',
-                            'secrm_efficiency_directional_l1_speed120_500k',
-                            'secrm_efficiency_directional_l1_speed120_no_pending_500k')
-            or speed120_continuation):
+    if args.exit_phase in ('secrm_efficiency_directional',
+                           'secrm_efficiency_directional_l1',
+                           'secrm_efficiency_directional_l2'):
         checkpoint_callback = IntermediateCheckpointCallback(
             final_step=args.total_timesteps, save_freq=args.checkpoint_freq,
             save_path=checkpoint_dir, name_prefix=args.run_name, verbose=2,
             save_replay_buffer=args.save_replay_buffer)
-    if curriculum_branch:
-        from src.curriculum_branch import AbsoluteCheckpointCallback, restored_learner_summary
-        episode_callback.starting_timesteps = 100_000
-        checkpoint_callback = AbsoluteCheckpointCallback(checkpoint_dir, args.run_name)
-        episode_callback._write({'event': 'branch_resume', 'steps': 100_000,
-                                 'env_steps': 100_000, **parent_hashes,
-                                 'reset_protocol': config['reset_protocol'],
-                                 **restored_learner_summary(model)})
-    if e09:
-        from src.curriculum_branch import restored_learner_summary
-        episode_callback.starting_timesteps = 100_000
-        episode_callback._write({'event': 'e09_resume', 'steps': 100_000,
-                                 'env_steps': 100_000, **parent_hashes,
-                                 'relative_warmup_steps': 100,
-                                 'absolute_learning_starts': model.learning_starts,
-                                 **restored_learner_summary(model)})
-    if speed120_continuation:
-        from src.curriculum_branch import restored_learner_summary
-        start_step = speed120_continuation['start_step']
-        episode_callback.starting_timesteps = start_step
-        episode_callback._write({
-            'event': 'speed120_resume', 'steps': start_step, 'env_steps': start_step,
-            **parent_hashes, 'reset_protocol': config['reset_protocol'],
-            **restored_learner_summary(model),
-        })
     wandb_callback = WandbCallback(
         gradient_save_freq=0 if args.exit_phase else 1000,
         verbose=2,
@@ -803,15 +608,8 @@ def main():
 
     # Train and save before closing the single active TraCI connection.
     try:
-        if curriculum_branch or e09 or speed120_continuation:
-            # Reset Python/NumPy/Torch RNGs identically AFTER logger setup.
-            # Optimizers, entropy, target critics and replay remain loaded.
-            model.set_random_seed(args.seed)
-        continuing_exit = bool(args.exit_phase and args.load_path)
-        remaining_steps = (args.total_timesteps - model.num_timesteps
-                           if continuing_exit else args.total_timesteps)
-        model.learn(total_timesteps=remaining_steps, callback=callbacks,
-                    reset_num_timesteps=not continuing_exit)
+        model.learn(total_timesteps=args.total_timesteps, callback=callbacks,
+                    reset_num_timesteps=True)
         save_model(model, model_path)
         if args.save_replay_buffer:
             replay_path = os.path.join(args.save_dir, f'{args.run_name}_replay_buffer.pkl')

@@ -3,14 +3,12 @@
 !/.gitignore
 !/README.md
 !/requirements.txt
-!/config.yaml
 !/train_sac_delay.py
 !/evaluate_sac_delay.py
 
 # Project directories allowed in version control.
 !/src/
 !/assets/
-!/sumo_files/
 !/sumo_new/
 !/models/
 !/tests/
@@ -18,11 +16,6 @@
 
 # Only the two distributed pretrained models are allowed under models/.
 /models/*
-!/models/GRU-uniform-delay/
-/models/GRU-uniform-delay/*
-!/models/GRU-uniform-delay/GRU-uniform-delay.zip
-!/models/GRU-uniform-delay/GRU-uniform-delay_best.zip
-
 # AI workspace files and temporary output, including inside allowed directories.
 .codex/
 .claude/

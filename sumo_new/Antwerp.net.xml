@@ -65,22 +65,22 @@
         <lane id=":J104_0_5" index="5" speed="13.89" length="8.13" shape="1868.90,1.60 1860.90,1.60"/>
     </edge>
     <edge id=":J105_0" function="internal">
-        <lane id=":J105_0_0" index="0" speed="13.89" length="8.13" shape="978.30,14.40 975.84,14.90 974.30,16.00 972.76,17.10 970.30,17.60"/>
-        <lane id=":J105_0_1" index="1" speed="13.89" length="8.13" shape="978.30,14.40 970.30,14.40"/>
-        <lane id=":J105_0_2" index="2" speed="13.89" length="8.13" shape="978.30,11.20 970.30,11.20"/>
-        <lane id=":J105_0_3" index="3" speed="13.89" length="8.13" shape="978.30,8.00 970.30,8.00"/>
-        <lane id=":J105_0_4" index="4" speed="13.89" length="8.13" shape="978.30,4.80 970.30,4.80"/>
-        <lane id=":J105_0_5" index="5" speed="13.89" length="8.13" shape="978.30,1.60 970.30,1.60"/>
+        <lane id=":J105_0_0" index="0" speed="33.3333333333" length="8.13" shape="978.30,14.40 975.84,14.90 974.30,16.00 972.76,17.10 970.30,17.60"/>
+        <lane id=":J105_0_1" index="1" speed="33.3333333333" length="8.13" shape="978.30,14.40 970.30,14.40"/>
+        <lane id=":J105_0_2" index="2" speed="33.3333333333" length="8.13" shape="978.30,11.20 970.30,11.20"/>
+        <lane id=":J105_0_3" index="3" speed="33.3333333333" length="8.13" shape="978.30,8.00 970.30,8.00"/>
+        <lane id=":J105_0_4" index="4" speed="33.3333333333" length="8.13" shape="978.30,4.80 970.30,4.80"/>
+        <lane id=":J105_0_5" index="5" speed="33.3333333333" length="8.13" shape="978.30,1.60 970.30,1.60"/>
     </edge>
     <edge id=":J106_0" function="internal">
-        <lane id=":J106_0_0" index="0" speed="13.89" length="3.53" shape="797.95,17.60 796.90,17.61 796.19,17.68 795.49,17.85 794.50,18.19"/>
+        <lane id=":J106_0_0" index="0" speed="33.3333333333" length="3.53" shape="797.95,17.60 796.90,17.61 796.19,17.68 795.49,17.85 794.50,18.19"/>
     </edge>
     <edge id=":J106_1" function="internal">
-        <lane id=":J106_1_0" index="0" speed="13.89" length="3.55" shape="797.95,14.40 794.40,14.40"/>
-        <lane id=":J106_1_1" index="1" speed="13.89" length="3.55" shape="797.95,11.20 794.40,11.20"/>
-        <lane id=":J106_1_2" index="2" speed="13.89" length="3.55" shape="797.95,8.00 794.40,8.00"/>
-        <lane id=":J106_1_3" index="3" speed="13.89" length="3.55" shape="797.95,4.80 794.40,4.80"/>
-        <lane id=":J106_1_4" index="4" speed="13.89" length="3.55" shape="797.95,1.60 794.40,1.60"/>
+        <lane id=":J106_1_0" index="0" speed="33.3333333333" length="3.55" shape="797.95,14.40 794.40,14.40"/>
+        <lane id=":J106_1_1" index="1" speed="33.3333333333" length="3.55" shape="797.95,11.20 794.40,11.20"/>
+        <lane id=":J106_1_2" index="2" speed="33.3333333333" length="3.55" shape="797.95,8.00 794.40,8.00"/>
+        <lane id=":J106_1_3" index="3" speed="33.3333333333" length="3.55" shape="797.95,4.80 794.40,4.80"/>
+        <lane id=":J106_1_4" index="4" speed="33.3333333333" length="3.55" shape="797.95,1.60 794.40,1.60"/>
     </edge>
     <edge id=":J107_0" function="internal">
         <lane id=":J107_0_0" index="0" speed="13.89" length="125.36" shape="449.20,14.40 323.85,17.60"/>
@@ -112,7 +112,7 @@
         <lane id="D2_2" index="2" speed="13.89" length="283.20" shape="197.91,11.66 -79.68,67.73"/>
     </edge>
     <edge id="D3" from="J106" to="J110" priority="-1">
-        <lane id="D3_0" index="0" speed="13.89" length="205.79" shape="794.50,18.19 600.53,86.96"/>
+        <lane id="D3_0" index="0" speed="33.3333333333" length="205.79" shape="794.50,18.19 600.53,86.96"/>
     </edge>
     <edge id="E74" from="J102" to="J103" priority="-1">
         <lane id="E74_0" index="0" speed="13.89" length="557.89" shape="2777.19,14.40 2219.30,14.40"/>
@@ -130,19 +130,19 @@
         <lane id="E75_5" index="5" speed="13.89" length="346.76" shape="2215.66,1.60 1868.90,1.60"/>
     </edge>
     <edge id="E76" from="J104" to="J105" priority="-1">
-        <lane id="E76_0" index="0" speed="13.89" length="882.60" shape="1860.90,14.40 978.30,14.40"/>
-        <lane id="E76_1" index="1" speed="13.89" length="882.60" shape="1860.90,11.20 978.30,11.20"/>
-        <lane id="E76_2" index="2" speed="13.89" length="882.60" shape="1860.90,8.00 978.30,8.00"/>
-        <lane id="E76_3" index="3" speed="13.89" length="882.60" shape="1860.90,4.80 978.30,4.80"/>
-        <lane id="E76_4" index="4" speed="13.89" length="882.60" shape="1860.90,1.60 978.30,1.60"/>
+        <lane id="E76_0" index="0" speed="33.3333333333" length="882.60" shape="1860.90,14.40 978.30,14.40"/>
+        <lane id="E76_1" index="1" speed="33.3333333333" length="882.60" shape="1860.90,11.20 978.30,11.20"/>
+        <lane id="E76_2" index="2" speed="33.3333333333" length="882.60" shape="1860.90,8.00 978.30,8.00"/>
+        <lane id="E76_3" index="3" speed="33.3333333333" length="882.60" shape="1860.90,4.80 978.30,4.80"/>
+        <lane id="E76_4" index="4" speed="33.3333333333" length="882.60" shape="1860.90,1.60 978.30,1.60"/>
     </edge>
     <edge id="E77" from="J105" to="J106" priority="-1">
-        <lane id="E77_0" index="0" speed="13.89" length="172.35" shape="970.30,17.60 797.95,17.60"/>
-        <lane id="E77_1" index="1" speed="13.89" length="172.35" shape="970.30,14.40 797.95,14.40"/>
-        <lane id="E77_2" index="2" speed="13.89" length="172.35" shape="970.30,11.20 797.95,11.20"/>
-        <lane id="E77_3" index="3" speed="13.89" length="172.35" shape="970.30,8.00 797.95,8.00"/>
-        <lane id="E77_4" index="4" speed="13.89" length="172.35" shape="970.30,4.80 797.95,4.80"/>
-        <lane id="E77_5" index="5" speed="13.89" length="172.35" shape="970.30,1.60 797.95,1.60"/>
+        <lane id="E77_0" index="0" speed="33.3333333333" length="172.35" shape="970.30,17.60 797.95,17.60"/>
+        <lane id="E77_1" index="1" speed="33.3333333333" length="172.35" shape="970.30,14.40 797.95,14.40"/>
+        <lane id="E77_2" index="2" speed="33.3333333333" length="172.35" shape="970.30,11.20 797.95,11.20"/>
+        <lane id="E77_3" index="3" speed="33.3333333333" length="172.35" shape="970.30,8.00 797.95,8.00"/>
+        <lane id="E77_4" index="4" speed="33.3333333333" length="172.35" shape="970.30,4.80 797.95,4.80"/>
+        <lane id="E77_5" index="5" speed="33.3333333333" length="172.35" shape="970.30,1.60 797.95,1.60"/>
     </edge>
     <edge id="E78" from="J106" to="J107" priority="-1">
         <lane id="E78_0" index="0" speed="13.89" length="345.20" shape="794.40,14.40 449.20,14.40"/>

@@ -67,7 +67,7 @@ class ProgressRewardTests(unittest.TestCase):
                       progress_experiment=self.config)
         old = Merging(seed=42, task=exit_config.TASK_ID)
         self.assertEqual(new.episode_limit_steps, 4000)
-        self.assertEqual(old.episode_limit_steps, 6000)
+        self.assertEqual(old.episode_limit_steps, 4000)
         invalid = copy.deepcopy(self.config)
         invalid['timeout_seconds'] = 400.05
         with self.assertRaises(ValueError):
@@ -174,7 +174,7 @@ class ProgressRewardTests(unittest.TestCase):
 
     def test_checkpoint_reward_identity_rejects_change(self):
         model = SimpleNamespace(
-            antwerp_env_version=3, antwerp_task=exit_config.TASK_ID,
+            antwerp_env_version=4, antwerp_task=exit_config.TASK_ID,
             exit_reward_profile=exit_config.PROGRESS_REWARD_PROFILE,
             exit_potential_beta=0.0,
             exit_control_profile=exit_config.CONTROL_PROFILE,
@@ -240,14 +240,13 @@ class ProgressRewardTests(unittest.TestCase):
                           args.checkpoint_freq, args.exit_reward_profile),
                          (42, 'easy', 1_000_000, 200_000, exit_config.DIRECTIONAL_REWARD_PROFILE))
         self.assertTrue(args.save_replay_buffer)
-        self.assertIsNone(args.load_path)
         self.assertNotEqual(progress.reward_identity(self.reward),
                             progress.reward_identity(directional['reward']))
         with self.assertRaises(ValueError):
             progress.validate_experiment(
                 {**directional, 'reward': {**directional['reward'], 'alpha': -1}})
         model = SimpleNamespace(
-            antwerp_env_version=3, antwerp_task=exit_config.TASK_ID,
+            antwerp_env_version=4, antwerp_task=exit_config.TASK_ID,
             exit_reward_profile=exit_config.DIRECTIONAL_REWARD_PROFILE,
             exit_potential_beta=0.0, exit_control_profile=exit_config.CONTROL_PROFILE,
             exit_observation_profile=None, exit_potential_gamma=0.99, gamma=0.99,
