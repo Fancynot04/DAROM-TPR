@@ -224,15 +224,15 @@ class EpisodeRewardCallback(BaseCallback):
                     metrics['reward/total/weighted_sum'] = stats['weighted_total']
                     continue
                 metric_names = {
-                    'raw_sum': 'raw_sum', 'weighted_sum': 'weighted_sum',
-                    'discounted_sum': 'discounted_sum', 'active_ratio': 'active_ratio',
-                    'abs_p95': 'abs_p95', 'abs_p99': 'abs_p99',
-                    'nonzero_abs_p95': 'nonzero_abs_p95',
-                    'nonzero_abs_p99': 'nonzero_abs_p99', 'max_abs': 'max_abs',
-                    'clipped_ratio': 'clipped_ratio',
+                    'raw_sum': 'raw', 'weighted_sum': 'wsum',
+                    'discounted_sum': 'disc', 'active_ratio': 'active',
+                    'abs_p95': 'p95', 'abs_p99': 'p99',
+                    'nonzero_abs_p95': 'nz_p95',
+                    'nonzero_abs_p99': 'nz_p99', 'max_abs': 'max',
+                    'clipped_ratio': 'clip',
                     # Keep SB3's 36-character key truncation from merging p95/p99.
-                    'effective_weight_p95': 'eff_w_p95',
-                    'effective_weight_p99': 'eff_w_p99',
+                    'effective_weight_p95': 'eff_p95',
+                    'effective_weight_p99': 'eff_p99',
                     'configured_weight': 'cfg_w',
                 }
                 for name, metric_name in metric_names.items():
