@@ -6,5 +6,11 @@ terms:
   missed_exit: {enabled: true, weight: 1.0, value: -100.0}
   teleport: {enabled: true, weight: 1.0, value: -100.0}
   timeout: {enabled: true, weight: 1.0, value: -100.0}
-  efficiency: {enabled: true, weight: 0.005, clip_min: -1.0, clip_max: 0.0, epsilon: 2.0}
+  efficiency:
+    enabled: true
+    weight: 0.005
+    clip_min: -1.0
+    clip_max: 0.0
+    epsilon: 2.0
+    decay: {type: remaining_distance_linear, min_factor: 0.0, max_factor: 1.0}
   route: {enabled: false, weight: 0.005, clip_min: -1.0, clip_max: 0.0, distance_scale_m: 200.0}

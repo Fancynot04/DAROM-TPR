@@ -17,6 +17,7 @@ class RewardTerm:
     active: bool = True
     clipped: bool = False
     clipped_value: float | None = None
+    base_weight: float | None = None
 
     def __post_init__(self):
         for value in (self.raw, self.weight):
@@ -24,6 +25,12 @@ class RewardTerm:
                 raise ValueError(f'Non-finite reward term value: {self.name}')
         if self.clipped_value is not None and not math.isfinite(float(self.clipped_value)):
             raise ValueError(f'Non-finite clipped reward term value: {self.name}')
+        if self.base_weight is not None and not math.isfinite(float(self.base_weight)):
+            raise ValueError(f'Non-finite base reward term weight: {self.name}')
+
+    @property
+    def configured_weight(self) -> float:
+        return float(self.weight if self.base_weight is None else self.base_weight)
 
     @property
     def weighted(self) -> float:
@@ -87,6 +94,12 @@ class RewardTracker:
                 'raw_sum': float(raw.sum()),
                 'weighted_sum': float(weighted.sum()),
                 'discounted_sum': float((discounts * weighted).sum()),
+                'effective_weight_p95': self._percentile(
+                    np.asarray([row[name].weight if name in row else 0.0 for row in rows]), 95),
+                'effective_weight_p99': self._percentile(
+                    np.asarray([row[name].weight if name in row else 0.0 for row in rows]), 99),
+                'configured_weight': float(next((row[name].configured_weight for row in rows
+                                                 if name in row), 0.0)),
                 'active_ratio': float(np.count_nonzero(raw) / count) if count else 0.0,
                 'abs_p95': self._percentile(abs_values, 95),
                 'abs_p99': self._percentile(abs_values, 99),

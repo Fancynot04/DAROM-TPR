@@ -6,6 +6,7 @@ from src.rewards.config import load_hydra_config, load_reward_file, validate_rew
 from src.rewards.registry import RewardContext, settle_terms
 from src.rewards.secrm_efficiency import efficiency
 from src.rewards.secrm_route import executable_distance, route_penalty
+from src.rewards.efficiency_decay import remaining_distance_factor
 from src.rewards.terms import RewardTracker
 from src.route_urgency import load_route_network
 
@@ -26,6 +27,12 @@ class DenseRewardProfileTests(unittest.TestCase):
             self.assertEqual(config['name'], 'e76_d3_dense_v1')
             self.assertEqual((config['terms']['efficiency']['enabled'],
                               config['terms']['route']['enabled']), expected)
+        b1 = load_reward_file('conf/reward/e76_d3_b1_efficiency.yaml')[0]
+        b3 = load_reward_file('conf/reward/e76_d3_b3_combined.yaml')[0]
+        for config in (b1, b3):
+            self.assertEqual(config['terms']['efficiency']['decay'], {
+                'type': 'remaining_distance_linear', 'min_factor': 0.0,
+                'max_factor': 1.0})
 
     def test_invalid_dense_configuration_is_rejected(self):
         _, config, _, _ = load_hydra_config(overrides=['reward=e76_d3_b1_efficiency'])
@@ -37,6 +44,35 @@ class DenseRewardProfileTests(unittest.TestCase):
         b0 = load_reward_file('conf/reward/e76_d3.yaml')[0]
         self.assertEqual(sum(term.weighted for term in settle_terms('events_only_v1', RewardContext(None, b0))), 0.0)
         self.assertEqual(sum(term.weighted for term in settle_terms('events_only_v1', RewardContext('Arrived', b0))), 50.0)
+
+    def test_b0_and_b2_contracts_are_unchanged(self):
+        b0 = load_reward_file('conf/reward/e76_d3.yaml')[0]
+        b2 = load_reward_file('conf/reward/e76_d3_b2_route.yaml')[0]
+        self.assertEqual(b0, load_hydra_config()[1])
+        self.assertNotIn('decay', b2['terms']['efficiency'])
+        terms = {term.name: term for term in settle_terms(
+            'e76_d3_dense_v1', RewardContext(None, b2, efficiency_raw=-1.0, route_raw=-0.5))}
+        self.assertEqual(terms['efficiency'].weighted, 0.0)
+        self.assertEqual(terms['route'].weighted, -0.0025)
+
+    def test_efficiency_decay_boundaries_and_midpoint(self):
+        self.assertEqual(remaining_distance_factor(100.0, 100.0), 1.0)
+        self.assertEqual(remaining_distance_factor(50.0, 100.0), 0.5)
+        self.assertEqual(remaining_distance_factor(0.0, 100.0), 0.0)
+        self.assertEqual(remaining_distance_factor(150.0, 100.0), 1.0)
+        with self.assertRaises(ValueError):
+            remaining_distance_factor(float('nan'), 100.0)
+
+    def test_effective_efficiency_weight_is_paid_and_logged_separately(self):
+        config = load_reward_file('conf/reward/e76_d3_b1_efficiency.yaml')[0]
+        terms = {term.name: term for term in settle_terms(
+            'e76_d3_dense_v1', RewardContext(None, config, efficiency_raw=-1.0,
+                                              route_raw=None, efficiency_weight=0.0025,
+                                              efficiency_decay_factor=0.5))}
+        term = terms['efficiency']
+        self.assertEqual(term.configured_weight, 0.005)
+        self.assertEqual(term.weight, 0.0025)
+        self.assertEqual(term.weighted, -0.0025)
 
     def test_efficiency_formula_edge_cases(self):
         raw, info = efficiency(20, 33.333333, 0.1, epsilon=2.0)

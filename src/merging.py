@@ -13,6 +13,7 @@ from . import exit_e76_d3_config as exit_config
 from . import exit_progress_reward, secrm_reward, road_boundary
 from .rewards.registry import RewardContext, settle_terms
 from .rewards.terms import RewardTracker
+from .rewards.efficiency_decay import remaining_distance_factor
 from .rewards.directional_lane import adaptive_lane_reward
 from .route_urgency import load_route_network, observe_route_urgency, route_urgency
 
@@ -179,6 +180,7 @@ class Merging(gym.Env):
         self.progress_before_odometer = None
         self.progress_after_remaining = None
         self.progress_after_odometer = None
+        self.efficiency_initial_remaining = None
         self.terminal_reason = ''
         self.final_event_settled = False
         self.emergency_stopping_steps = 0
@@ -282,6 +284,7 @@ class Merging(gym.Env):
         self.progress_before_odometer = None
         self.progress_after_remaining = None
         self.progress_after_odometer = None
+        self.efficiency_initial_remaining = None
         self.terminal_reason = ''
         self.secrm_before = None
         self.boundary_diagnostic = None
@@ -308,6 +311,21 @@ class Merging(gym.Env):
             distance = float(self.traci.vehicle.getDrivingDistance(
                 self.ego_id, 'D3', destination_position))
         return distance if math.isfinite(distance) and distance >= 0 else None
+
+    def _validated_remaining_to_d3_end(self):
+        """Return the route-distance remaining at the current reward state.
+
+        TraCI's driving-distance query follows the vehicle's actual route,
+        including junction connectors.  D3 is handled directly because SUMO
+        can return its invalid negative sentinel when the destination edge is
+        already current.
+        """
+        remaining = self._remaining_to_d3_end()
+        if remaining is None or not math.isfinite(remaining) or remaining < 0:
+            road = (self.traci.vehicle.getRoadID(self.ego_id)
+                    if self.ego_on_road else None)
+            raise ValueError(f'Invalid E76-D3 remaining route distance: {remaining!r}; road={road!r}')
+        return float(remaining)
 
     def _remaining_to_d3_start(self):
         """Route distance to D3 entrance; None means unavailable or already past it."""
@@ -385,6 +403,25 @@ class Merging(gym.Env):
             float(v.getSpeed(e)), min(allowed_speed, exit_config.ROAD_SPEED_LIMIT_MPS), SUMO_STEP_LENGTH,
             epsilon=float(self.reward_config['terms']['efficiency']['epsilon']), **params)
         diagnostic.update(ego_braking=ego_braking, leader_selection=leader_info)
+        efficiency_weight = None
+        efficiency_decay_factor = None
+        efficiency_term = self.reward_config['terms']['efficiency']
+        if efficiency_term['enabled']:
+            remaining = self._validated_remaining_to_d3_end()
+            if self.efficiency_initial_remaining is None:
+                raise ValueError('Missing initial E76-D3 route distance for efficiency decay')
+            decay = efficiency_term['decay']
+            efficiency_decay_factor = remaining_distance_factor(
+                remaining, self.efficiency_initial_remaining,
+                float(decay['min_factor']), float(decay['max_factor']))
+            efficiency_weight = float(efficiency_term['weight']) * efficiency_decay_factor
+            diagnostic.update({
+                'remaining_route_distance_m': remaining,
+                'initial_route_distance_m': self.efficiency_initial_remaining,
+                'efficiency_decay_factor': efficiency_decay_factor,
+                'efficiency_base_weight': float(efficiency_term['weight']),
+                'efficiency_effective_weight': efficiency_weight,
+            })
         road = v.getRoadID(e)
         route_value = None
         route_info = {'status': 'connector_excluded', 'required_changes': None,
@@ -415,6 +452,10 @@ class Merging(gym.Env):
                           'status': 'settled' if stable else 'pending_current_lane',
                           'remaining_section_m': remaining}
         return {'efficiency': eff, 'route_reward': route_value, 'target': diagnostic,
+                'efficiency_decay_factor': efficiency_decay_factor,
+                'efficiency_effective_weight': efficiency_weight,
+                'remaining_route_distance_m': diagnostic.get('remaining_route_distance_m'),
+                'initial_route_distance_m': diagnostic.get('initial_route_distance_m'),
                 'route': route_info, 'road': road}
 
     def _reward_urgency(self):
@@ -695,6 +736,12 @@ class Merging(gym.Env):
                         if self.exit_reward_profile in ('events_only_v1', 'e76_d3_dense_v1'):
                             self.potential_previous = 0.0
                             self.initial_potential = 0.0
+                            if (self.exit_reward_profile == 'e76_d3_dense_v1'
+                                    and self.reward_config['terms']['efficiency']['enabled']):
+                                self.efficiency_initial_remaining = (
+                                    self._validated_remaining_to_d3_end())
+                                if self.efficiency_initial_remaining <= 0:
+                                    raise ValueError('Invalid initial E76-D3 route distance for efficiency decay')
                         elif self.exit_reward_profile == exit_config.URGENCY_REWARD_PROFILE:
                             self._reward_urgency()
                         else:
@@ -738,7 +785,9 @@ class Merging(gym.Env):
                 teleported=self.teleport_transition or self.ego_teleported,
                 efficiency_raw=None if snapshot is None else snapshot['efficiency'],
                 route_raw=None if snapshot is None else snapshot['route_reward'],
-                diagnostics=None if snapshot is None else snapshot)
+                diagnostics=None if snapshot is None else snapshot,
+                efficiency_weight=None if snapshot is None else snapshot.get('efficiency_effective_weight'),
+                efficiency_decay_factor=None if snapshot is None else snapshot.get('efficiency_decay_factor'))
             self.reward_terms = settle_terms(self.exit_reward_profile, context)
             total = float(sum(term.weighted for term in self.reward_terms))
             self.reward_components = {term.name: term.weighted for term in self.reward_terms}
@@ -1088,7 +1137,12 @@ class Merging(gym.Env):
                                        'weight': term.weight, 'enabled': term.enabled,
                                        'weighted': term.weighted, 'active': term.active,
                                        'clipped': term.clipped,
-                                       'clipped_value': term.clipped_value} for term in self.reward_terms],
+                                       'clipped_value': term.clipped_value,
+                                       'base_weight': term.configured_weight,
+                                       'effective_weight': term.weight,
+                                       'decay_factor': (self.secrm_before or {}).get(
+                                           'efficiency_decay_factor')
+                                       if term.name == 'efficiency' else None} for term in self.reward_terms],
                      'reward_episode_summary': reward_summary,
                      'stage_reached': bool(self.stage_reached), 'stage_name': self.stage_name,
                      'stage_reward': self.last_stage_reward,

@@ -45,22 +45,39 @@ def validate_reward_config(config):
     if dense:
         for name in DENSE_TERM_NAMES:
             term = config['terms'][name]
+            if not isinstance(term, dict):
+                raise ValueError(f'Invalid dense reward term fields: {name}')
             expected_fields = {'enabled', 'weight', 'clip_min', 'clip_max'}
             if name == 'efficiency':
                 expected_fields.add('epsilon')
+                if term.get('enabled'):
+                    expected_fields.add('decay')
             else:
                 expected_fields.add('distance_scale_m')
-            if not isinstance(term, dict) or set(term) != expected_fields:
+            if set(term) != expected_fields:
                 raise ValueError(f'Invalid dense reward term fields: {name}')
             if type(term['enabled']) is not bool:
                 raise ValueError(f'{name}.enabled must be boolean')
             for key, value in term.items():
-                if key != 'enabled' and (type(value) not in (int, float) or not math.isfinite(float(value))):
+                if key not in ('enabled', 'decay') and (type(value) not in (int, float) or not math.isfinite(float(value))):
                     raise ValueError(f'{name}.{key} must be finite numeric')
             if not term['clip_min'] <= term['clip_max'] <= 0:
                 raise ValueError(f'{name} clip range must end at a non-positive value')
             if name == 'efficiency' and term['epsilon'] <= 0:
                 raise ValueError('efficiency.epsilon must be positive')
+            if name == 'efficiency' and term.get('enabled'):
+                decay = term['decay']
+                if not isinstance(decay, dict) or set(decay) != {
+                        'type', 'min_factor', 'max_factor'}:
+                    raise ValueError('Invalid efficiency.decay configuration')
+                if decay['type'] != 'remaining_distance_linear':
+                    raise ValueError('Unknown efficiency.decay type')
+                for key in ('min_factor', 'max_factor'):
+                    if (type(decay[key]) not in (int, float)
+                            or not math.isfinite(float(decay[key]))):
+                        raise ValueError(f'efficiency.decay.{key} must be finite numeric')
+                if not 0 <= decay['min_factor'] <= decay['max_factor'] <= 1:
+                    raise ValueError('efficiency.decay factors must be ordered in [0, 1]')
             if name == 'route' and term['distance_scale_m'] <= 0:
                 raise ValueError('route.distance_scale_m must be positive')
     return config

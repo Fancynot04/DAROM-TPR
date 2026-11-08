@@ -225,7 +225,9 @@ class EpisodeRewardCallback(BaseCallback):
                     continue
                 for name in ('raw_sum', 'weighted_sum', 'discounted_sum', 'active_ratio',
                              'abs_p95', 'abs_p99', 'nonzero_abs_p95',
-                             'nonzero_abs_p99', 'max_abs', 'clipped_ratio'):
+                             'nonzero_abs_p99', 'max_abs', 'clipped_ratio',
+                             'effective_weight_p95', 'effective_weight_p99',
+                             'configured_weight'):
                     metric = f'reward/episode/{term}/{name}'
                     value = float(stats[name])
                     metrics[metric] = value

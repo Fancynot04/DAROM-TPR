@@ -88,11 +88,17 @@ python3 train_sac_delay.py --hydra-override reward=e76_d3_b3_combined
 
 Both dense components have candidate `weight=0.005` and clip their raw value
 to `[-1, 0]`.  Efficiency uses the existing SECRM safe-speed formula with a
-2 m/s denominator floor.  Route guidance computes the minimum legal lane
+2 m/s denominator floor.  In B1/B3, only the efficiency payment weight is
+linearly decayed by the remaining route distance to D3: it is `0.005` at the
+E76 reference state, `0.0025` at 50% remaining distance, and zero at the D3
+endpoint.  The raw and clipped SECRM values remain unchanged and are logged
+separately from the effective weight.  Route guidance computes the minimum legal lane
 changes and applies `-min(1, n*200/max(d,200))`, where `d` is the remaining
 distance through the final on-route edge that can still host a required lane
 change; it is not distance to the D3 endpoint.  Internal connectors are marked
-unavailable and pay no route term, rather than being treated as `n=0`.
+unavailable and pay no route term, rather than being treated as `n=0`; the
+efficiency distance factor, in contrast, follows the full route through those
+connectors and D3.
 
 Reward terms can be disabled or reweighted with Hydra-style overrides. These
 change only payment, not termination or SUMO control:

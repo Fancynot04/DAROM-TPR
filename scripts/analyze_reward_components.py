@@ -112,13 +112,22 @@ def analyse(records, tolerance=1e-8):
                     continue
                 name = term['name']; raw = float(term['raw']); clipped = float(term.get('clipped_value', raw) if term.get('clipped_value') is not None else raw)
                 weighted = float(term['weighted'])
-                if not all(math.isfinite(value) for value in (raw, clipped, weighted)):
+                effective_weight = float(term.get('effective_weight', term.get('weight', 0.0)))
+                base_weight = float(term.get('base_weight', term.get('weight', 0.0)))
+                decay_factor = term.get('decay_factor')
+                if decay_factor is not None:
+                    decay_factor = float(decay_factor)
+                finite = (raw, clipped, weighted, effective_weight, base_weight)
+                if (not all(math.isfinite(value) for value in finite)
+                        or (decay_factor is not None and not math.isfinite(decay_factor))):
                     issues.append(f'{group}/{episode_id}/step{index}: nonfinite {name}')
                     continue
                 paid += weighted; paid_by_name[name] = paid_by_name.get(name, 0.0) + weighted
                 discounted_by_name[name] = discounted_by_name.get(name, 0.0) + (gamma ** index) * weighted
                 samples.append({'group': group, 'episode_id': episode_id, 'step': index, 'name': name,
                                 'raw': raw, 'clipped_value': clipped, 'weighted': weighted,
+                                'effective_weight': effective_weight, 'base_weight': base_weight,
+                                'decay_factor': decay_factor,
                                 'enabled': bool(term['enabled']), 'active': bool(term['active']),
                                 'clipped': bool(term['clipped']), 'gamma': gamma})
             if not math.isclose(paid, reward, abs_tol=tolerance, rel_tol=0):
@@ -147,7 +156,8 @@ def component_stats(samples, episodes):
                   'active_samples': int(frame.active.sum()),
                   'enabled_samples': int(frame.enabled.sum()), 'disabled_samples': int((~frame.enabled).sum()),
                   'clipped_samples': int(frame.clipped.sum()), 'clipped_ratio': float(frame.clipped.mean())}
-        for prefix, series in (('raw', frame.raw), ('clipped', frame.clipped_value), ('weighted', frame.weighted)):
+        for prefix, series in (('raw', frame.raw), ('clipped', frame.clipped_value), ('weighted', frame.weighted),
+                               ('effective_weight', frame.effective_weight), ('base_weight', frame.base_weight)):
             absolute = series.abs(); nonzero = absolute[absolute > 0]
             result.update({f'{prefix}_mean': series.mean(), f'{prefix}_min': series.min(), f'{prefix}_max': series.max(),
                            f'{prefix}_p95': series.quantile(.95), f'{prefix}_p99': series.quantile(.99),
