@@ -5,6 +5,7 @@
 !/requirements.txt
 !/train_sac_delay.py
 !/evaluate_sac_delay.py
+!/scripts/
 
 # Project directories allowed in version control.
 !/src/
