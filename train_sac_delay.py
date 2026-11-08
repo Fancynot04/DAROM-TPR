@@ -223,12 +223,20 @@ class EpisodeRewardCallback(BaseCallback):
                 if term == '_meta':
                     metrics['reward/total/weighted_sum'] = stats['weighted_total']
                     continue
-                for name in ('raw_sum', 'weighted_sum', 'discounted_sum', 'active_ratio',
-                             'abs_p95', 'abs_p99', 'nonzero_abs_p95',
-                             'nonzero_abs_p99', 'max_abs', 'clipped_ratio',
-                             'effective_weight_p95', 'effective_weight_p99',
-                             'configured_weight'):
-                    metric = f'reward/episode/{term}/{name}'
+                metric_names = {
+                    'raw_sum': 'raw_sum', 'weighted_sum': 'weighted_sum',
+                    'discounted_sum': 'discounted_sum', 'active_ratio': 'active_ratio',
+                    'abs_p95': 'abs_p95', 'abs_p99': 'abs_p99',
+                    'nonzero_abs_p95': 'nonzero_abs_p95',
+                    'nonzero_abs_p99': 'nonzero_abs_p99', 'max_abs': 'max_abs',
+                    'clipped_ratio': 'clipped_ratio',
+                    # Keep SB3's 36-character key truncation from merging p95/p99.
+                    'effective_weight_p95': 'eff_w_p95',
+                    'effective_weight_p99': 'eff_w_p99',
+                    'configured_weight': 'cfg_w',
+                }
+                for name, metric_name in metric_names.items():
+                    metric = f'reward/episode/{term}/{metric_name}'
                     value = float(stats[name])
                     metrics[metric] = value
                     self.logger.record(metric, value)
