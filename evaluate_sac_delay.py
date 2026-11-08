@@ -22,7 +22,7 @@ from src.route_urgency import load_route_network, observe_route_urgency
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
-OUTCOMES = ('Arrived', 'Collision', 'Max Steps', 'Emergency Stopping',
+OUTCOMES = ('Arrived', 'Collision', 'Timeout', 'Emergency Stopping',
             'Missed Exit', 'Ego Teleported')
 TIMEOUT_DETAILS = ('No Merge Timeout', 'Merged Timeout')
 EXIT_TIMEOUT_DETAILS = ('No Exit Timeout', 'Exit Reached Timeout')
@@ -59,52 +59,28 @@ def validate_checkpoint_setup(model, ablation, safety, task=exit_config.TASK_ID)
     checkpoint_task = getattr(model, 'antwerp_task', exit_config.TASK_ID)
     if checkpoint_task != task:
         raise ValueError(f'Checkpoint task={checkpoint_task!r}, requested {task!r}')
-    reward_profile = getattr(model, 'exit_reward_profile', None)
+    reward_profile = getattr(model, 'exit_reward_profile', exit_config.REWARD_PROFILE)
+    if reward_profile != exit_config.REWARD_PROFILE:
+        raise ValueError('Checkpoint does not use the E76-to-D3 B0 reward profile')
+    reward_config = exit_progress_reward.load_experiment(
+        getattr(model, 'exit_reward_config', None))
+    if getattr(model, 'exit_reward_config_sha256',
+               exit_progress_reward.reward_identity(reward_config)) != exit_progress_reward.reward_identity(reward_config):
+        raise ValueError('Checkpoint reward configuration hash mismatch')
     progress_experiment = None
-    if reward_profile in exit_config.secrm_reward.PROFILES:
-        if getattr(model, 'secrm_formula_version', None) != exit_config.secrm_reward.FORMULA_VERSION:
-            raise ValueError('Checkpoint SECRM formula version mismatch')
-    if (task == exit_config.TASK_ID and
-            reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
-                               exit_config.DIRECTIONAL_REWARD_PROFILE, *exit_config.secrm_reward.PROFILES)):
-        progress_experiment = exit_progress_reward.validate_experiment(
-            getattr(model, 'exit_progress_experiment', None))
-        if exit_progress_reward.reward_profile(progress_experiment) != reward_profile:
-            raise ValueError('Checkpoint progress reward profile does not match its configuration')
-        if (getattr(model, 'exit_progress_reward_identity', None)
-                != exit_progress_reward.reward_identity(progress_experiment['reward'])):
-            raise ValueError('Checkpoint progress reward identity does not match its configuration')
-        if (getattr(model, 'exit_progress_experiment_identity', None)
-                != exit_progress_reward.experiment_identity(progress_experiment)):
-            raise ValueError('Checkpoint progress experiment identity does not match its configuration')
-    if task == exit_config.TASK_ID:
-        try:
-            expected_beta = exit_config.potential_beta_for_profile(reward_profile)
-        except ValueError as error:
-            raise ValueError('Checkpoint E76-to-D3 reward profile does not match') from error
-        if getattr(model, 'exit_potential_beta', None) != expected_beta:
-            raise ValueError('Checkpoint E76-to-D3 potential configuration does not match')
-    if task == exit_config.TASK_ID and getattr(model, 'exit_control_profile', None) != exit_config.CONTROL_PROFILE:
-        raise ValueError('Checkpoint E76-to-D3 control profile does not match')
     potential_gamma = None
     nav_features = False
     if task == exit_config.TASK_ID:
         profile = getattr(model, 'exit_observation_profile', None)
-        if profile not in (None, exit_config.NAV_OBSERVATION_PROFILE):
-            raise ValueError(f'Unknown E76-to-D3 observation profile: {profile!r}')
-        nav_features = profile == exit_config.NAV_OBSERVATION_PROFILE
-        expected_dim = 136 if nav_features else 134
+        nav_features = False
+        expected_dim = 134
         if model.observation_space.shape != (expected_dim,):
             raise ValueError('Checkpoint E76-to-D3 observation profile and shape disagree')
         encoder_nav_dim = (getattr(model, 'policy_kwargs', {}) or {}).get(
             'features_extractor_kwargs', {}).get('nav_dim', 0)
         if encoder_nav_dim != (2 if nav_features else 0):
             raise ValueError('Checkpoint E76-to-D3 GRU navigation split disagrees')
-        if reward_profile == exit_config.URGENCY_REWARD_PROFILE and nav_features:
-            raise ValueError('Urgency reward v1 requires the 134-dimensional observation')
-        potential_gamma = float(getattr(model, 'exit_potential_gamma', model.gamma))
-        if not np.isclose(potential_gamma, float(model.gamma), rtol=0.0, atol=1e-12):
-            raise ValueError('Checkpoint SAC and E76-to-D3 potential gamma do not match')
+        potential_gamma = None
     setup = {'training_safety': getattr(model, 'training_safety', None),
              'evaluation_safety': bool(safety)}
     if potential_gamma is not None:
@@ -112,12 +88,7 @@ def validate_checkpoint_setup(model, ablation, safety, task=exit_config.TASK_ID)
         setup['exit_observation_profile'] = getattr(model, 'exit_observation_profile', None)
         setup['nav_features'] = nav_features
         setup['exit_reward_profile'] = reward_profile
-        if progress_experiment is not None:
-            setup['progress_experiment'] = progress_experiment
-            setup['progress_reward_identity'] = exit_progress_reward.reward_identity(
-                progress_experiment['reward'])
-            setup['progress_experiment_identity'] = exit_progress_reward.experiment_identity(
-                progress_experiment)
+        setup['reward_config'] = reward_config
     return setup
 
 
@@ -142,18 +113,7 @@ def e77_lane_index(env):
 
 
 def diagnostic_reward_without_potential(reward, info, task):
-    """Remove shaping only from the reported diagnostic, not the environment."""
-    potential = float(info.get('potential_reward', 0.0))
-    if task == exit_config.TASK_ID:
-        components = info.get('reward_components', {})
-        if ('potential' not in components
-                or not math.isclose(potential, float(components['potential']),
-                                    rel_tol=0.0, abs_tol=1e-6)):
-            raise ValueError('Missing or inconsistent E76-to-D3 potential component')
-    unshaped = float(reward) - potential
-    if not math.isfinite(unshaped):
-        raise ValueError('Nonfinite diagnostic reward without potential')
-    return potential, unshaped
+    return 0.0, float(reward)
 
 
 def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
@@ -166,9 +126,8 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
     for episode in range(episodes):
         observation, reset_info = env.reset(seed=seed + episode)
         base = env.unwrapped
-        secrm = getattr(base, 'exit_reward_profile', None) in exit_config.secrm_reward.PROFILES
-        directional = (getattr(base, 'exit_reward_profile', None)
-                       == exit_config.DIRECTIONAL_REWARD_PROFILE) or secrm
+        secrm = False
+        directional = False
         boundary_counts = Counter()
         boundary_max_area = 0.0
         reward_totals = Counter()
@@ -325,7 +284,7 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                     counts['Ego Teleported'] += int(teleported)
                 if outcome == 'Arrived':
                     counts['Teleported Arrived' if teleported else 'Uninterrupted Arrived'] += 1
-                if outcome == 'Max Steps':
+                if outcome == 'Timeout':
                     if ANTWERP_TASKS[task][2] == 'exit':
                         counts['Exit Reached Timeout' if info.get('stage_reached')
                                else 'No Exit Timeout'] += 1
@@ -394,7 +353,7 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
             'raw_arrival_rate': 100 * counts['Arrived'] / episodes,
             'ego_teleport_rate': 100 * counts['Ego Teleported'] / episodes,
             'collision_rate': 100 * counts['Collision'] / episodes,
-            'timeout_rate': 100 * counts['Max Steps'] / episodes,
+            'timeout_rate': 100 * counts['Timeout'] / episodes,
             'emergency_stopping_rate': 100 * counts['Emergency Stopping'] / episodes,
             'missed_exit_rate': 100 * counts['Missed Exit'] / episodes,
             'mean_return': float(np.mean(returns)), 'episode_results': records}
@@ -597,9 +556,8 @@ def main():
         else:
             print(f"  {key}: mean={values['mean']:.4f}, std={values['std']:.4f}, "
                   f"CI95 half-width={values['ci95_half_width']:.4f}")
-    print('success_rate excludes ego teleports; raw_arrival_rate includes them. '
-          'timeout_rate counts all Max Steps; the legacy/entry no_merge_rate '
-          'is a historical alias. Emergency stops stay separate.')
+    print('success_rate is SUMO route completion; timeout_rate counts terminal '
+          'Timeout events. Road-boundary and emergency-stop values remain diagnostics.')
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open('x') as output:

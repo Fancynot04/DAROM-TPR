@@ -1,32 +1,22 @@
-"""Single-ego E76-to-D3 experiment profile."""
-
-from . import secrm_reward
-
-import math
-from .exit_progress_reward import PROFILE as PROGRESS_REWARD_PROFILE
-from .exit_progress_reward import DIRECTIONAL_PROFILE as DIRECTIONAL_REWARD_PROFILE
+"""Single source of truth for the E76 -> D3 environment contract."""
 
 TASK_ID = 'exit_e76_d3'
 ORIGIN = 'E76'
 DESTINATION = 'D3'
 DEPART_LANE = 'random'
-POTENTIAL_BETA = 10.0
-POTENTIAL_GAMMA = 0.99
-REWARD_PROFILE = 'no_lane_command_penalty_v1'
-URGENCY_REWARD_PROFILE = 'urgency_penalty_no_potential_v1'
-URGENCY_THRESHOLD = 0.15
-URGENCY_CLIP = 1.5
-URGENCY_WEIGHT = 0.10
-CONTROL_PROFILE = 'tracked_lane_change_v2'
-DISTANCE_SCALE_EDGES = ('E76', 'E77', 'D3')
+DEFAULT_SCENARIO = 'easy'
+DEFAULT_TOTAL_TIMESTEPS = 200_000
+DEFAULT_CHECKPOINT_FREQ = 200_000
+DEFAULT_GAMMA = 0.99
+DEFAULT_SEED = 42
+SUMO_STEP_LENGTH = 0.1
+EGO_DEPART_TIME = 120.0
+TIMEOUT_STEPS = 4000
+TIMEOUT_SECONDS = TIMEOUT_STEPS * SUMO_STEP_LENGTH
 ROAD_SPEED_LIMIT_MPS = 120.0 / 3.6
-NAV_OBSERVATION_PROFILE = 'nav_d3_required_lanes_v1'
-NAV_DISTANCE_SCALE_METERS = 1260.74
-NAV_DIM = 2
-# J105 internal lanes follow the actual E76->E77 connections in Antwerp.net.xml.
+REWARD_PROFILE = 'events_only_v1'
+DISTANCE_SCALE_EDGES = ('E76', 'E77', 'D3')
 J105_TARGET_LANES = {f':J105_0_{index}': index for index in range(6)}
-# A same-seed TraCI probe needed 3.3 s from first lateral motion until the
-# vehicle was fully inside the adjacent lane. Reserve 4 s plus body clearance.
 LANE_CHANGE_TIME_SECONDS = 4.0
 MANEUVER_MAX_SECONDS = 6.0
 MANEUVER_STALL_SECONDS = 2.0
@@ -34,86 +24,12 @@ MANEUVER_STABLE_STEPS = 3
 LANE_END_BUFFER_METERS = 5.0
 MIN_MANEUVER_SPEED_MPS = 1.0
 LATERAL_SETTLED_SPEED_MPS = 0.05
-# SUMO's sublane solver may settle a fully-contained 1.8 m vehicle up to
-# about 0.5 mm beyond the analytic 0.7 m margin of a 3.2 m lane.  Keep this
-# tolerance far below the 0.8 m lateral resolution and apply it only after the
-# target lane matches and lateral motion has stopped.
 LATERAL_CONTAINMENT_EPSILON_METERS = 0.001
 LANE_END_EPSILON_METERS = 0.01
-MISSED_EXIT_PENALTY = 1000.0  # Before the environment's existing 0.1 scale.
-
 WANDB_ENTITY = 'arlikache-anhui-university'
 WANDB_PROJECT = 'DAROM-OUT'
 
-# Stage changes are selected only when a new training episode resets.
-URGENCY_CURRICULUM_STAGES = (
-    (0, (1,)),
-    (50_000, (1, 2)),
-    (100_000, (1, 2, 3)),
-    (150_000, (0, 1, 2, 3)),
-    (200_000, (0, 1, 2, 3, 4)),
-)
-
-PHASES = {
-    'progress_events': {
-        'scenario': 'easy', 'total_timesteps': 200_000,
-        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': PROGRESS_REWARD_PROFILE,
-    },
-    'progress_events_directional_lc': {
-        'scenario': 'easy', 'total_timesteps': 1_000_000,
-        'checkpoint_freq': 200_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': DIRECTIONAL_REWARD_PROFILE,
-    },
-    'secrm_efficiency': {
-        'scenario': 'easy', 'total_timesteps': 200_000,
-        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.EFFICIENCY_PROFILE,
-    },
-    'secrm_efficiency_route': {
-        'scenario': 'easy', 'total_timesteps': 200_000,
-        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.ROUTE_PROFILE,
-    },
-    'secrm_efficiency_route_no_events': {
-        'scenario': 'easy', 'total_timesteps': 200_000,
-        'checkpoint_freq': 50_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.ROUTE_PROFILE,
-    },
-    'secrm_efficiency_directional': {
-        'scenario': 'easy', 'total_timesteps': 500_000,
-        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.DIRECTIONAL_PROFILE,
-    },
-    **{f'secrm_efficiency_directional_{mode}': {
-        'scenario': 'easy', 'total_timesteps': 500_000,
-        'checkpoint_freq': 250_000, 'gamma': POTENTIAL_GAMMA,
-        'nav_features': False, 'reward_profile': secrm_reward.ADAPTIVE_PROFILE,
-    } for mode in ('l1', 'l2')},
-}
-
-
 def potential_beta_for_profile(profile):
     if profile == REWARD_PROFILE:
-        return POTENTIAL_BETA
-    if profile in (URGENCY_REWARD_PROFILE, PROGRESS_REWARD_PROFILE,
-                   DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES):
         return 0.0
     raise ValueError(f'Unknown E76-to-D3 reward profile: {profile!r}')
-
-
-def urgency_penalty(urgency):
-    """Per 0.1 s step, in final reward units; never modify terminal rewards."""
-    if not math.isfinite(urgency) or urgency < 0:
-        raise ValueError(f'Invalid urgency for reward: {urgency!r}')
-    return -URGENCY_WEIGHT * min(max(urgency - URGENCY_THRESHOLD, 0.0), URGENCY_CLIP)
-
-
-def potential(distance_to_exit, distance_scale, lane_index):
-    """Potential in final reward units, with lane zero connected to D3."""
-    if (not math.isfinite(distance_scale) or not math.isfinite(distance_to_exit)
-            or distance_scale <= 0 or distance_to_exit < 0):
-        return 0.0
-    distance_weight = max(0.0, min(1.0, 1.0 - distance_to_exit / distance_scale))
-    lane_weight = 1.0 - min(max(int(lane_index), 0), 5) / 5.0
-    return POTENTIAL_BETA * distance_weight * lane_weight

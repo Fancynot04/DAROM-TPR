@@ -5,7 +5,7 @@
     </input>
     <time>
         <begin value="0"/>
-        <end value="400"/>
+        <end value="600"/>
         <step-length value="0.1"/>
     </time>
     <lateral-resolution value="0.8" />

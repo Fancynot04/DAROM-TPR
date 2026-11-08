@@ -55,15 +55,19 @@ and logs should use a new run name and remain in ignored output directories.
 
 ```bash
 python3 train_sac_delay.py \
-  --exit_phase secrm_efficiency_directional_l1 \
   --scenario easy \
   --seed 42 \
+  --total_timesteps 200000 \
+  --checkpoint_freq 200000 \
+  --gamma 0.99 \
+  --reward-config configs/rewards/events_only_v1.json \
   --wandb_mode disabled
 ```
 
-Available profiles are defined in `src/exit_e76_d3_config.py`. The scenario can
-be changed to `easy`, `medium`, or `hard` without changing the task. Training
-does not accept old checkpoint or replay-buffer arguments.
+The command-line values are final; no historical Phase or reward file can
+override seed, scenario, budget, checkpoint interval, or gamma. The B0 reward
+is zero on non-terminal steps and settles exactly one event: success `+50`,
+collision/missed-exit/teleport/timeout `-100`.
 
 ## Evaluation
 
@@ -71,7 +75,7 @@ does not accept old checkpoint or replay-buffer arguments.
 python3 evaluate_sac_delay.py \
   models_experiments/e76-d3/<run>.zip \
   --scenario easy \
-  --episodes 100 \
+  --episodes 50 --seed 200001 \
   --no-safety \
   --output tmp/ai/e76-d3/eval.json
 ```
@@ -82,21 +86,16 @@ requested for a separate diagnostic.
 
 ## GUI inspection
 
-`sumo_new/Antwerp.sumocfg` opens the Easy E76→D3 route with a 400-second end
-time and 0.1-second step. For Medium or Hard inspection, replace the route file
+`sumo_new/Antwerp.sumocfg` opens the Easy E76→D3 route with a 600-second GUI
+end time and 0.1-second step. The 400-second/4,000-step task timeout is owned
+by the environment and is independent of this GUI end time. For Medium or Hard inspection, replace the route file
 in the GUI configuration with the corresponding
 `Antwerp_<scenario>_exit_e76_d3.rou.xml` file.
 
 ## Tests
 
 ```bash
-python3 -m unittest \
-  tests.test_antwerp_contract \
-  tests.test_exit_progress_reward \
-  tests.test_secrm_reward \
-  tests.test_adaptive_lane_reward \
-  tests.test_route_urgency \
-  tests.test_reward_registry
+python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
 The real SUMO integration suite is opt-in:

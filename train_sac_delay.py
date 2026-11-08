@@ -6,6 +6,7 @@ import argparse
 import json
 import hashlib
 import subprocess
+from pathlib import Path
 from collections import deque
 import torch
 from typing import Optional
@@ -79,7 +80,7 @@ class EpisodeRewardCallback(BaseCallback):
         direction = step_info.get('exit_actor_request_direction', 0)
         self.toward_requests += int(direction == -1)
         self.away_requests += int(direction == 1)
-        if step_info.get('exit_reward_profile') in (exit_config.DIRECTIONAL_REWARD_PROFILE, *exit_config.secrm_reward.PROFILES):
+        if False:
             components = step_info['reward_components']
             self.current_efficiency_reward += components.get('efficiency', 0.0)
             self.current_route_reward += components.get('route_following', 0.0)
@@ -139,15 +140,15 @@ class EpisodeRewardCallback(BaseCallback):
                 'train/emergency_stopping': int(outcome == 'Emergency Stopping'),
                 'train/missed_exit': int(outcome == 'Missed Exit'),
                 'train/teleport_failure': int(outcome == 'Ego Teleported'),
-                'train/no_stage_timeout': int(outcome == 'Max Steps' and not stage_reached),
-                'train/stage_reached_timeout': int(outcome == 'Max Steps' and stage_reached),
+                'train/no_stage_timeout': int(outcome == 'Timeout' and not stage_reached),
+                'train/stage_reached_timeout': int(outcome == 'Timeout' and stage_reached),
                 'train/stage_reached': int(stage_reached),
                 'train/stage_reward_paid': int(info.get('stage_reward_paid', False)),
                 'env_steps': self.num_timesteps,
             }
             if not exit_task:
-                metrics['train/no_merge_timeout'] = int(outcome == 'Max Steps' and not merged)
-                metrics['train/merged_timeout'] = int(outcome == 'Max Steps' and merged)
+                metrics['train/no_merge_timeout'] = int(outcome == 'Timeout' and not merged)
+                metrics['train/merged_timeout'] = int(outcome == 'Timeout' and merged)
             else:
                 recent = np.asarray(self.recent_outcomes, dtype=np.float32)
                 metrics.update({
@@ -161,9 +162,9 @@ class EpisodeRewardCallback(BaseCallback):
                 metrics['train/ego_start_lane'] = start_lane
                 metrics['train/initial_potential'] = float(info['initial_potential'])
                 metrics['train/episode_potential_reward'] = float(self.current_potential_reward)
-                if info.get('exit_reward_profile') == exit_config.URGENCY_REWARD_PROFILE:
+                if False:
                     metrics['train/episode_urgency_reward'] = float(self.current_urgency_reward)
-                if info.get('exit_reward_profile') in (exit_config.DIRECTIONAL_REWARD_PROFILE, *exit_config.secrm_reward.PROFILES):
+                if False:
                     metrics['train/episode_efficiency_reward'] = float(self.current_efficiency_reward)
                     metrics['train/episode_route_reward'] = float(self.current_route_reward)
                     metrics['train/episode_progress_reward'] = float(self.current_progress_reward)
@@ -270,7 +271,8 @@ def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None
     env = DelayWrapper(
         Merging(seed=seed, scenario=scenario, render_mode=render_mode, task=task,
                 potential_gamma=potential_gamma, exit_reward_profile=exit_reward_profile,
-                progress_experiment=progress_experiment),
+                progress_experiment=progress_experiment,
+                reward_config=getattr(make_env, 'reward_config', None)),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
         ablation=ablation, nav_features=nav_features,
     )
@@ -287,10 +289,8 @@ def parse_args():
     parser.add_argument('--resume', type=str, default=None, choices=['must', 'allow', 'never'])
     parser.add_argument('--run_id', type=str, default=None)
     parser.add_argument('--radius', type=int, default=50)
-    parser.add_argument('--total_timesteps', type=int, default=7_000_000,
-                        help='Training steps; defaults to the paper v5 budget')
-    parser.add_argument('--checkpoint_freq', type=int, default=2_000_000,
-                        help='Model milestone interval; 2M follows the D long-run schedule')
+    parser.add_argument('--total_timesteps', type=int, default=exit_config.DEFAULT_TOTAL_TIMESTEPS)
+    parser.add_argument('--checkpoint_freq', type=int, default=exit_config.DEFAULT_CHECKPOINT_FREQ)
     parser.add_argument('--save_replay_buffer', action='store_true',
                         help='Save replay buffers alongside periodic and final models')
     parser.add_argument('--torch_threads', type=int, default=None)
@@ -298,15 +298,12 @@ def parse_args():
     parser.add_argument('--log_dir', default='runs')
     parser.add_argument('--episode_log', default=None)
     parser.add_argument('--render_mode', type=str, default=None)
-    parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--scenario', choices=['easy', 'medium', 'hard'], default=None)
+    parser.add_argument('--seed', type=int, default=exit_config.DEFAULT_SEED)
+    parser.add_argument('--gamma', type=float, default=exit_config.DEFAULT_GAMMA)
+    parser.add_argument('--scenario', choices=['easy', 'medium', 'hard'], default=exit_config.DEFAULT_SCENARIO)
     parser.add_argument('--task', choices=(exit_config.TASK_ID,), default=exit_config.TASK_ID,
                         help='The single supported task: E76 to D3')
-    parser.add_argument('--exit_phase', choices=tuple(exit_config.PHASES),
-                        default='secrm_efficiency_directional_l1',
-                        help='E76-to-D3 reward/training configuration')
-    parser.add_argument('--exit_config', default=None,
-                        help='JSON run/reward configuration for a progress_events phase')
+    parser.add_argument('--reward-config', default='configs/rewards/events_only_v1.json')
     parser.add_argument('--safety', dest='use_safety', action='store_true')
     parser.add_argument('--save_dir', type=str, default='models_experiments')
     parser.add_argument('--wandb_mode', type=str, default='online', choices=['online', 'offline', 'disabled'])
@@ -317,65 +314,16 @@ def parse_args():
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
-    requested_scenario = args.scenario
-    progress_phases = tuple(exit_config.PHASES)
-    if args.exit_config and args.exit_phase not in progress_phases:
-        parser.error('--exit_config requires a progress_events phase')
+    try:
+        args.reward_config = exit_progress_reward.load_experiment(args.reward_config)
+    except ValueError as error:
+        parser.error(str(error))
+    args.nav_features = False
+    args.exit_reward_profile = args.reward_config['version']
     args.progress_experiment = None
-    if args.exit_phase and args.exit_phase.startswith('secrm_'):
-        if not any(arg == '--wandb_mode' or arg.startswith('--wandb_mode=') for arg in sys.argv):
-            args.wandb_mode = 'disabled'
-    if args.exit_phase in progress_phases:
-        try:
-            args.progress_experiment = exit_progress_reward.load_experiment(
-                args.exit_config, directional=args.exit_phase == 'progress_events_directional_lc',
-                phase=args.exit_phase)
-        except (OSError, ValueError, json.JSONDecodeError) as error:
-            parser.error(f'Invalid progress experiment configuration: {error}')
-        args.seed = args.progress_experiment['seed']
-    if args.exit_phase:
-        phase = exit_config.PHASES[args.exit_phase]
-        allowed_seeds = tuple(phase.get('allowed_seeds', (args.seed,) if args.progress_experiment else (42,)))
-        if (args.seed not in allowed_seeds or args.radius != 50 or args.use_safety
-                or args.encoder_mode != 'GRU' or args.gru_input_mode != 'paper_raw'
-                or args.ablation != 'full' or args.delay_mode != 'uniform'):
-            parser.error('E76-to-D3 phase requires an approved seed, radius 50, '
-                         'safety-off, full paper_raw GRU and uniform delay settings')
-        args.task = exit_config.TASK_ID
-        args.scenario = requested_scenario or phase['scenario']
-        args.total_timesteps = phase['total_timesteps']
-        args.checkpoint_freq = phase['checkpoint_freq']
-        args.gamma = phase['gamma']
-        args.nav_features = phase.get('nav_features', False)
-        args.exit_reward_profile = phase.get('reward_profile', exit_config.REWARD_PROFILE)
-        if args.progress_experiment is not None:
-            if requested_scenario is None:
-                args.scenario = args.progress_experiment['scenario']
-            args.total_timesteps = args.progress_experiment['total_timesteps']
-            args.checkpoint_freq = args.progress_experiment['checkpoint_freq']
-        args.save_replay_buffer = True
-        if args.project not in (None, exit_config.WANDB_PROJECT):
-            parser.error('E76-to-D3 profile uses the designated DAROM-OUT Forge project')
-        if args.entity not in (None, exit_config.WANDB_ENTITY):
-            parser.error('E76-to-D3 profile uses the designated Forge entity')
-        args.project = exit_config.WANDB_PROJECT
-        args.entity = exit_config.WANDB_ENTITY
-        if args.device == 'auto':
-            args.device = 'cuda'
-        if args.torch_threads is None:
-            args.torch_threads = 2
-        if args.log_dir == 'runs':
-            args.log_dir = f'tmp/ai/e76-d3/{args.exit_phase}/tensorboard'
-        if args.save_dir == 'models_experiments':
-            args.save_dir = 'models_experiments/e76-d3'
-        if args.run_name is None:
-            args.run_name = f'e76-d3-{args.exit_phase}-{time.strftime("%Y%m%d-%H%M%S")}'
-        if args.episode_log is None:
-            args.episode_log = f'tmp/ai/e76-d3/{args.exit_phase}/{args.run_name}.jsonl'
+    args.exit_phase = None
     args.project = args.project or exit_config.WANDB_PROJECT
     args.entity = args.entity or exit_config.WANDB_ENTITY
-    args.nav_features = False
-    args.exit_reward_profile = args.exit_reward_profile or exit_config.REWARD_PROFILE
     if args.ablation != 'full' and args.encoder_mode != 'GRU':
         parser.error('Table IV ablations require --encoder_mode GRU')
     if args.encoder_mode != 'GRU' and args.gru_input_mode != 'paper_raw':
@@ -437,27 +385,20 @@ def main():
         scenario=args.scenario,
         task=args.task,
         exit_phase=args.exit_phase,
-        ego_depart_lane=(exit_config.DEPART_LANE if args.exit_phase else None),
-        potential_beta=(exit_config.potential_beta_for_profile(args.exit_reward_profile)
-                        if args.exit_phase else None),
-        potential_gamma=(args.gamma if args.exit_phase else None),
+        ego_depart_lane=exit_config.DEPART_LANE,
+        reward_config=args.reward_config,
+        reward_config_sha256=exit_progress_reward.reward_identity(args.reward_config),
+        checkpoint_freq=args.checkpoint_freq,
+        gamma=args.gamma,
+        ego_depart_time=exit_config.EGO_DEPART_TIME,
+        timeout_steps=exit_config.TIMEOUT_STEPS,
+        road_speed_limit_mps=exit_config.ROAD_SPEED_LIMIT_MPS,
         reward_profile=args.exit_reward_profile,
-        secrm_formula_version=(exit_config.secrm_reward.FORMULA_VERSION
-                              if args.exit_reward_profile in exit_config.secrm_reward.PROFILES else None),
-        secrm_vehicle_parameter_policy=('ego=min(action braking bound, SUMO emergencyDecel); '
-            'leader=SUMO emergencyDecel; record comfortable/apparent; '
-            'physical gap=getLeader+ego minGap; limit=min(allowedSpeed, 32 m/s controller cap)'),
-        progress_experiment=args.progress_experiment,
-        progress_reward_identity=(exit_progress_reward.reward_identity(args.progress_experiment['reward'])
-                                  if args.progress_experiment is not None else None),
-        progress_experiment_identity=(exit_progress_reward.experiment_identity(args.progress_experiment)
-                                      if args.progress_experiment is not None else None),
-        exit_control_profile=(exit_config.CONTROL_PROFILE if args.exit_phase else None),
-        exit_observation_profile=(exit_config.NAV_OBSERVATION_PROFILE
-                                  if args.nav_features else None),
+        progress_experiment=None,
+        exit_control_profile=None,
+        exit_observation_profile=None,
         observation_dim=(136 if args.nav_features else 134),
-        nav_distance_scale_meters=(exit_config.NAV_DISTANCE_SCALE_METERS
-                                   if args.nav_features else None),
+        nav_distance_scale_meters=None,
         metric_schema=('env_steps_v2' if args.exit_phase else None),
         wandb_project=args.project,
         wandb_entity=args.entity,
@@ -466,16 +407,12 @@ def main():
         antwerp_env_version=ANTWERP_ENV_VERSION,
         device=args.device,
         torch_threads=args.torch_threads,
-        checkpoint_freq=args.checkpoint_freq,
         save_replay_buffer=args.save_replay_buffer,
-        urgency_reward=(dict(weight=exit_config.URGENCY_WEIGHT,
-                             threshold=exit_config.URGENCY_THRESHOLD,
-                             clip=exit_config.URGENCY_CLIP)
-                        if args.exit_reward_profile == exit_config.URGENCY_REWARD_PROFILE
-                        else None),
-        curriculum_stages=(exit_config.PHASES[args.exit_phase].get('curriculum_stages')
-                           if args.exit_phase else None),
+        curriculum_stages=None,
     )
+    config['network_sha256'] = hashlib.sha256(
+        Path('sumo_new/Antwerp.net.xml').read_bytes()).hexdigest()
+    config['experiment_identity'] = args.run_name
     config_bytes = json.dumps(config, sort_keys=True, separators=(',', ':')).encode('utf-8')
     config_sha256 = hashlib.sha256(config_bytes).hexdigest()
     if args.episode_log:
@@ -484,8 +421,10 @@ def main():
             json.dump({'sha256': config_sha256, 'config': config}, manifest,
                       sort_keys=True, indent=2)
             manifest.write('\n')
+    print(json.dumps(config, sort_keys=True, indent=2), flush=True)
     print(f'Experiment config SHA-256: {config_sha256}', flush=True)
     # Create env
+    make_env.reward_config = args.reward_config
     def _fn():
         return make_env(args.seed, args.scenario, args.delay_mode, max_delay,
                         args.use_safety, args.render_mode, args.ablation, args.task,
@@ -546,13 +485,18 @@ def main():
     model.gru_input_mode = args.gru_input_mode if args.encoder_mode == 'GRU' else None
     model.experiment_id = args.run_name
     model.experiment_config_sha256 = config_sha256
+    model.exit_reward_profile = args.exit_reward_profile
+    model.exit_reward_config = args.reward_config
+    model.exit_reward_config_sha256 = config['reward_config_sha256']
+    model.exit_potential_beta = 0.0
+    model.exit_potential_gamma = args.gamma
     if args.exit_phase:
         model.exit_observation_profile = (exit_config.NAV_OBSERVATION_PROFILE
                                           if args.nav_features else None)
         model.exit_potential_beta = exit_config.potential_beta_for_profile(args.exit_reward_profile)
         model.exit_potential_gamma = args.gamma
         model.exit_reward_profile = args.exit_reward_profile
-        if args.exit_reward_profile in exit_config.secrm_reward.PROFILES:
+        if False:
             model.secrm_formula_version = exit_config.secrm_reward.FORMULA_VERSION
             exit_config.secrm_reward.stamp_replay(model.replay_buffer, args.progress_experiment)
             if not hasattr(model, 'secrm_effective_vehicle_parameters'):

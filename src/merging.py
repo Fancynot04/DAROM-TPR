@@ -87,43 +87,23 @@ class Merging(gym.Env):
     metadata = {"render_modes": ["human", "none"], "render_fps": 10}
     def __init__(self, seed, mode='all', radius=50, render_mode=None, runSafetyCheck=False,
                  scenario='medium', task=exit_config.TASK_ID, potential_gamma=None,
-                 exit_reward_profile=None, progress_experiment=None):
+                 exit_reward_profile=None, progress_experiment=None, reward_config=None):
         if scenario not in ('easy', 'medium', 'hard'):
             raise ValueError(f'Unknown Antwerp scenario: {scenario}')
         if task not in ANTWERP_TASKS:
             raise ValueError(f'Unknown Antwerp task: {task}')
         self.scenario = scenario
         self.task = task
-        self.exit_reward_profile = (exit_config.REWARD_PROFILE if exit_reward_profile is None
-                                    else exit_reward_profile)
-        self.progress_experiment = (exit_progress_reward.validate_experiment(progress_experiment)
-                                    if progress_experiment is not None else None)
-        if self.exit_reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
-                                        exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES):
-            if task != exit_config.TASK_ID or self.progress_experiment is None:
-                raise ValueError('Progress reward requires an E76-D3 experiment configuration')
-            if exit_progress_reward.reward_profile(self.progress_experiment) != self.exit_reward_profile:
-                raise ValueError('Progress configuration and reward profile disagree')
-        elif self.progress_experiment is not None:
-            raise ValueError('Progress experiment configuration requires its reward profile')
-        self.episode_limit_steps = (int(round(self.progress_experiment['timeout_seconds']
-                                               / SUMO_STEP_LENGTH))
-                                    if self.progress_experiment is not None else maxSteps)
-        if (self.progress_experiment is not None and
-                (self.episode_limit_steps < 1 or
-                 not math.isclose(self.episode_limit_steps * SUMO_STEP_LENGTH,
-                                  self.progress_experiment['timeout_seconds'], abs_tol=1e-9))):
-            raise ValueError('Progress timeout must be a multiple of the SUMO step length')
-        if task == exit_config.TASK_ID:
-            exit_config.potential_beta_for_profile(self.exit_reward_profile)
-        elif exit_reward_profile is not None:
-            raise ValueError('An E76-to-D3 reward profile requires the E76-to-D3 task')
-        self.route_network = (load_route_network(ANTWERP_DIR / 'Antwerp.net.xml')
-                              if self.exit_reward_profile in (exit_config.URGENCY_REWARD_PROFILE,
-                                                              exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES)
-                              and task == exit_config.TASK_ID else None)
-        self.potential_gamma = (exit_config.POTENTIAL_GAMMA
-                                if potential_gamma is None else float(potential_gamma))
+        self.exit_reward_profile = exit_config.REWARD_PROFILE if exit_reward_profile is None else exit_reward_profile
+        self.reward_config = exit_progress_reward.load_experiment(reward_config)
+        if self.exit_reward_profile != self.reward_config['version']:
+            raise ValueError('Unknown or mismatched E76-to-D3 reward configuration')
+        if task != exit_config.TASK_ID:
+            raise ValueError('Only the E76-to-D3 task is supported')
+        self.progress_experiment = None
+        self.episode_limit_steps = exit_config.TIMEOUT_STEPS
+        self.potential_gamma = 0.0
+        self.route_network = None
         self.origin, self.destination, self.stage_name = ANTWERP_TASKS[task]
         self.ego_id = None
         self.ego_depart_time = None
@@ -165,6 +145,10 @@ class Merging(gym.Env):
         self.progress_after_remaining = None
         self.progress_after_odometer = None
         self.terminal_reason = ''
+        self.final_event_settled = False
+        self.emergency_stopping_steps = 0
+        self.emergency_stopping_episodes = 0
+        self.emergency_stopping_episode_seen = False
         self.secrm_before = None
         self.boundary_diagnostic = None
         self.network_path = ANTWERP_DIR / 'Antwerp.net.xml'
@@ -234,6 +218,9 @@ class Merging(gym.Env):
         self.ego_id = None
         self.ego_depart_time = None
         self.counter = 0
+        self.final_event_settled = False
+        self.emergency_stopping_steps = 0
+        self.emergency_stopping_episode_seen = False
         self.last_acc = 0
         self._ahead_state = []
         self._behind_state = []
@@ -532,8 +519,7 @@ class Merging(gym.Env):
         """Settle a physical same-edge change once; ignore junction remapping."""
         self.directional_lane_reward = 0.0
         self.directional_lane_event = None
-        if self.exit_reward_profile not in (exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES):
-            return
+        return
         if (not self.ego_on_road or self.ego_teleported or self.teleport_transition
                 or self.terminal_reason in ('Collision', 'Ego Teleported')
                 or self.lane_name not in LANE_CHANGE_EDGES):
@@ -633,7 +619,7 @@ class Merging(gym.Env):
             self.sumoBinary,
             '--net-file', str(scene_paths['network']),
             '--route-files', str(scene_paths['routes']),
-            '--begin', '0', '--end', str(self.episode_limit_steps * SUMO_STEP_LENGTH),
+            '--begin', '0',
             '--step-length', str(SUMO_STEP_LENGTH), '--lateral-resolution', '0.8',
             '--seed', str(sumo_seed),
             '--no-step-log', '--collision.check-junctions',
@@ -664,8 +650,8 @@ class Merging(gym.Env):
                             self.traci.lane.getLength(f'{edge}_0')
                             for edge in exit_config.DISTANCE_SCALE_EDGES)
                         if self.exit_reward_profile == exit_config.REWARD_PROFILE:
-                            self.potential_previous = self._exit_potential()
-                            self.initial_potential = self.potential_previous
+                            self.potential_previous = 0.0
+                            self.initial_potential = 0.0
                         elif self.exit_reward_profile == exit_config.URGENCY_REWARD_PROFILE:
                             self._reward_urgency()
                         else:
@@ -700,20 +686,10 @@ class Merging(gym.Env):
 
     def getReward(self):
 
-        if (self.exit_reward_profile in secrm_reward.PROFILES
-                or (self.exit_reward_profile in (exit_config.PROGRESS_REWARD_PROFILE,
-                                                 exit_config.DIRECTIONAL_REWARD_PROFILE)
-                    and self.task == exit_config.TASK_ID)):
+        if self.exit_reward_profile == exit_config.REWARD_PROFILE:
             context = RewardContext(
-                outcome=self.terminal_reason, config=self.progress_experiment['reward'],
-                teleported=self.teleport_transition or self.ego_teleported,
-                progress_before=self.progress_before_remaining,
-                progress_after=self.progress_after_remaining,
-                odometer_before=self.progress_before_odometer,
-                odometer_after=self.progress_after_odometer,
-                initial_remaining=self.progress_initial_remaining,
-                lane_change=self.directional_lane_reward,
-                secrm_before=self.secrm_before)
+                outcome=self.terminal_reason, config=self.reward_config,
+                teleported=self.teleport_transition or self.ego_teleported)
             total, self.reward_components = settle(self.exit_reward_profile, context)
             self.last_stage_reward = 0.0
             return total
@@ -910,7 +886,7 @@ class Merging(gym.Env):
                         self.exit_maneuver = {'edge': self.lane_name, 'target': target,
                                               'start_time': now, 'last_progress_time': now,
                                               'stable_steps': 0}
-                        if self.exit_reward_profile in (exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES):
+                        if False:
                             self.directional_pending_request = int(direction)
                             self.directional_seen_lateral_motion = False
                             self.directional_request_distance = self._remaining_to_d3_start()
@@ -934,12 +910,9 @@ class Merging(gym.Env):
             self.lane_id = self.traci.vehicle.getLaneID(self.ego_id)
             self.lane_name = self.traci.vehicle.getRoadID(self.ego_id)
             self.lane_idx = self.traci.vehicle.getLaneIndex(self.ego_id)
-            if (self.exit_reward_profile in (exit_config.DIRECTIONAL_REWARD_PROFILE, *secrm_reward.PROFILES)
-                    and self.directional_settled_lane is None):
+            if False:
                 self._update_directional_lane_reward()
-        if self.exit_reward_profile in secrm_reward.PROFILES:
-            self.secrm_before = self._secrm_snapshot() if was_on_road else None
-            self.boundary_diagnostic = road_boundary.observe(self)
+        self.boundary_diagnostic = road_boundary.observe(self) if was_on_road else {'status': 'unknown'}
         parsed_action = parseAction(action)
         self.exit_applied_lane_change_direction = 0
         self.exit_actor_request_direction = (
@@ -1007,7 +980,7 @@ class Merging(gym.Env):
         if self.ego_id in self.traci.simulation.getCollidingVehiclesIDList():
             info['message'] = 'Collision'
             terminated = True
-        elif self.progress_experiment is not None and (started or ended or self.ego_teleported):
+        elif started or ended or self.ego_teleported:
             info['message'] = 'Ego Teleported'
             terminated = True
         elif self.missed_exit:
@@ -1017,11 +990,13 @@ class Merging(gym.Env):
             info['message'] = 'Arrived'
             terminated = True
         elif self.counter >= self.episode_limit_steps:
-            info['message'] = 'Max Steps'
-            truncated = True
-        elif self.ego_id in self.traci.simulation.getEmergencyStoppingVehiclesIDList():
-            info['message'] = 'Emergency Stopping'
+            info['message'] = 'Timeout'
             terminated = True
+        if self.ego_id in self.traci.simulation.getEmergencyStoppingVehiclesIDList():
+            self.emergency_stopping_steps += 1
+            if not self.emergency_stopping_episode_seen:
+                self.emergency_stopping_episodes += 1
+                self.emergency_stopping_episode_seen = True
         self.done = terminated or truncated
         self.terminal_reason = info['message'] if self.done else ''
         self._update_directional_lane_reward()
@@ -1040,20 +1015,7 @@ class Merging(gym.Env):
         urgency_reward = 0.0
         urgency_value = None
         urgency_provisional = False
-        if self.task == exit_config.TASK_ID:
-            if self.exit_reward_profile == exit_config.REWARD_PROFILE:
-                next_potential = 0.0 if self.done else self._exit_potential()
-                potential_reward = (self.potential_gamma * next_potential
-                                    - self.potential_previous)
-                self.potential_previous = next_potential
-                self.reward += potential_reward
-            elif self.exit_reward_profile == exit_config.URGENCY_REWARD_PROFILE:
-                urgency_value, urgency_provisional = self._reward_urgency()
-                urgency_reward = (0.0 if self.done else
-                                  exit_config.urgency_penalty(urgency_value))
-                self.reward += urgency_reward
-                self.reward_components['urgency'] = float(urgency_reward)
-            self.reward_components['potential'] = float(potential_reward)
+        self.reward_components['emergency_stopping'] = 0.0
         self.state = self.observation.copy()
         self.last_acc = self.parsed_action[0]
         if self.done and close_on_done:
@@ -1087,7 +1049,10 @@ class Merging(gym.Env):
                      'secrm_diagnostic': getattr(self, 'secrm_before', None),
                      'road_boundary': getattr(self, 'boundary_diagnostic', None),
                      'teleport_started': started, 'teleport_ended': ended,
-                     'is_success': info['message'] == 'Arrived' and not self.ego_teleported})
+                     'sumo_route_completion': info['message'] == 'Arrived',
+                     'is_success': info['message'] == 'Arrived',
+                     'emergency_stopping_steps': self.emergency_stopping_steps,
+                     'emergency_stopping_episodes': self.emergency_stopping_episodes})
         return self.observation, float(self.reward), terminated, truncated, info
 
 

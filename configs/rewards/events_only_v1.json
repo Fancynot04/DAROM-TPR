@@ -1,0 +1,10 @@
+{
+  "version": "events_only_v1",
+  "events": {
+    "success": 50,
+    "collision": -100,
+    "missed_exit": -100,
+    "teleport": -100,
+    "timeout": -100
+  }
+}

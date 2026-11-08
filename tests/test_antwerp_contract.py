@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from src import exit_e76_d3_config as exit_config
-from src import exit_progress_reward, secrm_reward
+from src import exit_progress_reward
 from src.merging import ANTWERP_TASKS, Merging
 from train_sac_delay import parse_args
 
@@ -25,8 +25,8 @@ class E76D3ContractTests(unittest.TestCase):
 
     def test_training_entry_is_fresh_and_single_task(self):
         with patch.object(sys, 'argv', [
-                'train_sac_delay.py', '--exit_phase', 'secrm_efficiency_directional_l1',
-                '--scenario', 'hard', '--wandb_mode', 'disabled']):
+                'train_sac_delay.py', '--seed', '43', '--scenario', 'hard',
+                '--total_timesteps', '17', '--checkpoint_freq', '9', '--wandb_mode', 'disabled']):
             args = parse_args()
         self.assertEqual(args.task, exit_config.TASK_ID)
         self.assertEqual(args.scenario, 'hard')
@@ -62,11 +62,8 @@ class E76D3ContractTests(unittest.TestCase):
         self.assertNotIn('vehicle.setSpeed', source)
 
     def test_pending_off_submits_repeated_requests(self):
-        experiment = exit_progress_reward.load_experiment(
-            phase='secrm_efficiency_directional_l1')
         env = Merging(seed=42, scenario='easy', task=exit_config.TASK_ID,
-                      exit_reward_profile=secrm_reward.ADAPTIVE_PROFILE,
-                      progress_experiment=experiment)
+                      reward_config=exit_progress_reward.load_experiment())
         env.ego_on_road = True
         env.ego_id = 'ego'
         env.lane_name = 'E77'
