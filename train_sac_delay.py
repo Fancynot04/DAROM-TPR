@@ -59,6 +59,11 @@ class EpisodeRewardCallback(BaseCallback):
         self.recent_outcomes = deque(maxlen=20)
         self.toward_requests = 0
         self.away_requests = 0
+        self.completed_episodes = 0
+        self.sumo_emergency_stopping_steps_total = 0
+        self.sumo_emergency_stopping_episodes = 0
+        self.hard_braking_steps_total = 0
+        self.hard_braking_episodes = 0
         self.started = time.monotonic()
         self.starting_timesteps = 0
         self.last_logged_env_steps = -1
@@ -131,6 +136,15 @@ class EpisodeRewardCallback(BaseCallback):
             merged = bool(info.get('merged'))
             stage_reached = bool(info.get('stage_reached', merged))
             exit_task = info.get('stage_name') == 'exit'
+            self.completed_episodes += 1
+            sumo_emergency_steps = int(info.get('sumo_emergency_stopping_steps', 0))
+            sumo_emergency_episode = bool(info.get('sumo_emergency_stopping_episode', False))
+            hard_braking_steps = int(info.get('hard_braking_steps', 0))
+            hard_braking_episode = bool(info.get('hard_braking_episode', False))
+            self.sumo_emergency_stopping_steps_total += sumo_emergency_steps
+            self.sumo_emergency_stopping_episodes += int(sumo_emergency_episode)
+            self.hard_braking_steps_total += hard_braking_steps
+            self.hard_braking_episodes += int(hard_braking_episode)
             if exit_task:
                 self.recent_outcomes.append((int(bool(info['is_success'])),
                                              int(outcome == 'Missed Exit'),
@@ -147,7 +161,22 @@ class EpisodeRewardCallback(BaseCallback):
                 'train/ego_teleported': int(info['ego_teleported']),
                 'train/teleported_arrival': int(outcome == 'Arrived' and info['ego_teleported']),
                 'train/collision': int(outcome == 'Collision'),
-                'train/emergency_stopping': int(outcome == 'Emergency Stopping'),
+                'train/emergency_stopping': int(sumo_emergency_episode),
+                'train/sumo_emergency_stopping_steps_episode': sumo_emergency_steps,
+                'train/sumo_emergency_stopping_steps_total': (
+                    self.sumo_emergency_stopping_steps_total),
+                'train/sumo_emergency_stopping_episodes_total': (
+                    self.sumo_emergency_stopping_episodes),
+                'train/sumo_emergency_stopping_episode_rate': (
+                    self.sumo_emergency_stopping_episodes / self.completed_episodes),
+                'train/hard_braking_threshold_mps2': float(
+                    info.get('hard_braking_threshold_mps2',
+                             exit_config.HARD_BRAKING_THRESHOLD_MPS2)),
+                'train/hard_braking_steps_episode': hard_braking_steps,
+                'train/hard_braking_steps_total': self.hard_braking_steps_total,
+                'train/hard_braking_episodes_total': self.hard_braking_episodes,
+                'train/hard_braking_episode_rate': (
+                    self.hard_braking_episodes / self.completed_episodes),
                 'train/missed_exit': int(outcome == 'Missed Exit'),
                 'train/teleport_failure': int(outcome == 'Ego Teleported'),
                 'train/no_stage_timeout': int(outcome == 'Timeout' and not stage_reached),
@@ -292,6 +321,21 @@ def save_model(model: SAC, path: str) -> str:
     model.save(path)
     return path
 
+
+def read_git_provenance():
+    """Return commit and porcelain state without reading file contents."""
+    try:
+        commit = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], text=True).strip()
+        status = subprocess.check_output(
+            ['git', 'status', '--porcelain=v1', '--untracked-files=all'],
+            text=True).rstrip('\n')
+    except (OSError, subprocess.CalledProcessError):
+        return {'git_commit': None, 'git_dirty': None,
+                'git_status_porcelain': None}
+    return {'git_commit': commit, 'git_dirty': bool(status),
+            'git_status_porcelain': status}
+
 def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None,
              ablation='full', task=exit_config.TASK_ID, potential_gamma=None,
              nav_features=False, exit_reward_profile=None,
@@ -405,11 +449,7 @@ def main():
     ensure_dirs(args.log_dir)
 
     max_delay = 20
-    try:
-        git_commit = subprocess.check_output(
-            ['git', 'rev-parse', 'HEAD'], text=True).strip()
-    except (OSError, subprocess.CalledProcessError):
-        git_commit = None
+    git_provenance = read_git_provenance()
     sac_parameters = dict(
         learning_rate=3e-5, batch_size=512, buffer_size=1_000_000,
         learning_starts=100, gamma=args.gamma, tau=0.005, train_freq=1,
@@ -418,9 +458,10 @@ def main():
     )
     config = dict(
         algo='SAC',
-        git_commit=git_commit,
+        **git_provenance,
         radius=args.radius,
         seed=args.seed,
+        training_seed=args.seed,
         total_timesteps=args.total_timesteps,
         policy='MlpPolicy',
         encoder_mode=args.encoder_mode,

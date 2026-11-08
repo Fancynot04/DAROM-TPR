@@ -51,7 +51,10 @@ def load_hydra_config(config_dir=None, config_name='config', overrides=()):
     with initialize_config_dir(version_base=None, config_dir=str(directory)):
         composed = compose(config_name=config_name, overrides=list(overrides))
     reward = validate_reward_config(composed.reward)
-    return composed, reward, reward_hash(reward), OmegaConf.to_yaml(composed, resolve=True)
+    # Persist only the resolved reward contract here. Runtime parameters remain
+    # CLI-owned and are recorded from their final argparse values in the manifest.
+    reward_yaml = OmegaConf.to_yaml(OmegaConf.create(reward), resolve=True)
+    return composed, reward, reward_hash(reward), reward_yaml
 
 
 def load_reward_file(path):

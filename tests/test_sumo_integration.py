@@ -1,7 +1,8 @@
 """Opt-in real SUMO checks: python -m tests.test_sumo_integration.
 
-The arrival/teleport fixtures reposition ego and shorten the teleport timeout
-only inside these tests. They validate accounting, not driving performance.
+Tests explicitly distinguish controlled TraCI terminal fixtures from the
+natural fixed-action Missed Exit trajectory. They validate accounting, not
+policy performance, and never alter the formal route files.
 """
 
 import socket
@@ -54,11 +55,20 @@ class SumoIntegrationTests(unittest.TestCase):
                 command = info['sumo_command']
                 self.assertEqual(int(command[command.index('--seed') + 1]), info['sumo_seed'])
                 json.dumps(info, allow_nan=False)
+                sumo_emergency_steps = 0
+                hard_braking_steps = 0
                 for _ in range(125):
                     observation, reward, terminated, truncated, info = env.step([0.5, 0])
                     self.assertFalse(terminated or truncated)
                     self.assertTrue(env.observation_space.contains(observation))
-                    self.assertTrue(np.isfinite(reward))
+                    self.assertEqual(reward, 0.0)
+                    self.assertEqual(info['reward_components']['emergency_stopping'], 0.0)
+                    sumo_emergency_steps += int(info['sumo_emergency_stopping_this_step'])
+                    hard_braking_steps += int(info['hard_braking_this_step'])
+                    self.assertEqual(info['sumo_emergency_stopping_steps'],
+                                     sumo_emergency_steps)
+                    self.assertEqual(info['hard_braking_steps'], hard_braking_steps)
+                    self.assertEqual(info['hard_braking_threshold_mps2'], -4.5)
                     self.assertFalse(info['ego_teleported'])
                     snapshot = base.observation_snapshot
                     aligned = align_delayed_neighbors(snapshot, snapshot, base.observation[0])
@@ -74,6 +84,7 @@ class SumoIntegrationTests(unittest.TestCase):
         return env.step([0, 0])
 
     def test_clean_arrival_reward_and_flags(self):
+        # Controlled SUMO integration: place Ego at the real D3 route endpoint.
         env = Merging(seed=579071, scenario='easy')
         env.reset()
         _, reward, terminated, truncated, info = self.force_arrival(env)
@@ -82,18 +93,63 @@ class SumoIntegrationTests(unittest.TestCase):
         self.assertEqual(info['message'], 'Arrived')
         self.assertTrue(info['is_success'])
         self.assertFalse(info['ego_teleported'])
-        self.assertGreater(reward, 49)
+        self.assertEqual(reward, 50.0)
+        self.assertEqual(info['reward_episode_summary']['_meta']['weighted_total'], 50.0)
 
-    def test_real_sumo_timeout_and_reward_tracker_reset(self):
+    def test_controlled_collision_reward_and_flags(self):
+        # Controlled SUMO integration: overlap a background vehicle with Ego.
         env = Merging(seed=43, scenario='easy')
-        env.episode_limit_steps = 1
         env.reset(seed=43)
+        ego_lane = traci.vehicle.getLaneID('ego')
+        ego_position = traci.vehicle.getLanePosition('ego')
+        blocker = next(vehicle_id for vehicle_id in traci.vehicle.getIDList()
+                       if vehicle_id != 'ego')
+        traci.vehicle.moveTo(blocker, ego_lane, ego_position + 0.1)
+        traci.vehicle.setSpeed(blocker, 0.0)
         _, reward, terminated, truncated, info = env.step([0, 0])
+        self.assertTrue(terminated)
+        self.assertFalse(truncated)
+        self.assertEqual(info['message'], 'Collision')
+        self.assertEqual(reward, -100.0)
+        self.assertEqual(info['reward_episode_summary']['_meta']['weighted_total'], -100.0)
+
+    def test_natural_fixed_action_missed_exit(self):
+        # Natural driving trajectory: no lane-change requests, no repositioning.
+        env = Merging(seed=43, scenario='easy')
+        env.reset(seed=43)
+        for _ in range(1000):
+            _, reward, terminated, truncated, info = env.step([5.0, 0.0])
+            if terminated or truncated:
+                break
+        self.assertTrue(terminated)
+        self.assertFalse(truncated)
+        self.assertEqual(info['message'], 'Missed Exit')
+        self.assertEqual(reward, -100.0)
+        self.assertEqual(info['reward_episode_summary']['_meta']['weighted_total'], -100.0)
+
+    def test_controlled_timeout_at_exact_control_step_and_tracker_reset(self):
+        # Controlled SUMO integration: hold Ego in place without changing formal scenes.
+        env = Merging(seed=43, scenario='easy')
+        env.reset(seed=43)
+        for control_step in range(1, 4001):
+            was_on_road = env.prepare_step([0.0, 0.0])
+            traci.vehicle.setSpeed('ego', 0.0)
+            traci.simulationStep()
+            _, reward, terminated, truncated, info = env.collect_step(
+                was_on_road, close_on_done=False)
+            if control_step == 3999:
+                self.assertFalse(terminated)
+                self.assertFalse(truncated)
+                self.assertEqual(reward, 0.0)
+        self.assertEqual(control_step, 4000)
         self.assertTrue(terminated)
         self.assertFalse(truncated)
         self.assertEqual(info['message'], 'Timeout')
         self.assertEqual(reward, -100.0)
-        self.assertEqual(info['reward_episode_summary']['_meta']['steps'], 1)
+        self.assertEqual(info['reward_episode_summary']['_meta']['steps'], 4000)
+        self.assertEqual(info['reward_episode_summary']['_meta']['weighted_total'], -100.0)
+        with self.assertRaisesRegex(RuntimeError, 'reset'):
+            env.step([0, 0])
         env.reset(seed=43)
         self.assertEqual(env.reward_tracker.summary()['_meta']['steps'], 0)
         env.close()

@@ -30,7 +30,7 @@ ARRIVAL_DETAILS = ('Uninterrupted Arrived', 'Teleported Arrived', 'Ego Teleporte
 REPORT_METRICS = ('success_rate', 'raw_arrival_rate', 'collision_rate', 'timeout_rate',
                   'no_merge_rate', 'emergency_stopping_rate', 'ego_teleport_rate',
                   'missed_exit_rate', 'mean_policy_reward_return',
-                  'mean_b0_reference_return')
+                  'mean_b0_reference_return', 'hard_braking_episode_rate')
 B0_REFERENCE_REWARDS = {
     'Arrived': 50.0,
     'Collision': -100.0,
@@ -42,7 +42,8 @@ B0_REFERENCE_REWARDS = {
 
 def make_env(seed, scenario, delay_mode, safety, ablation, task=exit_config.TASK_ID,
              potential_gamma=None, nav_features=False, exit_reward_profile=None,
-             progress_experiment=None, reward_config=None, reward_gamma=0.99):
+             progress_experiment=None, reward_config=None,
+             reward_gamma=exit_config.DEFAULT_GAMMA):
     env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
                                potential_gamma=potential_gamma,
                                exit_reward_profile=exit_reward_profile,
@@ -186,7 +187,6 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
         stopped_steps = 0
         stopped_streak = 0
         max_stopped_streak = 0
-        hard_braking_steps = 0
         e77_zero_traffic_samples = []
         speed_samples = []
         commands_sent = Counter()
@@ -211,9 +211,9 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                 stopped_streak = stopped_streak + 1 if speed < 0.5 else 0
                 max_stopped_streak = max(max_stopped_streak, stopped_streak)
                 stopped_steps += int(speed < 0.5)
-                hard_braking_steps += int(acceleration <= -4.5)
                 if (base.lane_name == 'E77' and base.lane_idx == 0
-                        and (speed < 0.5 or acceleration <= -4.5)):
+                        and (speed < 0.5 or acceleration
+                             <= exit_config.HARD_BRAKING_THRESHOLD_MPS2)):
                     leader = vehicle.getLeader(base.ego_id, 100.0)
                     gap = (float(leader[1]) + float(vehicle.getMinGap(base.ego_id))
                            if leader and leader[0] else None)
@@ -319,6 +319,11 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                 if outcome not in OUTCOMES:
                     raise ValueError(f'Unexpected episode outcome: {outcome!r}')
                 counts[outcome] += 1
+                sumo_emergency_steps = int(info['sumo_emergency_stopping_steps'])
+                sumo_emergency_episode = bool(info['sumo_emergency_stopping_episode'])
+                hard_braking_steps = int(info['hard_braking_steps'])
+                hard_braking_episode = bool(info['hard_braking_episode'])
+                counts['Emergency Stopping'] += int(sumo_emergency_episode)
                 teleported = bool(info['ego_teleported'])
                 if outcome != 'Ego Teleported':
                     counts['Ego Teleported'] += int(teleported)
@@ -334,7 +339,9 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                 b0_return = b0_reference_reward(outcome, teleported)
                 policy_returns.append(episode_return)
                 b0_reference_returns.append(b0_return)
-                record = {'seed': seed + episode, 'steps': steps, 'outcome': outcome,
+                record = {'seed': seed + episode,
+                                'evaluation_seed': seed + episode,
+                                'steps': steps, 'outcome': outcome,
                                 'merged': bool(info.get('merged')), 'ego_teleported': teleported,
                                 'stage_reached': bool(info.get('stage_reached', info.get('merged'))),
                                 'stage_reward_paid': bool(info.get('stage_reward_paid', False)),
@@ -354,6 +361,12 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                                 'policy_reward_return': episode_return,
                                 'b0_reference_return': b0_return,
                                 'reward_term_totals': dict(reward_term_totals),
+                                'sumo_emergency_stopping_steps': sumo_emergency_steps,
+                                'sumo_emergency_stopping_episode': sumo_emergency_episode,
+                                'hard_braking_threshold_mps2': float(
+                                    info['hard_braking_threshold_mps2']),
+                                'hard_braking_steps': hard_braking_steps,
+                                'hard_braking_episode': hard_braking_episode,
                                 'return': episode_return, 'reset_info': reset_info}
                 if secrm:
                     record['road_boundary'] = {'sample_counts': dict(boundary_counts),
@@ -400,6 +413,16 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
             'collision_rate': 100 * counts['Collision'] / episodes,
             'timeout_rate': 100 * counts['Timeout'] / episodes,
             'emergency_stopping_rate': 100 * counts['Emergency Stopping'] / episodes,
+            'sumo_emergency_stopping_steps': sum(
+                row['sumo_emergency_stopping_steps'] for row in records),
+            'sumo_emergency_stopping_episodes': counts['Emergency Stopping'],
+            'sumo_emergency_stopping_episode_rate': (
+                100 * counts['Emergency Stopping'] / episodes),
+            'hard_braking_threshold_mps2': exit_config.HARD_BRAKING_THRESHOLD_MPS2,
+            'hard_braking_steps': sum(row['hard_braking_steps'] for row in records),
+            'hard_braking_episodes': sum(row['hard_braking_episode'] for row in records),
+            'hard_braking_episode_rate': (
+                100 * sum(row['hard_braking_episode'] for row in records) / episodes),
             'missed_exit_rate': 100 * counts['Missed Exit'] / episodes,
             'mean_policy_reward_return': float(np.mean(policy_returns)),
             'mean_b0_reference_return': float(np.mean(b0_reference_returns)),
@@ -507,7 +530,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
                            reward_config=setup['reward_config'],
                            reward_gamma=setup['reward_gamma'])
             try:
-                runs.append({'seed': seed, 'episodes': episodes,
+                runs.append({'seed': seed, 'evaluation_seed_start': seed,
+                             'episodes': episodes,
                              **evaluate(model, env, episodes, seed, task=task,
                                         urgency_trace=urgency_trace, route_network=network)})
             finally:
@@ -521,7 +545,9 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
             'secrm_formula_version': getattr(model, 'secrm_formula_version', None),
             'secrm_effective_vehicle_parameters': getattr(model, 'secrm_effective_vehicle_parameters', None),
             'training_timesteps': getattr(model, 'num_timesteps', None),
-            'deterministic': True, 'evaluation_seeds': list(seeds),
+            'deterministic': True,
+            'evaluation_seed_starts': list(seeds),
+            'evaluation_seeds': list(seeds),  # compatibility alias
             'episodes_per_seed': episodes, 'total_episodes': episodes * len(seeds),
             'std_ddof': 1, 'ci_method': '1.96 * sample_std / sqrt(evaluation_runs)',
             'aggregation_unit': 'evaluation_run_of_one_checkpoint',
@@ -548,12 +574,14 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('checkpoint', help='Antwerp SAC checkpoint (.zip)')
-    parser.add_argument('--scenario', choices=('easy', 'medium', 'hard'), default='medium')
+    parser.add_argument('--scenario', choices=('easy', 'medium', 'hard'),
+                        default=exit_config.DEFAULT_SCENARIO)
     parser.add_argument('--task', choices=(exit_config.TASK_ID,), default=exit_config.TASK_ID)
     parser.add_argument('--delay-mode', choices=('uniform', 'exponential', 'triangular', 'bursty', 'bimodal'), default='uniform')
-    parser.add_argument('--episodes', type=int, default=51)
+    parser.add_argument('--episodes', type=int, default=50)
     seed_options = parser.add_mutually_exclusive_group()
-    seed_options.add_argument('--seed', type=int, default=42)
+    seed_options.add_argument('--seed', type=int, default=200001,
+                              help='First evaluation-episode seed; distinct from training seed')
     seed_options.add_argument('--seeds', nargs='+', type=int,
                               help='Start seed of each run; episode seeds increment within a run')
     safety_options = parser.add_mutually_exclusive_group()

@@ -45,6 +45,7 @@ class E76D3ContractTests(unittest.TestCase):
             self.assertEqual(ego[0].attrib['from'], 'E76')
             self.assertEqual(ego[0].attrib['to'], 'D3')
             self.assertEqual(ego[0].attrib['departLane'], 'random')
+            self.assertEqual(ego[0].attrib['speedFactor'], '1.0')
 
     def test_net_contains_120_kmh_corridor_limit(self):
         root = ET.parse(ROUTES / 'Antwerp.net.xml').getroot()
@@ -82,6 +83,13 @@ class E76D3ContractTests(unittest.TestCase):
         self.assertEqual(env.origin, 'E76')
         self.assertEqual(env.destination, 'D3')
         self.assertEqual(env.episode_limit_steps, 4000)
+
+    def test_training_defaults_match_final_baseline(self):
+        self.assertEqual(exit_config.DEFAULT_SCENARIO, 'easy')
+        self.assertEqual(exit_config.DEFAULT_SEED, 42)
+        self.assertEqual(exit_config.DEFAULT_GAMMA, 0.999)
+        self.assertEqual(exit_config.DEFAULT_TOTAL_TIMESTEPS, 200_000)
+        self.assertEqual(exit_config.DEFAULT_CHECKPOINT_FREQ, 50_000)
 
 
 if __name__ == '__main__':

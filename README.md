@@ -62,8 +62,8 @@ python3 train_sac_delay.py \
   --scenario easy \
   --seed 42 \
   --total_timesteps 200000 \
-  --checkpoint_freq 200000 \
-  --gamma 0.99 \
+  --checkpoint_freq 50000 \
+  --gamma 0.999 \
   --reward-config configs/rewards/events_only_v1.json \
   --wandb_mode disabled
 ```
@@ -81,12 +81,14 @@ change only payment, not termination or SUMO control:
 python3 train_sac_delay.py \
   --hydra-override reward.terms.collision.enabled=false \
   --hydra-override reward.terms.timeout.weight=0.5 \
-  --total_timesteps 200000 --checkpoint_freq 200000 \
+  --total_timesteps 200000 --checkpoint_freq 50000 \
   --wandb_mode disabled
 ```
 
 Each run records the resolved reward YAML, configuration hashes and Git SHA in
-the episode-log manifest. Episode-level raw, weighted, discounted, active,
+the episode-log manifest. It also records `git_dirty` and the porcelain status
+so an uncommitted source snapshot is never presented as a clean commit.
+Episode-level raw, weighted, discounted, active,
 tail-quantile and clipping statistics use the training gamma and are emitted
 under `reward/episode/*` and `reward/total/*`. W&B training, reward and
 diagnostic series all use monotonic `env_steps`; TensorBoard remains a separate
@@ -111,11 +113,18 @@ an error and never falls back to B0. Reports distinguish
 `-100`, non-terminal `0`) and retain per-term totals. Safety is off for the
 matched task contract unless explicitly requested for a separate diagnostic.
 
-The network lane speed is 120 km/h, but SUMO computes vehicle `allowedSpeed`
-using the vehicle speed factor. Until the Ego vType is fixed to
-`speedFactor=1.0`, an unmodified route can therefore permit a small amount
-above the nominal lane value; do not describe the lane XML value alone as a
-verified hard Ego cap.
+Training defaults are Easy, training seed 42, gamma 0.999, 200,000 environment
+steps and 50,000-step checkpoints. Evaluation defaults are Easy, 50 episodes
+and evaluation seed range beginning at 200001. Training seed and evaluation
+seeds are separate provenance fields. Explicit CLI values remain final.
+
+SUMO `Emergency Stopping` diagnostics and the kinematic hard-braking threshold
+(`acceleration <= -4.5 m/s²`) are logged separately. Both report step counts,
+episode counts and episode rates; neither changes termination or B0 reward.
+
+The network lane speed is 120 km/h and all three formal route files pin the Ego
+trip to `speedFactor=1.0`. Background vehicle types retain their original
+speed-factor behavior.
 
 ## GUI inspection
 

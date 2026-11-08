@@ -104,13 +104,22 @@ def select_terminal_event(*, collision, ego_teleported, missed_exit, arrived,
     return None
 
 
+def classify_braking_diagnostics(sumo_emergency_stopping, acceleration_mps2):
+    """Keep the SUMO event separate from the kinematic hard-braking threshold."""
+    hard_braking = (acceleration_mps2 is not None
+                    and float(acceleration_mps2)
+                    <= exit_config.HARD_BRAKING_THRESHOLD_MPS2)
+    return bool(sumo_emergency_stopping), bool(hard_braking)
+
+
 
 class Merging(gym.Env):
     metadata = {"render_modes": ["human", "none"], "render_fps": 10}
     def __init__(self, seed, mode='all', radius=50, render_mode=None, runSafetyCheck=False,
-                 scenario='medium', task=exit_config.TASK_ID, potential_gamma=None,
+                 scenario=exit_config.DEFAULT_SCENARIO, task=exit_config.TASK_ID,
+                 potential_gamma=None,
                  exit_reward_profile=None, progress_experiment=None, reward_config=None,
-                 reward_gamma=0.99):
+                 reward_gamma=exit_config.DEFAULT_GAMMA):
         if scenario not in ('easy', 'medium', 'hard'):
             raise ValueError(f'Unknown Antwerp scenario: {scenario}')
         if task not in ANTWERP_TASKS:
@@ -174,6 +183,8 @@ class Merging(gym.Env):
         self.emergency_stopping_steps = 0
         self.emergency_stopping_episodes = 0
         self.emergency_stopping_episode_seen = False
+        self.hard_braking_steps = 0
+        self.hard_braking_episode_seen = False
         self.secrm_before = None
         self.boundary_diagnostic = None
         self.network_path = ANTWERP_DIR / 'Antwerp.net.xml'
@@ -247,7 +258,10 @@ class Merging(gym.Env):
         self.counter = 0
         self.final_event_settled = False
         self.emergency_stopping_steps = 0
+        self.emergency_stopping_episodes = 0
         self.emergency_stopping_episode_seen = False
+        self.hard_braking_steps = 0
+        self.hard_braking_episode_seen = False
         self.last_acc = 0
         self._ahead_state = []
         self._behind_state = []
@@ -1017,11 +1031,20 @@ class Merging(gym.Env):
         if terminal_event is not None:
             info['message'] = terminal_event
             terminated = True
-        if self.ego_id in self.traci.simulation.getEmergencyStoppingVehiclesIDList():
+        sumo_emergency_stopping_event = (
+            self.ego_id in self.traci.simulation.getEmergencyStoppingVehiclesIDList())
+        acceleration = (float(self.traci.vehicle.getAcceleration(self.ego_id))
+                        if self.ego_on_road else None)
+        sumo_emergency_stopping, hard_braking = classify_braking_diagnostics(
+            sumo_emergency_stopping_event, acceleration)
+        if sumo_emergency_stopping:
             self.emergency_stopping_steps += 1
             if not self.emergency_stopping_episode_seen:
                 self.emergency_stopping_episodes += 1
                 self.emergency_stopping_episode_seen = True
+        if hard_braking:
+            self.hard_braking_steps += 1
+            self.hard_braking_episode_seen = True
         self.done = terminated or truncated
         self.terminal_reason = info['message'] if self.done else ''
         self._update_directional_lane_reward()
@@ -1082,6 +1105,16 @@ class Merging(gym.Env):
                      'teleport_started': started, 'teleport_ended': ended,
                      'sumo_route_completion': info['message'] == 'Arrived',
                      'is_success': info['message'] == 'Arrived',
+                     # Explicit SUMO event diagnostics; never terminal and never rewarded.
+                     'sumo_emergency_stopping_this_step': sumo_emergency_stopping,
+                     'sumo_emergency_stopping_steps': self.emergency_stopping_steps,
+                     'sumo_emergency_stopping_episode': self.emergency_stopping_episode_seen,
+                     # Separate kinematic threshold diagnostic, not a SUMO event.
+                     'hard_braking_threshold_mps2': exit_config.HARD_BRAKING_THRESHOLD_MPS2,
+                     'hard_braking_this_step': hard_braking,
+                     'hard_braking_steps': self.hard_braking_steps,
+                     'hard_braking_episode': self.hard_braking_episode_seen,
+                     # Compatibility aliases for existing local analysis scripts.
                      'emergency_stopping_steps': self.emergency_stopping_steps,
                      'emergency_stopping_episodes': self.emergency_stopping_episodes})
         return self.observation, float(self.reward), terminated, truncated, info

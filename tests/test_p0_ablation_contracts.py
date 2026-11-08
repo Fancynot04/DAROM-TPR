@@ -13,8 +13,10 @@ from stable_baselines3.common.buffers import ReplayBuffer
 import evaluate_sac_delay as evaluation
 import train_sac_delay as training
 from src import exit_progress_reward
-from src.merging import (ANTWERP_ENV_VERSION, Merging, control_step_timeout,
+from src.merging import (ANTWERP_ENV_VERSION, Merging,
+                         classify_braking_diagnostics, control_step_timeout,
                          select_terminal_event)
+from src.rewards.config import load_hydra_config
 from src.rewards.registry import RewardContext, settle, settle_terms
 from src.rewards.terms import RewardTracker
 from src.wrapper import DelayWrapper, SafetyWrapper
@@ -93,6 +95,33 @@ class EvaluationRewardContractTests(unittest.TestCase):
 
 
 class TrainingSafetyAndMetricTests(unittest.TestCase):
+    def test_cli_hydra_and_evaluation_defaults_are_aligned(self):
+        with patch.object(sys, 'argv', ['train_sac_delay.py', '--wandb_mode', 'disabled']):
+            args = training.parse_args()
+        self.assertEqual((args.scenario, args.seed, args.gamma,
+                          args.total_timesteps, args.checkpoint_freq),
+                         ('easy', 42, 0.999, 200_000, 50_000))
+        composed, reward, _, _ = load_hydra_config()
+        self.assertEqual((composed.experiment.scenario, composed.experiment.seed,
+                          composed.experiment.gamma,
+                          composed.experiment.total_timesteps,
+                          composed.experiment.checkpoint_freq),
+                         ('easy', 42, 0.999, 200_000, 50_000))
+        self.assertEqual(reward['name'], 'events_only_v1')
+        evaluation_args = evaluation.parse_args(['checkpoint.zip'])
+        self.assertEqual((evaluation_args.scenario, evaluation_args.episodes,
+                          evaluation_args.seeds), ('easy', 50, [200001]))
+
+    def test_git_provenance_records_commit_dirty_flag_and_porcelain(self):
+        with patch('train_sac_delay.subprocess.check_output',
+                   side_effect=['abc123\n', ' M train_sac_delay.py\n']):
+            provenance = training.read_git_provenance()
+        self.assertEqual(provenance, {
+            'git_commit': 'abc123',
+            'git_dirty': True,
+            'git_status_porcelain': ' M train_sac_delay.py',
+        })
+
     def test_default_training_is_safety_off_and_safety_flag_fails(self):
         with patch.object(sys, 'argv', ['train_sac_delay.py', '--wandb_mode', 'disabled']):
             self.assertFalse(training.parse_args().use_safety)
@@ -123,6 +152,33 @@ class TrainingSafetyAndMetricTests(unittest.TestCase):
         self.assertIn('sync_tensorboard=False', source)
         self.assertIn('gradient_save_freq=0', source)
 
+    def test_emergency_metrics_come_from_info_not_terminal_outcome(self):
+        callback = training.EpisodeRewardCallback()
+        callback.num_timesteps = 1
+        callback._log_metrics = Mock()
+        callback.locals = {
+            'rewards': np.array([0.0]),
+            'dones': np.array([True]),
+            'infos': [{
+                'message': 'Timeout', 'stage_name': 'exit', 'merged': False,
+                'stage_reached': False, 'is_success': False,
+                'ego_teleported': False, 'ego_start_lane': None,
+                'exit_actor_request_direction': 0, 'potential_reward': 0.0,
+                'urgency_reward': 0.0, 'reward_episode_summary': None,
+                'sumo_emergency_stopping_steps': 3,
+                'sumo_emergency_stopping_episode': True,
+                'hard_braking_threshold_mps2': -4.5,
+                'hard_braking_steps': 2, 'hard_braking_episode': True,
+            }],
+        }
+        self.assertTrue(callback._on_step())
+        metrics = callback._log_metrics.call_args.args[0]
+        self.assertEqual(metrics['train/emergency_stopping'], 1)
+        self.assertEqual(metrics['train/sumo_emergency_stopping_steps_episode'], 3)
+        self.assertEqual(metrics['train/sumo_emergency_stopping_episode_rate'], 1.0)
+        self.assertEqual(metrics['train/hard_braking_steps_episode'], 2)
+        self.assertEqual(metrics['train/hard_braking_episode_rate'], 1.0)
+
     @patch('train_sac_delay.wandb.log')
     def test_two_episode_logs_keep_global_monotonic_steps(self, log):
         callback = training.EpisodeRewardCallback()
@@ -140,6 +196,14 @@ class TrainingSafetyAndMetricTests(unittest.TestCase):
 
 
 class TerminalContractTests(unittest.TestCase):
+    def test_sumo_emergency_and_hard_braking_are_distinct_and_reward_free(self):
+        self.assertEqual(classify_braking_diagnostics(True, -1.0), (True, False))
+        self.assertEqual(classify_braking_diagnostics(False, -5.0), (False, True))
+        config = exit_progress_reward.load_experiment()
+        reward, components = settle(config['name'], RewardContext(None, config))
+        self.assertEqual(reward, 0.0)
+        self.assertTrue(all(value == 0.0 for value in components.values()))
+
     def test_individual_terminal_events_and_nonterminal_diagnostics(self):
         cases = {
             'Collision': dict(collision=True),

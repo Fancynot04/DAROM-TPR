@@ -1,5 +1,5 @@
 scenario: easy
 seed: 42
-gamma: 0.99
+gamma: 0.999
 total_timesteps: 200000
-checkpoint_freq: 200000
+checkpoint_freq: 50000
