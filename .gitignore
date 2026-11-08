@@ -67,6 +67,7 @@ dist/
 !/configs/
 !/configs/rewards/
 !/configs/rewards/events_only_v1.json
+!/configs/e0_reachability_v1.json
 wandb/
 runs/
 logs/

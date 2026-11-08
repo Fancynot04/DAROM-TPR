@@ -134,6 +134,30 @@ by the environment and is independent of this GUI end time. For Medium or Hard i
 in the GUI configuration with the corresponding
 `Antwerp_<scenario>_exit_e76_d3.rou.xml` file.
 
+## E0 reachability diagnostic
+
+`src.e0_reachability` is a privileged, non-learning diagnostic controller. It
+uses the real SUMO state and the parsed lane-connection graph only to choose
+ordinary `[acceleration, lateral_action]` environment actions. It does not
+change vehicle position, route, speed limits, or the SAC observation.
+
+Run the five fixed E76 departure lanes against the same ten traffic seeds in a
+fresh, ignored output directory:
+
+```bash
+SUMO_HOME=/path/to/sumo python3 -m src.e0_reachability \
+  --output-dir tmp/ai/e0-reachability/<run-id> \
+  --lanes 0 1 2 3 4 \
+  --seeds 100001 100002 100003 100004 100005 100006 100007 100008 100009 100010 \
+  --run-label <experiment-id>
+```
+
+The command writes an immutable manifest, route/network/configuration hashes,
+`episodes.csv`, per-lane outcome counts, and JSONL traces per episode. It
+validates B0 reward settlement on every transition and rejects any terminal
+truncation. These privileged-controller results are environment reachability
+evidence, not SAC-policy performance.
+
 ## Tests
 
 ```bash

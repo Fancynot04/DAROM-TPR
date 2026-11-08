@@ -1,0 +1,16 @@
+{
+  "version": "e0_reachability_v1",
+  "scenario": "easy",
+  "reward_config": "configs/rewards/events_only_v1.json",
+  "gamma": 0.999,
+  "episode_limit_steps": 4000,
+  "lane_change_seconds": 4.0,
+  "target_speed_mps": 30.0,
+  "max_acceleration_mps2": 2.6,
+  "max_braking_mps2": -4.5,
+  "front_gap_base_m": 3.0,
+  "rear_gap_base_m": 3.0,
+  "headway_seconds": 0.5,
+  "gap_buffer_m": 1.0,
+  "strategy": "topology_route_plan_v1"
+}
