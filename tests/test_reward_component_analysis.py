@@ -1,6 +1,8 @@
+import tempfile
 import unittest
+from pathlib import Path
 
-from scripts.analyze_reward_components import analyse, component_stats
+from scripts.analyze_reward_components import analyse, component_stats, jsonl_records
 
 
 def term(name, raw, weighted, enabled=True, active=True, clipped=False, clipped_value=None):
@@ -38,6 +40,14 @@ class RewardComponentAnalysisTests(unittest.TestCase):
                   'terms':[term('route',0,0,enabled=False,active=False)]}]
         _,_,issues=analyse(records)
         self.assertTrue(any('term sum' in issue for issue in issues))
+
+    def test_jsonl_without_step_terms_warns_instead_of_creating_zero_samples(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'episodes.jsonl'
+            path.write_text('{"reward": 3.0}\n')
+            records, messages = jsonl_records(path, .99)
+        self.assertEqual(records, [])
+        self.assertTrue(any('no per-step reward_terms' in message for message in messages))
 
 
 if __name__=='__main__': unittest.main()
