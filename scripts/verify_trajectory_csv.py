@@ -14,6 +14,11 @@ from pathlib import Path
 VOLATILE = {'trajectory_dir', 'output', 'wall_seconds'}
 
 
+def vector_columns(row, prefix):
+    """Return only numbered vector fields, excluding similarly named metadata."""
+    return [key for key in row if key.startswith(prefix) and key[len(prefix):].isdigit()]
+
+
 def strip(value):
     if isinstance(value, dict):
         return {k: strip(v) for k, v in value.items() if k not in VOLATILE}
@@ -90,8 +95,8 @@ def main():
     for row in trans:
         tr_by.setdefault(row['trajectory_id'], []).append(row)
     for tid, rows in tr_by.items():
-        obs_keys = [k for k in rows[0] if k.startswith('obs_')]
-        nxt_keys = [k for k in rows[0] if k.startswith('next_obs_')]
+        obs_keys = vector_columns(rows[0], 'obs_')
+        nxt_keys = vector_columns(rows[0], 'next_obs_')
         check(f'[{tid}] obs/next_obs dim 134', len(obs_keys) == 134 == len(nxt_keys))
         check(f'[{tid}] action dim 2 and finite', all(
             math.isfinite(float(r[k])) for r in rows for k in ('action_policy_0', 'action_policy_1')))

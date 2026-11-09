@@ -10,6 +10,7 @@ import numpy as np
 
 from src.route_urgency import Lane, RouteNetwork
 from src.trajectory_recorder import OBS_DIM, TrajectoryRecorder, ttc
+from scripts.verify_trajectory_csv import vector_columns
 
 
 class FakeVehicle:
@@ -79,6 +80,11 @@ def info(terminal=False, on_road=True, message=''):
 
 
 class RecorderTest(unittest.TestCase):
+    def test_vector_columns_exclude_next_obs_metadata(self):
+        row = {'next_obs_000': '1', 'next_obs_133': '2',
+               'next_obs_valid': '1', 'next_obs_note': ''}
+        self.assertEqual(vector_columns(row, 'next_obs_'), ['next_obs_000', 'next_obs_133'])
+
     def test_arrived_terminal_row_kept_and_after_state_not_fabricated(self):
         with tempfile.TemporaryDirectory() as tmp:
             rec, base = make(tmp), FakeBase()
