@@ -139,6 +139,33 @@ an error and never falls back to B0. Reports distinguish
 `-100`, non-terminal `0`) and retain per-term totals. Safety is off for the
 matched task contract unless explicitly requested for a separate diagnostic.
 
+For read-only trajectory export, pass a new output directory. The recorder
+writes one step row and one transition row per `env.step`, plus an immutable
+manifest and column dictionary. Reward columns are derived from the
+checkpoint-authenticated reward configuration; for B0 they are `success`,
+`collision`, `missed_exit`, `teleport`, and `timeout`. Terminal transitions
+whose Ego has already left SUMO retain the environment-returned observation
+but mark it invalid rather than presenting it as a physical next state.
+
+```bash
+python3 evaluate_sac_delay.py \
+  models_experiments/e76-d3/<run>.zip \
+  --scenario easy --episodes 1 --seeds 200051 200052 \
+  --no-safety --trajectory-dir tmp/ai/e76-d3/trajectory-export \
+  --model-label B0 --run-label <experiment-id> \
+  --output tmp/ai/e76-d3/trajectory-eval.json
+
+python3 -m scripts.verify_trajectory_csv \
+  --trajectory-dir tmp/ai/e76-d3/trajectory-export \
+  --report-on tmp/ai/e76-d3/trajectory-eval.json \
+  --report-off tmp/ai/e76-d3/baseline-eval.json
+```
+
+The optional baseline report must use the same checkpoint, arguments, and
+seeds without `--trajectory-dir`; the verifier then checks that recording did
+not change the evaluation report. Exported `next_obs_valid=0` rows must not be
+used as physical successor states in downstream transition learning.
+
 Training defaults are Easy, training seed 42, gamma 0.999, 200,000 environment
 steps and 50,000-step checkpoints. Evaluation defaults are Easy, 50 episodes
 and evaluation seed range beginning at 200001. Training seed and evaluation

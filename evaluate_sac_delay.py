@@ -19,6 +19,7 @@ from src.merging import (ANTWERP_DIR, ANTWERP_ENV_VERSION, ANTWERP_TASKS,
 from src import exit_e76_d3_config as exit_config
 from src import exit_progress_reward
 from src.route_urgency import load_route_network, observe_route_urgency
+from src.trajectory_recorder import TrajectoryRecorder
 from src.wrapper import ABLATION_MODES, DelayWrapper, SafetyWrapper
 
 
@@ -154,7 +155,7 @@ def diagnostic_reward_without_potential(reward, info, task):
 
 
 def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
-             urgency_trace=None, route_network=None):
+             urgency_trace=None, route_network=None, recorder=None):
     if episodes < 1:
         raise ValueError('episodes must be positive')
     counts = Counter()
@@ -164,6 +165,9 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
     for episode in range(episodes):
         observation, reset_info = env.reset(seed=seed + episode)
         base = env.unwrapped
+        if recorder is not None:
+            recorder.begin_episode(run_seed=seed, episode_index=episode,
+                                   eval_seed=seed + episode, reset_info=reset_info)
         secrm = False
         directional = False
         boundary_counts = Counter()
@@ -241,7 +245,12 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                     env.unwrapped, route_network, LANE_CHANGE_EDGES,
                     lane_change_seconds=exit_config.LANE_CHANGE_TIME_SECONDS)
             action, _ = model.predict(observation, deterministic=True)
+            trajectory_pre = (recorder.capture_pre(base, observation, action)
+                              if recorder is not None else None)
             observation, reward, terminated, truncated, info = env.step(action)
+            if recorder is not None:
+                recorder.record_step(trajectory_pre, base, observation, reward,
+                                     terminated, truncated, info)
             for term in info.get('reward_terms', ()):
                 reward_term_totals[term['name']] += float(term['weighted'])
             if secrm:
@@ -318,6 +327,8 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                 outcome = info.get('message', 'Unknown')
                 if outcome not in OUTCOMES:
                     raise ValueError(f'Unexpected episode outcome: {outcome!r}')
+                if recorder is not None:
+                    recorder.end_episode(outcome, steps)
                 counts[outcome] += 1
                 sumo_emergency_steps = int(info['sumo_emergency_stopping_steps'])
                 sumo_emergency_episode = bool(info['sumo_emergency_stopping_episode'])
@@ -506,16 +517,40 @@ def summarize_runs(runs, metrics=REPORT_METRICS):
 
 
 def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds,
-                  task=exit_config.TASK_ID, urgency_trace_path=None):
+                  task=exit_config.TASK_ID, urgency_trace_path=None,
+                  trajectory_dir=None, trajectory_context=None):
     """Repeat evaluation of ONE checkpoint; this is not training-seed variance."""
     validate_seed_ranges(episodes, seeds)
     setup = validate_checkpoint_setup(model, ablation, safety, task)
     if urgency_trace_path is not None and ANTWERP_TASKS[task][2] != 'exit':
         raise ValueError('Route urgency diagnostics require an exit task')
     network = (load_route_network(ANTWERP_DIR / 'Antwerp.net.xml')
-               if urgency_trace_path is not None else None)
+               if urgency_trace_path is not None or trajectory_dir is not None else None)
+    recorder = None
+    if trajectory_dir is not None:
+        context = dict(trajectory_context or {})
+        recorder = TrajectoryRecorder(
+            trajectory_dir, model_label=context.get('model_label'),
+            checkpoint=context.get('checkpoint'),
+            checkpoint_sha256=context.get('checkpoint_sha256'),
+            training_seed=getattr(model, 'seed', None), scenario=scenario,
+            reward_config=setup['reward_config'], route_network=network,
+            lane_change_edges=LANE_CHANGE_EDGES, parse_action=parseAction,
+            destination=exit_config.DESTINATION,
+            lane_change_seconds=exit_config.LANE_CHANGE_TIME_SECONDS,
+            step_length=exit_config.SUMO_STEP_LENGTH,
+            hard_braking_threshold=exit_config.HARD_BRAKING_THRESHOLD_MPS2,
+            run_label=context.get('run_label'),
+            config={**context.get('evaluation_config', {}), 'delay_mode': delay_mode,
+                    'evaluation_safety': bool(safety), 'ablation': ablation,
+                    'episodes_per_seed': episodes, 'evaluation_seed_starts': list(seeds),
+                    'deterministic': True, 'task': task,
+                    'training_safety': setup.get('training_safety')})
+    status = 'error'
     runs = []
     with ExitStack() as stack:
+        if recorder is not None:
+            stack.callback(lambda: recorder.close(status))  # also runs on exceptions
         urgency_trace = None
         if urgency_trace_path is not None:
             urgency_trace_path = Path(urgency_trace_path)
@@ -533,9 +568,11 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
                 runs.append({'seed': seed, 'evaluation_seed_start': seed,
                              'episodes': episodes,
                              **evaluate(model, env, episodes, seed, task=task,
-                                        urgency_trace=urgency_trace, route_network=network)})
+                                        urgency_trace=urgency_trace, route_network=network,
+                                        recorder=recorder)})
             finally:
                 env.close()
+        status = 'ok'
     report = {'protocol': 'antwerp-v2-evaluation-v1', 'scenario': scenario,
             'task': task, 'stage_name': ANTWERP_TASKS[task][2],
             'delay_mode': delay_mode, 'ablation': ablation, **setup,
@@ -564,6 +601,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
     if task == exit_config.TASK_ID:
         report['e77_zero_redeparture_episodes'] = sum(
             run['e77_zero_redeparture_episodes'] for run in runs)
+    if trajectory_dir is not None:
+        report['trajectory_dir'] = str(trajectory_dir)
     if urgency_trace_path is not None:
         report['route_urgency_trace'] = str(urgency_trace_path)
         report['route_urgency_profile'] = 'lane_graph_minimax_v1'
@@ -595,6 +634,10 @@ def parse_args(argv=None):
     parser.add_argument('--output', type=Path, help='Save a new JSON report; never overwrite')
     parser.add_argument('--urgency-trace', type=Path,
                         help='Write a new read-only per-step route-urgency JSONL trace')
+    parser.add_argument('--trajectory-dir', type=Path,
+                        help='Enable full per-step CSV trajectory recording into this NEW directory')
+    parser.add_argument('--model-label', help='Label stored in trajectory files (default: checkpoint stem)')
+    parser.add_argument('--run-label', help='Experiment id stored in the trajectory manifest')
     args = parser.parse_args(argv)
     args.seeds = args.seeds if args.seeds is not None else [args.seed]
     try:
@@ -605,6 +648,8 @@ def parse_args(argv=None):
         parser.error('--torch-threads must be positive')
     if args.output and args.output.exists():
         parser.error(f'Output already exists: {args.output}')
+    if args.trajectory_dir and args.trajectory_dir.exists():
+        parser.error(f'Trajectory directory already exists: {args.trajectory_dir}')
     if args.urgency_trace and args.urgency_trace.exists():
         parser.error(f'Urgency trace already exists: {args.urgency_trace}')
     if args.urgency_trace and ANTWERP_TASKS[args.task][2] != 'exit':
@@ -625,7 +670,17 @@ def main():
     model = SAC.load(checkpoint, device=args.device)
     report = evaluate_runs(model, args.scenario, args.delay_mode, args.safety,
                            args.ablation, args.episodes, args.seeds, task=args.task,
-                           urgency_trace_path=args.urgency_trace)
+                           urgency_trace_path=args.urgency_trace,
+                           trajectory_dir=args.trajectory_dir,
+                           trajectory_context={
+                               'model_label': args.model_label or checkpoint.stem,
+                               'checkpoint': str(checkpoint),
+                               'checkpoint_sha256': checkpoint_hash,
+                               'run_label': args.run_label,
+                               'evaluation_config': {
+                                   'argv_scenario': args.scenario, 'device': args.device,
+                                   'torch_threads': args.torch_threads,
+                                   'seeds': list(args.seeds), 'episodes': args.episodes}})
     report.update(checkpoint=str(checkpoint), checkpoint_sha256=checkpoint_hash,
                   device=args.device, torch_threads=args.torch_threads)
     print(f"{args.scenario} | {args.delay_mode} | task={args.task} | ablation={args.ablation} | "
