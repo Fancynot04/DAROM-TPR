@@ -385,6 +385,12 @@ def parse_args():
     parser.add_argument('--checkpoint_freq', type=int, default=exit_config.DEFAULT_CHECKPOINT_FREQ)
     parser.add_argument('--save_replay_buffer', action='store_true',
                         help='Save replay buffers alongside periodic and final models')
+    parser.add_argument('--resume-model', default=None,
+                        help='SAC checkpoint to resume with its matching Replay Buffer')
+    parser.add_argument('--resume-replay-buffer', default=None,
+                        help='Replay Buffer paired with --resume-model')
+    parser.add_argument('--target-total-timesteps', type=int, default=None,
+                        help='Absolute target when resuming; training continues from the loaded model step')
     parser.add_argument('--torch_threads', type=int, default=None)
     parser.add_argument('--device', default='auto')
     parser.add_argument('--log_dir', default='runs')
@@ -434,6 +440,13 @@ def parse_args():
         parser.error('--gru_input_mode only applies to --encoder_mode GRU')
     if args.checkpoint_freq < 1 or (args.torch_threads is not None and args.torch_threads < 1):
         parser.error('checkpoint_freq and torch_threads must be positive')
+    resuming = bool(args.resume_model)
+    if resuming != bool(args.resume_replay_buffer):
+        parser.error('--resume-model and --resume-replay-buffer must be supplied together')
+    if args.target_total_timesteps is not None and not resuming:
+        parser.error('--target-total-timesteps requires --resume-model and --resume-replay-buffer')
+    if resuming and (args.target_total_timesteps is None or args.target_total_timesteps < 1):
+        parser.error('A positive --target-total-timesteps is required when resuming')
     return args
 
 def ensure_dirs(path: str):
@@ -510,6 +523,9 @@ def main():
         device=args.device,
         torch_threads=args.torch_threads,
         save_replay_buffer=args.save_replay_buffer,
+        resume_model=args.resume_model,
+        resume_replay_buffer=args.resume_replay_buffer,
+        target_total_timesteps=args.target_total_timesteps,
         curriculum_stages=None,
     )
     config['network_sha256'] = hashlib.sha256(
@@ -577,10 +593,27 @@ def main():
     else:
         policy_kwargs = dict()
 
-    model = SAC('MlpPolicy', vec_env, seed=args.seed, verbose=1, tensorboard_log=os.path.join(args.log_dir, args.run_name), device=args.device, policy_kwargs=policy_kwargs, **sac_parameters)
-    
-    
-    
+    if args.resume_model:
+        model = SAC.load(args.resume_model, env=vec_env, device=args.device)
+        if getattr(model, 'exit_reward_config_sha256', None) != args.reward_config_hash:
+            raise ValueError('Resume checkpoint reward configuration hash mismatch')
+        if getattr(model, 'antwerp_task', None) != args.task:
+            raise ValueError('Resume checkpoint task mismatch')
+        model.load_replay_buffer(args.resume_replay_buffer)
+        resumed_from_timesteps = int(model.num_timesteps)
+        if args.target_total_timesteps <= resumed_from_timesteps:
+            raise ValueError('target-total-timesteps must exceed the resumed model step count')
+        learn_timesteps = args.target_total_timesteps - resumed_from_timesteps
+        model.continuation_source_model = os.path.abspath(args.resume_model)
+        model.continuation_source_replay_buffer = os.path.abspath(args.resume_replay_buffer)
+        model.continuation_start_timesteps = resumed_from_timesteps
+        model.continuation_target_timesteps = int(args.target_total_timesteps)
+    else:
+        model = SAC('MlpPolicy', vec_env, seed=args.seed, verbose=1,
+                    tensorboard_log=os.path.join(args.log_dir, args.run_name),
+                    device=args.device, policy_kwargs=policy_kwargs, **sac_parameters)
+        resumed_from_timesteps = 0
+        learn_timesteps = args.total_timesteps
 
     model.ablation = args.ablation
     model.antwerp_env_version = ANTWERP_ENV_VERSION
@@ -632,16 +665,18 @@ def main():
 
     # Create callbacks
     episode_callback = EpisodeRewardCallback(log_path=args.episode_log)
+    episode_callback.starting_timesteps = resumed_from_timesteps
     checkpoint_callback = CheckpointCallback(
         save_freq=args.checkpoint_freq, save_path=checkpoint_dir,
         name_prefix=args.run_name, verbose=2,
         save_replay_buffer=args.save_replay_buffer,
     )
-    if args.exit_phase in ('secrm_efficiency_directional',
+    if (args.resume_model or args.exit_phase in ('secrm_efficiency_directional',
                            'secrm_efficiency_directional_l1',
-                           'secrm_efficiency_directional_l2'):
+                           'secrm_efficiency_directional_l2')):
         checkpoint_callback = IntermediateCheckpointCallback(
-            final_step=args.total_timesteps, save_freq=args.checkpoint_freq,
+            final_step=(args.target_total_timesteps if args.resume_model
+                        else args.total_timesteps), save_freq=args.checkpoint_freq,
             save_path=checkpoint_dir, name_prefix=args.run_name, verbose=2,
             save_replay_buffer=args.save_replay_buffer)
     wandb_callback = WandbCallback(
@@ -655,8 +690,8 @@ def main():
 
     # Train and save before closing the single active TraCI connection.
     try:
-        model.learn(total_timesteps=args.total_timesteps, callback=callbacks,
-                    reset_num_timesteps=True)
+        model.learn(total_timesteps=learn_timesteps, callback=callbacks,
+                    reset_num_timesteps=not bool(args.resume_model))
         save_model(model, model_path)
         if args.save_replay_buffer:
             replay_path = os.path.join(args.save_dir, f'{args.run_name}_replay_buffer.pkl')
