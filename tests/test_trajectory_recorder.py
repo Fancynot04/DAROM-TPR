@@ -107,6 +107,8 @@ class RecorderTest(unittest.TestCase):
                 rows = list(csv.DictReader(handle))
             with (Path(tmp) / 'traj/trajectory_transitions.csv').open() as handle:
                 trans = list(csv.DictReader(handle))
+            with (Path(tmp) / 'traj/episode_summary.csv').open() as handle:
+                summary = list(csv.DictReader(handle))
             self.assertEqual(len(rows), 3)
             self.assertEqual(rows[-1]['terminal_reason'], 'Arrived')
             self.assertEqual(rows[-1]['post_state_source'], 'unavailable')
@@ -119,9 +121,14 @@ class RecorderTest(unittest.TestCase):
             self.assertEqual(rows[0]['ttc_follower_status'], 'no_follower')
             self.assertEqual(trans[-1]['next_obs_valid'], '0')
             self.assertEqual(len([k for k in trans[0] if k.startswith('obs_')]), 134)
+            self.assertEqual(summary[0]['steps'], '3')
+            self.assertEqual(summary[0]['terminal_reason'], 'Arrived')
+            self.assertEqual(summary[0]['success'], '1')
+            self.assertEqual(summary[0]['physical_lane_changes'], '0')
             manifest = json.loads((Path(tmp) / 'traj/trajectory_manifest.json').read_text())
             self.assertEqual(manifest['status'], 'ok')
             self.assertEqual(manifest['episodes'][0]['chain_breaks'], 0)
+            self.assertIn('episode_summary.csv', manifest['files'])
 
     def test_diagnostic_failure_leaves_blank_not_crash(self):
         with tempfile.TemporaryDirectory() as tmp:

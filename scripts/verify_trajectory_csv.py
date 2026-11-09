@@ -91,6 +91,22 @@ def main():
         results.append(f"INFO  {tag} lane requests={sum(r['lc_request_e76_e77'] not in ('0', '') for r in rows)}, "
                        f"commands sent={sum(r['lc_command_sent'] not in ('0', '') for r in rows)}, "
                        f"physical lane changes={sum(r['lane_change_physical'] == '1' for r in rows)}")
+    summary_path = d / 'episode_summary.csv'
+    if summary_path.exists():
+        with summary_path.open() as handle:
+            summary = list(csv.DictReader(handle))
+        summary_by_id = {row['trajectory_id']: row for row in summary}
+        check('episode summary has one row per trajectory', len(summary) == len(by_id))
+        for tid, rows in by_id.items():
+            item = summary_by_id.get(tid)
+            check(f'[{tid}] episode summary present', item is not None)
+            if item is not None:
+                check(f'[{tid}] episode summary steps/outcome',
+                      int(item['steps']) == len(rows) and item['terminal_reason'] == rows[-1]['terminal_reason'])
+                check(f'[{tid}] episode summary return', math.isclose(
+                    float(item['policy_return']), float(rows[-1]['return_cum']), abs_tol=1e-9))
+    else:
+        results.append('INFO  episode_summary.csv absent (legacy trajectory artifact)')
     tr_by = {}
     for row in trans:
         tr_by.setdefault(row['trajectory_id'], []).append(row)

@@ -166,6 +166,27 @@ seeds without `--trajectory-dir`; the verifier then checks that recording did
 not change the evaluation report. Exported `next_obs_valid=0` rows must not be
 used as physical successor states in downstream transition learning.
 
+Each current export also contains `episode_summary.csv`, with one row per
+trajectory. It aggregates the existing route diagnostics, E76/E77 request and
+command stages, physical lane changes, braking/TTC safety diagnostics, and
+available efficiency/route reward terms; a missing reward term remains empty.
+It does not create labels or change any environment behavior. Compare several
+recording directories read-only with:
+
+```bash
+python3 -m scripts.analyze_trajectory_collection \
+  --group B0=/path/to/B0/trajectory \
+  --group B1=/path/to/B1/trajectory \
+  --group B2=/path/to/B2/trajectory \
+  --group B3=/path/to/B3/trajectory \
+  --output-dir tmp/ai/e76-d3/trajectory-comparison
+```
+
+The comparison reports evaluation-episode summaries, not independent
+training-seed statistics. `exit_reachable_fraction` is computed over only the
+steps where the route diagnostic is defined; request, command, and physical
+lane-change counts remain separate quantities.
+
 Training defaults are Easy, training seed 42, gamma 0.999, 200,000 environment
 steps and 50,000-step checkpoints. Evaluation defaults are Easy, 50 episodes
 and evaluation seed range beginning at 200001. Training seed and evaluation

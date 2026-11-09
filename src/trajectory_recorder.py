@@ -35,6 +35,7 @@ TTC_MIN_CLOSING_SPEED_MPS = 0.1
 NEIGHBOR_SEARCH_M = 150.0
 STEPS_FILE = 'trajectory_steps.csv'
 TRANSITIONS_FILE = 'trajectory_transitions.csv'
+SUMMARY_FILE = 'episode_summary.csv'
 MANIFEST_FILE = 'trajectory_manifest.json'
 COLUMNS_FILE = 'trajectory_columns.json'
 
@@ -126,6 +127,22 @@ FIXED_COLUMNS = [
 ]
 TERM_SUFFIXES = (('raw', 'reward'), ('weighted', 'reward'), ('active', 'bool'))
 
+SUMMARY_FIELDS = [
+    'trajectory_id', 'model_label', 'checkpoint_sha256_12', 'training_seed', 'eval_seed', 'scenario',
+    'steps', 'terminal_reason', 'success', 'terminated', 'truncated', 'policy_return',
+    'route_remaining_to_d3_end_initial_m', 'route_remaining_to_d3_end_last_m',
+    'route_remaining_to_d3_start_initial_m', 'route_remaining_to_d3_start_last_m',
+    'exit_reachable_known_steps', 'exit_reachable_true_steps', 'exit_reachable_false_steps',
+    'min_lane_changes_required_min', 'min_lane_changes_required_max', 'direct_exit_lane_steps',
+    'route_urgency_max', 'route_diag_error_rows',
+    'lane_requests_e76_e77', 'lane_change_commands_sent', 'physical_lane_changes',
+    'hard_braking_steps', 'sumo_emergency_stopping_steps',
+    'leader_ttc_min_s', 'follower_ttc_min_s', 'leader_ttc_below_2s_steps',
+    'follower_ttc_below_2s_steps',
+    'efficiency_raw_mean', 'efficiency_weighted_sum',
+    'route_raw_mean', 'route_weighted_sum',
+]
+
 
 def _fmt(value):
     if value is None:
@@ -200,10 +217,13 @@ class TrajectoryRecorder:
                'next_obs_valid', 'next_obs_note'])
         self._steps_file = (self.out_dir / STEPS_FILE).open('x', newline='')
         self._trans_file = (self.out_dir / TRANSITIONS_FILE).open('x', newline='')
+        self._summary_file = (self.out_dir / SUMMARY_FILE).open('x', newline='')
         self._steps = csv.DictWriter(self._steps_file, fieldnames=self.step_fields, restval='')
         self._trans = csv.DictWriter(self._trans_file, fieldnames=self.transition_fields, restval='')
+        self._summary = csv.DictWriter(self._summary_file, fieldnames=SUMMARY_FIELDS, restval='')
         self._steps.writeheader()
         self._trans.writeheader()
+        self._summary.writeheader()
         self.episodes = []
         self.errors = Counter()
         self.unknown_terms = Counter()
@@ -221,6 +241,7 @@ class TrajectoryRecorder:
             'trajectory_id': tid, 'eval_seed': eval_seed, 'run_seed': run_seed,
             'episode_index': episode_index, 'rows': 0, 'return': 0.0, 'prev_cmd_acc': None,
             'last_row': None, 'prev_obs_hash': None, 'chain_breaks': 0,
+            'summary_stats': _summary_stats(),
             'sumo_seed': reset_info.get('sumo_seed'), 'sumo_version': reset_info.get('sumo_version'),
             'ego_route': reset_info.get('ego_route'), 'ego_start_lane': reset_info.get('ego_start_lane'),
             'scene_files': reset_info.get('scene_files'),
@@ -238,6 +259,10 @@ class TrajectoryRecorder:
                                f'last_reason={last["terminal_reason"]!r} outcome={outcome!r}')
         self._steps_file.flush()
         self._trans_file.flush()
+        summary = _episode_summary(ep, self.model_label, self.checkpoint_sha256, self.training_seed,
+                                   self.scenario)
+        self._summary.writerow({key: _fmt(summary.get(key)) for key in SUMMARY_FIELDS})
+        self._summary_file.flush()
         self.episodes.append({k: ep[k] for k in (
             'trajectory_id', 'run_seed', 'episode_index', 'eval_seed', 'sumo_seed',
             'sumo_version', 'ego_route', 'ego_start_lane', 'scene_files', 'ego_speed_mode',
@@ -427,6 +452,8 @@ class TrajectoryRecorder:
             else:
                 self.unknown_terms[term['name']] += 1  # still preserved in reward_terms_json
 
+        _update_summary_stats(ep['summary_stats'], row)
+
         self._steps.writerow({k: _fmt(row.get(k)) for k in self.step_fields})
         valid = alive
         note = '' if valid else 'synthetic: env returns a stale copy (ego removed/collided/teleporting)'
@@ -454,6 +481,7 @@ class TrajectoryRecorder:
             status = 'aborted'
         self._steps_file.close()
         self._trans_file.close()
+        self._summary_file.close()
         root = Path(__file__).resolve().parents[1]
         porcelain = _git(['status', '--porcelain'], root)
         manifest = {
@@ -476,7 +504,7 @@ class TrajectoryRecorder:
             'episodes': self.episodes, 'diagnostic_read_errors': dict(self.errors),
             'reward_terms_not_in_config': dict(self.unknown_terms),
             'files': {name: hashlib.sha256((self.out_dir / name).read_bytes()).hexdigest()
-                      for name in (STEPS_FILE, TRANSITIONS_FILE)},
+                      for name in (STEPS_FILE, TRANSITIONS_FILE, SUMMARY_FILE)},
         }
         columns = ([{'name': n, 'unit': u, 'description': d} for n, u, d in FIXED_COLUMNS]
                    + [{'name': n, 'unit': u, 'description': 'reward term field (see reward_terms_json)'}
@@ -491,3 +519,83 @@ class TrajectoryRecorder:
 def _finite_nonneg(value):
     value = _finite(value)
     return value if value is not None and value >= 0 else None
+
+
+def _summary_stats():
+    return {'first': {}, 'last': {}, 'counts': Counter(), 'numeric': {}}
+
+
+def _summary_number(stats, name, value):
+    value = _finite(value)
+    if value is None:
+        return
+    values = stats['numeric'].setdefault(name, [])
+    values.append(value)
+
+
+def _update_summary_stats(stats, row):
+    for key in ('route_remaining_to_d3_end_m', 'route_remaining_to_d3_start_m'):
+        value = _finite(row.get(key))
+        if value is not None:
+            stats['first'].setdefault(key, value)
+            stats['last'][key] = value
+    for key in ('min_lane_changes_required', 'route_urgency', 'ttc_leader_s', 'ttc_follower_s',
+                'rt_efficiency_raw', 'rt_efficiency_weighted', 'rt_route_raw', 'rt_route_weighted'):
+        _summary_number(stats, key, row.get(key))
+    counts = stats['counts']
+    for key in ('exit_reachable', 'direct_exit_lane', 'lc_request_e76_e77', 'lc_command_sent',
+                'lane_change_physical', 'hard_braking_this_step', 'sumo_emergency_stopping_this_step'):
+        value = row.get(key)
+        if value not in (None, '', 0, False, '0'):
+            counts[key] += 1
+    if row.get('exit_reachable') not in (None, ''):
+        counts['exit_reachable_known'] += 1
+    if row.get('route_diag_error'):
+        counts['route_diag_error'] += 1
+    for key in ('ttc_leader_s', 'ttc_follower_s'):
+        value = _finite(row.get(key))
+        if value is not None and value < 2.0:
+            counts[f'{key}_below_2s'] += 1
+
+
+def _mean(values):
+    return float(sum(values) / len(values)) if values else None
+
+
+def _episode_summary(ep, model_label, checkpoint_sha256, training_seed, scenario):
+    stats, last = ep['summary_stats'], ep['last_row']
+    numeric, counts = stats['numeric'], stats['counts']
+    return {
+        'trajectory_id': ep['trajectory_id'], 'model_label': model_label,
+        'checkpoint_sha256_12': (checkpoint_sha256 or '')[:12], 'training_seed': training_seed,
+        'eval_seed': ep['eval_seed'], 'scenario': scenario, 'steps': ep['rows'],
+        'terminal_reason': last['terminal_reason'], 'success': last['terminal_reason'] == 'Arrived',
+        'terminated': last['terminated'], 'truncated': last['truncated'], 'policy_return': ep['return'],
+        'route_remaining_to_d3_end_initial_m': stats['first'].get('route_remaining_to_d3_end_m'),
+        'route_remaining_to_d3_end_last_m': stats['last'].get('route_remaining_to_d3_end_m'),
+        'route_remaining_to_d3_start_initial_m': stats['first'].get('route_remaining_to_d3_start_m'),
+        'route_remaining_to_d3_start_last_m': stats['last'].get('route_remaining_to_d3_start_m'),
+        'exit_reachable_known_steps': counts['exit_reachable_known'],
+        'exit_reachable_true_steps': counts['exit_reachable'],
+        'exit_reachable_false_steps': counts['exit_reachable_known'] - counts['exit_reachable'],
+        'min_lane_changes_required_min': min(numeric['min_lane_changes_required'])
+        if numeric.get('min_lane_changes_required') else None,
+        'min_lane_changes_required_max': max(numeric['min_lane_changes_required'])
+        if numeric.get('min_lane_changes_required') else None,
+        'direct_exit_lane_steps': counts['direct_exit_lane'],
+        'route_urgency_max': max(numeric['route_urgency']) if numeric.get('route_urgency') else None,
+        'route_diag_error_rows': counts['route_diag_error'],
+        'lane_requests_e76_e77': counts['lc_request_e76_e77'],
+        'lane_change_commands_sent': counts['lc_command_sent'],
+        'physical_lane_changes': counts['lane_change_physical'],
+        'hard_braking_steps': counts['hard_braking_this_step'],
+        'sumo_emergency_stopping_steps': counts['sumo_emergency_stopping_this_step'],
+        'leader_ttc_min_s': min(numeric['ttc_leader_s']) if numeric.get('ttc_leader_s') else None,
+        'follower_ttc_min_s': min(numeric['ttc_follower_s']) if numeric.get('ttc_follower_s') else None,
+        'leader_ttc_below_2s_steps': counts['ttc_leader_s_below_2s'],
+        'follower_ttc_below_2s_steps': counts['ttc_follower_s_below_2s'],
+        'efficiency_raw_mean': _mean(numeric.get('rt_efficiency_raw', ())),
+        'efficiency_weighted_sum': sum(numeric.get('rt_efficiency_weighted', ())),
+        'route_raw_mean': _mean(numeric.get('rt_route_raw', ())),
+        'route_weighted_sum': sum(numeric.get('rt_route_weighted', ())),
+    }
