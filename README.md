@@ -200,6 +200,19 @@ python3 -m scripts.audit_trajectory_preferences \
   --output-dir tmp/ai/e76-d3/preference-audit
 ```
 
+The P3-only v2 candidate is a separate implementation and never overwrites the
+v1 CSV. It audits whether stable `min_lane_changes_required=0` has false
+negatives among successful trajectories before enabling completion-dependent
+branches, then writes only a candidate CSV and short comparison report:
+
+```bash
+python3 -m scripts.compare_trajectory_preferences_v2_candidate \
+  --group B0=/path/to/B0 --group B1=/path/to/B1 \
+  --group B2=/path/to/B2 --group B3=/path/to/B3 \
+  --v1-preferences /path/to/trajectory_preferences.csv \
+  --output-dir tmp/ai/e76-d3/preference-v2-candidate
+```
+
 Training defaults are Easy, training seed 42, gamma 0.999, 200,000 environment
 steps and 50,000-step checkpoints. Evaluation defaults are Easy, 50 episodes
 and evaluation seed range beginning at 200001. Training seed and evaluation
