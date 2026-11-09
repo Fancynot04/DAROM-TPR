@@ -187,6 +187,19 @@ training-seed statistics. `exit_reachable_fraction` is computed over only the
 steps where the route diagnostic is defined; request, command, and physical
 lane-change counts remain separate quantities.
 
+Existing preference exports can be audited without changing the rule or the
+source CSV files. The audit replays the exact comparator branch for every pair,
+checks A/B reversal and strict three-way cycles, and writes a cross-tab, 20
+review samples, and a Markdown report to a new output directory:
+
+```bash
+python3 -m scripts.audit_trajectory_preferences \
+  --group B0=/path/to/B0 --group B1=/path/to/B1 \
+  --group B2=/path/to/B2 --group B3=/path/to/B3 \
+  --preferences-dir /path/to/preferences \
+  --output-dir tmp/ai/e76-d3/preference-audit
+```
+
 Training defaults are Easy, training seed 42, gamma 0.999, 200,000 environment
 steps and 50,000-step checkpoints. Evaluation defaults are Easy, 50 episodes
 and evaluation seed range beginning at 200001. Training seed and evaluation
