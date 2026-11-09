@@ -125,6 +125,7 @@ class RecorderTest(unittest.TestCase):
             self.assertEqual(summary[0]['terminal_reason'], 'Arrived')
             self.assertEqual(summary[0]['success'], '1')
             self.assertEqual(summary[0]['physical_lane_changes'], '0')
+            self.assertEqual(summary[0]['min_lane_changes_required_min'], '')
             manifest = json.loads((Path(tmp) / 'traj/trajectory_manifest.json').read_text())
             self.assertEqual(manifest['status'], 'ok')
             self.assertEqual(manifest['episodes'][0]['chain_breaks'], 0)

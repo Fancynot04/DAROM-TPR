@@ -32,6 +32,8 @@ def main():
     ap.add_argument('--trajectory-dir', type=Path, required=True)
     ap.add_argument('--report-on', type=Path, required=True)
     ap.add_argument('--report-off', type=Path)
+    ap.add_argument('--require-route-diagnostics', action='store_true',
+                    help='Require each trajectory to contain valid D3 distance/reachability/lane-change samples')
     args = ap.parse_args()
     d = args.trajectory_dir
     steps = list(csv.DictReader((d / 'trajectory_steps.csv').open()))
@@ -88,6 +90,18 @@ def main():
         check(f'{tag} removal only on the terminal row', all(int(r['is_terminal_step']) for r in removed))
         check(f'{tag} no after-state fabricated when removed',
               all(r['post_state_source'] == 'unavailable' for r in removed))
+        if args.require_route_diagnostics:
+            end_distance = [float(r['route_remaining_to_d3_end_m']) for r in rows
+                            if r['route_remaining_to_d3_end_m'] != '']
+            reachability = [r['exit_reachable'] for r in rows if r['exit_reachable'] != '']
+            changes = [float(r['min_lane_changes_required']) for r in rows
+                       if r['min_lane_changes_required'] != '']
+            check(f'{tag} D3 remaining distance is sampled and non-negative',
+                  bool(end_distance) and all(math.isfinite(v) and v >= 0 for v in end_distance))
+            check(f'{tag} exit reachability is sampled and binary',
+                  bool(reachability) and all(v in ('0', '1') for v in reachability))
+            check(f'{tag} minimum lane changes is sampled and non-negative integer',
+                  bool(changes) and all(math.isfinite(v) and v >= 0 and v.is_integer() for v in changes))
         results.append(f"INFO  {tag} lane requests={sum(r['lc_request_e76_e77'] not in ('0', '') for r in rows)}, "
                        f"commands sent={sum(r['lc_command_sent'] not in ('0', '') for r in rows)}, "
                        f"physical lane changes={sum(r['lane_change_physical'] == '1' for r in rows)}")
