@@ -240,12 +240,18 @@ def choose_samples(audited_rows, trajectories):
             return (-b2 if bucket == 'P3' else 0, -away_gap if bucket == 'P3' else 0,
                     pair, int(row['eval_seed']), row['pair_id'])
         candidates.sort(key=score)
+        seen_branches = set()
         seen_pairs = set()
         ordered = []
         for row in candidates:
+            branch = row['trigger_branch']
+            if branch not in seen_branches:
+                ordered.append(row)
+                seen_branches.add(branch)
+        for row in candidates:
             a, b = trajectories[row['trajectory_a']], trajectories[row['trajectory_b']]
             combo = tuple(sorted((a.group, b.group)))
-            if combo not in seen_pairs:
+            if combo not in seen_pairs and row not in ordered:
                 ordered.append(row)
                 seen_pairs.add(combo)
         ordered.extend(row for row in candidates if row not in ordered)
