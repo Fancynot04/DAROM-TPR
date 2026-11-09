@@ -34,6 +34,8 @@ def main():
     ap.add_argument('--report-off', type=Path)
     ap.add_argument('--require-route-diagnostics', action='store_true',
                     help='Require each trajectory to contain valid D3 distance/reachability/lane-change samples')
+    ap.add_argument('--require-failure', action='store_true',
+                    help='Require at least one terminal outcome other than Arrived')
     args = ap.parse_args()
     d = args.trajectory_dir
     steps = list(csv.DictReader((d / 'trajectory_steps.csv').open()))
@@ -144,6 +146,9 @@ def main():
         off = strip(json.loads(args.report_off.read_text()))
         on = strip(report)
         check('evaluation report identical with recording OFF vs ON', off == on)
+    if args.require_failure:
+        check('at least one real non-Arrived terminal trajectory',
+              any(rows[-1]['terminal_reason'] != 'Arrived' for rows in by_id.values()))
     print('\n'.join(results))
     print('ALL CHECKS PASSED' if ok else 'SOME CHECKS FAILED')
     raise SystemExit(0 if ok else 1)
