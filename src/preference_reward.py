@@ -481,11 +481,14 @@ def fit_preference_reward(trajectories, pairs, *, epochs=200, learning_rate=1e-3
             model, tensors, trajectories, train_pairs, aggregation)
         validation_loss, validation_metrics = _pair_metrics(
             model, tensors, trajectories, validation_pairs, aggregation)
+        train_step_reward_mean = float(torch.cat(
+            [model(tensors[tid]) for tid in sorted(train_ids)]).mean())
     result = {
         "best_epoch": best["epoch"],
         "train_loss": float(train_loss), "validation_loss": float(validation_loss),
         "train_metrics": train_metrics, "validation_metrics": validation_metrics,
         "selected_pairs": {"train": len(train_pairs), "validation": len(validation_pairs)},
         "aggregation": aggregation,
+        "train_step_reward_mean": train_step_reward_mean,
     }
     return model.cpu(), {"mean": mean, "scale": scale}, history, result

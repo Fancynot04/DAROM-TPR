@@ -123,6 +123,7 @@ class PreferenceRewardTest(unittest.TestCase):
             self.assertGreaterEqual(result["validation_loss"], 0.0)
             self.assertEqual(result["selected_pairs"], {"train": 1, "validation": 1})
             self.assertEqual(normalizer["mean"].shape, (FEATURE_DIM,))
+            self.assertIsInstance(result["train_step_reward_mean"], float)
 
     def test_known_evaluation_seed_cannot_be_assigned_to_training(self):
         with tempfile.TemporaryDirectory() as tmp:

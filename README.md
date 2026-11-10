@@ -259,7 +259,10 @@ process signal rather than an embedded terminal bonus. Pair scores use the
 mean step reward to avoid a direct cumulative-length shortcut and are trained
 with Bradley–Terry loss. Normalization uses selected Train trajectories only;
 Validation is used only for checkpoint selection. `similar` and `unresolved`
-pairs are not fitted.
+pairs are not fitted. Because pairwise loss cannot identify a global reward
+offset, the saved reward definition subtracts the selected model's mean raw
+output over selected Train transitions; this fixes the zero point without
+using Validation or changing preference margins.
 
 The new output directory contains `reward_model.pt`, `training_config.json`,
 `training_metrics.csv`, `validation_report.md`, the full audit and metrics,

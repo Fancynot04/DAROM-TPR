@@ -115,7 +115,7 @@ def _diagnostics(output_dir, model, normalizer, trajectories, validation_pairs,
             trajectory = trajectories[tid]
             features = torch.from_numpy(normalize_trajectory(
                 trajectory, normalizer["mean"], normalizer["scale"]))
-            rewards = model(features).numpy()
+            rewards = (model(features) - result["train_step_reward_mean"]).numpy()
             score = float(np.mean(rewards))
             lengths.append(len(rewards))
             scores.append(score)
@@ -241,6 +241,7 @@ def _write_report(path, config, result, baselines, diagnostics):
         "- Features: obs_t(134), executed action_t(2), next_obs_t(134).",
         "- Invalid successor: normalized next-observation slice reset to zero.",
         "- Original environment reward and terminal event fields are excluded.",
+        "- Reward zero point: subtract the selected model's mean raw output on selected Train transitions.",
         "- Trajectory score: mean of step rewards (not sum), limiting a direct length shortcut.", "",
         "## Selected checkpoint", "",
         f"- Best epoch by validation loss: {result['best_epoch']}.",
@@ -349,7 +350,9 @@ def main():
         "reward_definition": {
             "kind": "learned process reward", "trajectory_aggregation": AGGREGATION,
             "original_reward_used": False, "terminal_event_features_used": False,
-            "invalid_next_obs": f"normalized features[{NEXT_OBS_START}:] reset to zero"},
+            "invalid_next_obs": f"normalized features[{NEXT_OBS_START}:] reset to zero",
+            "output_postprocess": "raw_mlp_output - train_step_reward_mean",
+            "train_step_reward_mean": result["train_step_reward_mean"]},
         "optimizer": {"type": "Adam", "learning_rate": args.learning_rate,
                       "weight_decay": args.weight_decay},
         "epochs": args.epochs, "seed": args.seed,
@@ -368,6 +371,7 @@ def main():
         "model_state_dict": model.state_dict(), "model_config": config["model"],
         "normalizer_mean": normalizer["mean"],
         "normalizer_scale": normalizer["scale"],
+        "reward_offset": result["train_step_reward_mean"],
         "reward_definition": config["reward_definition"],
         "training_config": config, "best_epoch": result["best_epoch"],
     }, args.output_dir / "reward_model.pt")
