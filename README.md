@@ -213,6 +213,54 @@ python3 -m scripts.compare_trajectory_preferences_v2_candidate \
   --output-dir tmp/ai/e76-d3/preference-v2-candidate
 ```
 
+### Preference reward-model data preparation
+
+`scripts.train_preference_reward` audits immutable `trajectory-csv-v1`
+exports before any fitting. A JSON data spec must assign each source exactly
+one role: `train`, `validation`, `test`, or `holdout`. Evaluation seeds may not
+cross roles. `holdout` sources are checked and reported, but never contribute
+normalization statistics, gradients, early stopping, or model selection.
+
+```json
+{
+  "schema_version": "preference-reward-data-v1",
+  "sources": [{
+    "source_id": "independent-train-v1",
+    "role": "train",
+    "groups": {"B0": "/path/B0", "B1": "/path/B1"},
+    "preferences": "/path/trajectory_preferences.csv",
+    "provenance": {
+      "experiment_id": "...",
+      "git_commit": "full commit SHA",
+      "evaluation_seeds": "..."
+    }
+  }]
+}
+```
+
+Audit-only preparation does not fit or write a model:
+
+```bash
+python3 -m scripts.train_preference_reward \
+  --data-spec /path/data-spec.json \
+  --audit-output tmp/ai/preference-reward/data-audit.json
+```
+
+Adding `--model-output models_experiments/preference_reward/model.pt` enables
+training only when the audit finds non-overlapping train, validation, and test
+preference pairs. The transition MLP uses recorded observation, executed
+action, successor observation, validity/terminal flags, and terminal-event
+features. An invalid terminal successor is zero-masked and identified by an
+explicit validity feature; it is never treated as a physical next state. Pair
+scores are sums of per-transition rewards and are trained with a
+Bradley–Terry logistic loss. `similar` pairs use target 0.5; `unresolved` pairs
+are audited but excluded from fitting.
+
+The established evaluation ranges `200001-200150` and `300001-300060`
+(including P1-A `300001-300050`) are reserved. The loader rejects them as
+`train` or `validation`; they may only be evaluated once as `test`, or audited
+without metrics as `holdout`.
+
 Training defaults are Easy, training seed 42, gamma 0.999, 200,000 environment
 steps and 50,000-step checkpoints. Evaluation defaults are Easy, 50 episodes
 and evaluation seed range beginning at 200001. Training seed and evaluation
