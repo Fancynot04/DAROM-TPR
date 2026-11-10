@@ -50,7 +50,7 @@ class TrajectoryPreferenceAuditTest(unittest.TestCase):
                          'trajectory_a': a_id, 'trajectory_b': b_id,
                          'preference': 'A', 'deciding_priority': 'P2',
                          'trigger_branch': 'non_collision' if index == 5 else 'ttc'})
-        # Add the remaining categories so the fixed quota selector can complete.
+        # Add the remaining categories so the preferred quotas can complete.
         for bucket, count in (('P1', 4), ('P3', 7), ('P4', 3), ('similar', 2)):
             for index in range(count):
                 suffix = f'{bucket}{index}'
@@ -66,6 +66,22 @@ class TrajectoryPreferenceAuditTest(unittest.TestCase):
         p2_branches = {row['trigger_branch'] for row in selected
                        if row['deciding_priority'] == 'P2'}
         self.assertEqual(p2_branches, {'ttc', 'non_collision'})
+
+    def test_sample_selection_uses_available_rows_when_bucket_is_short(self):
+        rows = []
+        trajectories = {}
+        for index, bucket in enumerate(('P1', 'P2', 'P3', 'P4', 'similar')):
+            a, b = trajectory(f'a{index}'), trajectory(f'b{index}')
+            a.group, b.group = 'B0', 'B1'
+            trajectories[a.id], trajectories[b.id] = a, b
+            rows.append({'pair_id': str(index), 'eval_seed': str(index),
+                         'trajectory_a': a.id, 'trajectory_b': b.id,
+                         'preference': 'similar' if bucket == 'similar' else 'A',
+                         'deciding_priority': 'none' if bucket == 'similar' else bucket,
+                         'trigger_branch': bucket})
+        selected = choose_samples(rows, trajectories)
+        self.assertEqual({row['pair_id'] for row in selected},
+                         {row['pair_id'] for row in rows})
 
 
 if __name__ == '__main__':

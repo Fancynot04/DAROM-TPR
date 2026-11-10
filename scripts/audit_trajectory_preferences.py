@@ -231,6 +231,7 @@ def choose_samples(audited_rows, trajectories):
     used_pair_ids = set()
     for bucket, quota in SAMPLE_QUOTAS.items():
         candidates = [row for row in audited_rows if result_bucket(row) == bucket]
+        target = min(quota, len(candidates))
         def score(row):
             a, b = trajectories[row['trajectory_a']], trajectories[row['trajectory_b']]
             pair = tuple(sorted((a.group, b.group)))
@@ -260,10 +261,8 @@ def choose_samples(audited_rows, trajectories):
                 continue
             selected.append(row)
             used_pair_ids.add(row['pair_id'])
-            if sum(result_bucket(item) == bucket for item in selected) == quota:
+            if sum(result_bucket(item) == bucket for item in selected) == target:
                 break
-        if sum(result_bucket(item) == bucket for item in selected) != quota:
-            raise ValueError(f'not enough sample pairs for {bucket}')
     return selected
 
 
@@ -497,7 +496,7 @@ P3 的主要决定分支是 `{p3_main[0]}`，共 {p3_main[1]} 对。
 
 {chr(10).join(issue_lines)}
 
-## 20 对人工复核样本
+## {len(review_rows)} 对人工复核样本
 
 {chr(10).join(sample_lines)}
 
