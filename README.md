@@ -238,23 +238,32 @@ normalization statistics, gradients, early stopping, or model selection.
 }
 ```
 
-Audit-only preparation does not fit or write a model:
+P3 training reads only sources assigned to `train` and `validation`; sources
+assigned to `test` or `holdout` are skipped before their paths are opened:
 
 ```bash
 python3 -m scripts.train_preference_reward \
   --data-spec /path/data-spec.json \
-  --audit-output tmp/ai/preference-reward/data-audit.json
+  --output-dir /path/to/new/output-directory \
+  --expected-data-spec-sha256 EXPECTED_SHA256 \
+  --epochs 200 --seed 42
 ```
 
-Adding `--model-output models_experiments/preference_reward/model.pt` enables
-training only when the audit finds non-overlapping train, validation, and test
-preference pairs. The transition MLP uses recorded observation, executed
-action, successor observation, validity/terminal flags, and terminal-event
-features. An invalid terminal successor is zero-masked and identified by an
-explicit validity feature; it is never treated as a physical next state. Pair
-scores are sums of per-transition rewards and are trained with a
-Bradley–Terry logistic loss. `similar` pairs use target 0.5; `unresolved` pairs
-are audited but excluded from fitting.
+The first P3 model selects only explicit `A`/`B` pairs for which both
+trajectories end in `Arrived`. Its fixed 270-dimensional input is
+`obs_t(134) + executed_action_t(2) + next_obs_t(134)`, followed by two
+64-neuron ReLU layers and a scalar step reward. Invalid terminal successors
+are reset to the normalized mean (zero after normalization). Recorded rewards,
+terminal flags, and terminal reasons are excluded, so the output is a learned
+process signal rather than an embedded terminal bonus. Pair scores use the
+mean step reward to avoid a direct cumulative-length shortcut and are trained
+with Bradley–Terry loss. Normalization uses selected Train trajectories only;
+Validation is used only for checkpoint selection. `similar` and `unresolved`
+pairs are not fitted.
+
+The new output directory contains `reward_model.pt`, `training_config.json`,
+`training_metrics.csv`, `validation_report.md`, the full audit and metrics,
+and `reward_diagnostics/` plots.
 
 The established evaluation ranges `200001-200150` and `300001-300060`
 (including P1-A `300001-300050`) are reserved. The loader rejects them as

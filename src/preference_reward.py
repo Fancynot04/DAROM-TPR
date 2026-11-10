@@ -8,6 +8,7 @@ statistics, gradients, early stopping, or model selection.
 from __future__ import annotations
 
 import csv
+import copy
 import hashlib
 import json
 import math
@@ -23,9 +24,10 @@ from torch import nn
 OBS_DIM = 134
 ACTION_DIM = 2
 DATA_SPEC_VERSION = "preference-reward-data-v1"
-FEATURE_SCHEMA_VERSION = "transition-mlp-v1"
+FEATURE_SCHEMA_VERSION = "transition-process-mlp-v2"
 ALLOWED_ROLES = frozenset({"train", "validation", "test", "holdout"})
-TERMINAL_REASONS = ("Arrived", "Collision", "Missed Exit", "Ego Teleported", "Timeout")
+FEATURE_DIM = OBS_DIM + ACTION_DIM + OBS_DIM
+NEXT_OBS_START = OBS_DIM + ACTION_DIM
 # Project evaluation partitions already used for model comparison.  They may
 # be evaluated as test/holdout, but never influence fitting or validation.
 RESERVED_EVAL_SEEDS = frozenset(range(200001, 200151)) | frozenset(range(300001, 300061))
@@ -40,6 +42,9 @@ class Trajectory:
     group: str
     eval_seed: int
     features: np.ndarray
+    next_obs_valid: np.ndarray
+    terminal_reason: str
+    diagnostics: dict
 
 
 @dataclass(frozen=True)
@@ -51,6 +56,7 @@ class PreferencePair:
     trajectory_b: str
     target_a: float
     preference: str
+    deciding_priority: str
 
 
 def _read_csv(path):
@@ -72,23 +78,27 @@ def _sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def _terminal_one_hot(reason):
-    values = [float(reason == item) for item in TERMINAL_REASONS]
-    values.append(float(bool(reason) and reason not in TERMINAL_REASONS))
-    return values
-
-
 def transition_features(row):
-    """Return features without treating an invalid successor as physical state."""
+    """Return process-only obs/action/next-obs features.
+
+    Invalid successors are represented as zeros here and are reset to the
+    normalized mean after train-only normalization.  Terminal flags, terminal
+    reasons, and recorded environment rewards are deliberately excluded.
+    """
     obs = [_finite(row, f"obs_{i:03d}") for i in range(OBS_DIM)]
     action = [_finite(row, f"action_exec_{i}") for i in range(ACTION_DIM)]
     valid = row.get("next_obs_valid") == "1"
     next_obs = ([_finite(row, f"next_obs_{i:03d}") for i in range(OBS_DIM)]
                 if valid else [0.0] * OBS_DIM)
-    flags = [float(valid), float(row.get("terminated") == "1"),
-             float(row.get("truncated") == "1")]
-    return np.asarray(obs + action + next_obs + flags
-                      + _terminal_one_hot(row.get("terminal_reason", "")), dtype=np.float32)
+    return np.asarray(obs + action + next_obs, dtype=np.float32)
+
+
+def _optional_number(row, key):
+    try:
+        value = float(row.get(key, ""))
+    except (TypeError, ValueError):
+        return np.nan
+    return value if math.isfinite(value) else np.nan
 
 
 def _audit_manifest(directory, errors):
@@ -124,8 +134,9 @@ def _load_group(source, group, directory, errors):
     _audit_manifest(directory, errors)
     summary_path = directory / "episode_summary.csv"
     transition_path = directory / "trajectory_transitions.csv"
-    if not summary_path.exists() or not transition_path.exists():
-        errors.append(f"{directory}: missing summary or transition CSV")
+    steps_path = directory / "trajectory_steps.csv"
+    if not summary_path.exists() or not transition_path.exists() or not steps_path.exists():
+        errors.append(f"{directory}: missing summary, step, or transition CSV")
         return [], {}
     summaries = _read_csv(summary_path)
     summary_ids = [row.get("trajectory_id", "") for row in summaries]
@@ -134,23 +145,30 @@ def _load_group(source, group, directory, errors):
     rows_by_id = defaultdict(list)
     for row in _read_csv(transition_path):
         rows_by_id[row.get("trajectory_id", "")].append(row)
+    steps_by_id = defaultdict(list)
+    for row in _read_csv(steps_path):
+        steps_by_id[row.get("trajectory_id", "")].append(row)
     result, seeds = [], {}
     for summary in summaries:
         tid = summary.get("trajectory_id", "")
         rows = rows_by_id.get(tid, [])
+        step_rows = steps_by_id.get(tid, [])
         try:
             seed = int(summary["eval_seed"])
             expected_steps = int(summary["steps"])
         except (KeyError, TypeError, ValueError):
             errors.append(f"{directory}/{tid}: invalid summary seed or step count")
             continue
-        if not tid or len(rows) != expected_steps:
-            errors.append(f"{directory}/{tid}: transition count differs from summary")
+        if not tid or len(rows) != expected_steps or len(step_rows) != expected_steps:
+            errors.append(f"{directory}/{tid}: step/transition count differs from summary")
             continue
         try:
             indices = [int(row["step"]) for row in rows]
             if indices != list(range(len(rows))):
                 raise ValueError("non-contiguous steps")
+            step_indices = [int(row["step"]) for row in step_rows]
+            if step_indices != indices:
+                raise ValueError("step CSV is not aligned with transition CSV")
             terminal = [row.get("is_terminal_step") == "1" for row in rows]
             if sum(terminal) != 1 or not terminal[-1]:
                 raise ValueError("terminal flag must occur exactly once at the end")
@@ -163,11 +181,29 @@ def _load_group(source, group, directory, errors):
                     if left[f"next_obs_{i:03d}"] != right[f"obs_{i:03d}"]:
                         raise ValueError("broken obs/next_obs chain")
             features = np.stack([transition_features(row) for row in rows])
+            next_obs_valid = np.asarray(
+                [row.get("next_obs_valid") == "1" for row in rows], dtype=bool)
+            diagnostics = {
+                "step": np.asarray(indices, dtype=np.int64),
+                "lane_index": np.asarray(
+                    [_optional_number(row, "ego_lane_index") for row in step_rows]),
+                "speed_mps": np.asarray(
+                    [_optional_number(row, "ego_speed_mps") for row in step_rows]),
+                "reverse_lane_change": np.asarray([
+                    row.get("lane_change_physical") == "1"
+                    and _optional_number(row, "ego_lane_index_after")
+                    > _optional_number(row, "ego_lane_index")
+                    for row in step_rows], dtype=bool),
+                "physical_lane_change": np.asarray(
+                    [row.get("lane_change_physical") == "1" for row in step_rows],
+                    dtype=bool),
+            }
         except (KeyError, ValueError) as exc:
             errors.append(f"{directory}/{tid}: {exc}")
             continue
         result.append(Trajectory(tid, source["source_id"], source["role"], group,
-                                 seed, features))
+                                 seed, features, next_obs_valid,
+                                 summary.get("terminal_reason", ""), diagnostics))
         seeds[tid] = seed
     extras = sorted(set(rows_by_id) - {item.trajectory_id for item in result})
     if extras:
@@ -175,14 +211,19 @@ def _load_group(source, group, directory, errors):
     return result, seeds
 
 
-def load_and_audit(spec_path):
+def load_and_audit(spec_path, *, roles=None, required_roles=None):
     """Load a data specification and return data plus a serializable audit."""
     spec_path = Path(spec_path)
     spec = json.loads(spec_path.read_text())
     if spec.get("schema_version") != DATA_SPEC_VERSION:
         raise ValueError(f"schema_version must be {DATA_SPEC_VERSION}")
+    selected_roles = set(ALLOWED_ROLES if roles is None else roles)
+    unknown_roles = selected_roles - ALLOWED_ROLES
+    if unknown_roles:
+        raise ValueError(f"unknown roles: {sorted(unknown_roles)}")
     errors, warnings, trajectories, pairs = [], [], {}, []
     source_reports = []
+    skipped_sources = []
     seed_roles = defaultdict(set)
     sources = spec.get("sources", [])
     if not sources:
@@ -191,6 +232,9 @@ def load_and_audit(spec_path):
         source_id, role = source.get("source_id"), source.get("role")
         if not source_id or role not in ALLOWED_ROLES:
             errors.append(f"invalid source_id/role: {source_id!r}/{role!r}")
+            continue
+        if role not in selected_roles:
+            skipped_sources.append({"source_id": source_id, "role": role})
             continue
         provenance = source.get("provenance", {})
         missing_provenance = sorted(REQUIRED_PROVENANCE - set(provenance))
@@ -264,7 +308,8 @@ def load_and_audit(spec_path):
                 if preference == "unresolved":
                     continue
                 target = {"A": 1.0, "B": 0.0, "similar": 0.5}[preference]
-                pairs.append(PreferencePair(pair_id, source_id, role, a, b, target, preference))
+                pairs.append(PreferencePair(pair_id, source_id, role, a, b, target, preference,
+                                            row.get("deciding_priority", "none")))
         source_reports.append({
             "source_id": source_id, "role": role,
             "trajectory_count": len(source_trajectories),
@@ -281,18 +326,20 @@ def load_and_audit(spec_path):
     usable_by_role = Counter(pair.role for pair in pairs)
     if not usable_by_role["train"]:
         warnings.append("no independent training preference pairs; fitting is disabled")
-    for role in ("validation", "test"):
-        if not usable_by_role[role]:
+    required = tuple(required_roles or ("train", "validation", "test"))
+    for role in required:
+        if role != "train" and not usable_by_role[role]:
             warnings.append(f"no {role} preference pairs")
     audit = {
         "schema_version": DATA_SPEC_VERSION,
         "data_spec_sha256": _sha256(spec_path),
         "ok": not errors,
-        "fit_ready": not errors and all(usable_by_role[role]
-                                        for role in ("train", "validation", "test")),
+        "fit_ready": not errors and all(usable_by_role[role] for role in required),
         "feature_schema": FEATURE_SCHEMA_VERSION,
         "feature_dim": next(iter(trajectories.values())).features.shape[1] if trajectories else None,
         "sources": source_reports,
+        "skipped_sources": skipped_sources,
+        "required_roles": list(required),
         "usable_pairs_by_role": dict(sorted(usable_by_role.items())),
         "errors": errors, "warnings": warnings,
     }
@@ -300,7 +347,7 @@ def load_and_audit(spec_path):
 
 
 class TransitionRewardMLP(nn.Module):
-    def __init__(self, input_dim, hidden_dims=(256, 128)):
+    def __init__(self, input_dim, hidden_dims=(64, 64)):
         super().__init__()
         layers, previous = [], input_dim
         for width in hidden_dims:
@@ -313,47 +360,132 @@ class TransitionRewardMLP(nn.Module):
         return self.network(features).squeeze(-1)
 
 
-def fit_preference_reward(trajectories, pairs, *, epochs=100, learning_rate=1e-3,
-                          hidden_dims=(256, 128), seed=0):
-    """Fit on train pairs only; validation/test/holdout never affect gradients."""
-    train_pairs = [pair for pair in pairs if pair.role == "train"]
-    validation_pairs = [pair for pair in pairs if pair.role == "validation"]
-    test_pairs = [pair for pair in pairs if pair.role == "test"]
-    if not train_pairs or not validation_pairs or not test_pairs:
-        raise ValueError("independent train, validation, and test preference pairs are required")
-    torch.manual_seed(seed)
-    train_ids = {value for pair in train_pairs for value in (pair.trajectory_a, pair.trajectory_b)}
-    train_steps = np.concatenate([trajectories[tid].features for tid in sorted(train_ids)])
-    mean = train_steps.mean(axis=0, dtype=np.float64).astype(np.float32)
-    scale = train_steps.std(axis=0, dtype=np.float64).astype(np.float32)
+def select_success_pairs(trajectories, pairs):
+    """Keep explicit A/B preferences where both trajectories arrived."""
+    return [pair for pair in pairs
+            if pair.preference in {"A", "B"}
+            and trajectories[pair.trajectory_a].terminal_reason == "Arrived"
+            and trajectories[pair.trajectory_b].terminal_reason == "Arrived"]
+
+
+def _normalizer(trajectories, trajectory_ids):
+    items = [trajectories[tid] for tid in sorted(trajectory_ids)]
+    steps = np.concatenate([item.features for item in items])
+    mean = steps.mean(axis=0, dtype=np.float64).astype(np.float32)
+    scale = steps.std(axis=0, dtype=np.float64).astype(np.float32)
+    valid_next = np.concatenate([
+        item.features[item.next_obs_valid, NEXT_OBS_START:] for item in items
+    ])
+    mean[NEXT_OBS_START:] = valid_next.mean(axis=0, dtype=np.float64).astype(np.float32)
+    scale[NEXT_OBS_START:] = valid_next.std(axis=0, dtype=np.float64).astype(np.float32)
     scale[scale < 1e-6] = 1.0
-    tensors = {tid: torch.from_numpy((item.features - mean) / scale)
+    return mean, scale
+
+
+def normalize_trajectory(trajectory, mean, scale):
+    values = (trajectory.features - mean) / scale
+    values = values.astype(np.float32, copy=False)
+    values[~trajectory.next_obs_valid, NEXT_OBS_START:] = 0.0
+    return values
+
+
+def trajectory_score(model, features, aggregation="mean"):
+    rewards = model(features)
+    if aggregation == "mean":
+        return rewards.mean()
+    if aggregation == "sum":
+        return rewards.sum()
+    raise ValueError(f"unsupported aggregation: {aggregation}")
+
+
+def _pair_metrics(model, tensors, trajectories, items, aggregation):
+    losses, correct = [], 0
+    by_priority = defaultdict(lambda: [0, 0])
+    margins, length_differences = [], []
+    trajectory_ids = {tid for pair in items
+                      for tid in (pair.trajectory_a, pair.trajectory_b)}
+    scores = {tid: trajectory_score(model, tensors[tid], aggregation)
+              for tid in trajectory_ids}
+    for pair in items:
+        score_a = scores[pair.trajectory_a]
+        score_b = scores[pair.trajectory_b]
+        target = torch.tensor(pair.target_a, dtype=score_a.dtype, device=score_a.device)
+        margin = score_a - score_b
+        losses.append(nn.functional.binary_cross_entropy_with_logits(margin, target))
+        predicted_a = float(margin.detach()) > 0
+        expected_a = pair.target_a == 1.0
+        hit = int(predicted_a == expected_a)
+        correct += hit
+        by_priority[pair.deciding_priority][0] += hit
+        by_priority[pair.deciding_priority][1] += 1
+        margins.append(float(margin.detach()))
+        length_differences.append(
+            len(trajectories[pair.trajectory_a].features)
+            - len(trajectories[pair.trajectory_b].features))
+    loss = torch.stack(losses).mean()
+    return loss, {
+        "correct": correct, "total": len(items), "accuracy": correct / len(items),
+        "by_priority": {key: {"correct": value[0], "total": value[1],
+                              "accuracy": value[0] / value[1]}
+                        for key, value in sorted(by_priority.items())},
+        "margins": margins, "length_differences": length_differences,
+    }
+
+
+def fit_preference_reward(trajectories, pairs, *, epochs=200, learning_rate=1e-3,
+                          weight_decay=1e-4, hidden_dims=(64, 64), seed=42,
+                          aggregation="mean", device="cpu"):
+    """Fit process reward on train; use validation only for model selection."""
+    selected = select_success_pairs(trajectories, pairs)
+    train_pairs = [pair for pair in selected if pair.role == "train"]
+    validation_pairs = [pair for pair in selected if pair.role == "validation"]
+    if not train_pairs or not validation_pairs:
+        raise ValueError("explicit success-success train and validation pairs are required")
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    torch.use_deterministic_algorithms(True)
+    if device == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA requested but unavailable")
+    compute_device = torch.device(device)
+    train_ids = {value for pair in train_pairs for value in (pair.trajectory_a, pair.trajectory_b)}
+    mean, scale = _normalizer(trajectories, train_ids)
+    tensors = {tid: torch.from_numpy(normalize_trajectory(item, mean, scale)).to(compute_device)
                for tid, item in trajectories.items()}
-    model = TransitionRewardMLP(train_steps.shape[1], hidden_dims)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    model = TransitionRewardMLP(FEATURE_DIM, hidden_dims).to(compute_device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate,
+                                 weight_decay=weight_decay)
 
-    def loss_for(items):
-        losses = []
-        for pair in items:
-            score_a = model(tensors[pair.trajectory_a]).sum()
-            score_b = model(tensors[pair.trajectory_b]).sum()
-            target = torch.tensor(pair.target_a, dtype=score_a.dtype)
-            losses.append(nn.functional.binary_cross_entropy_with_logits(score_a - score_b, target))
-        return torch.stack(losses).mean()
-
-    history = []
+    history, best = [], None
     for epoch in range(epochs):
         model.train()
         optimizer.zero_grad()
-        train_loss = loss_for(train_pairs)
+        train_loss, train_metrics = _pair_metrics(
+            model, tensors, trajectories, train_pairs, aggregation)
         train_loss.backward()
         optimizer.step()
         model.eval()
         with torch.no_grad():
-            validation_loss = loss_for(validation_pairs)
+            validation_loss, validation_metrics = _pair_metrics(
+                model, tensors, trajectories, validation_pairs, aggregation)
         history.append({"epoch": epoch + 1, "train_loss": float(train_loss.detach()),
-                        "validation_loss": float(validation_loss)})
+                        "validation_loss": float(validation_loss),
+                        "train_accuracy": train_metrics["accuracy"],
+                        "validation_accuracy": validation_metrics["accuracy"]})
+        if best is None or float(validation_loss) < best["validation_loss"]:
+            best = {"epoch": epoch + 1, "validation_loss": float(validation_loss),
+                    "state_dict": copy.deepcopy(model.state_dict())}
+    model.load_state_dict(best["state_dict"])
     model.eval()
     with torch.no_grad():
-        test_loss = float(loss_for(test_pairs))
-    return model, {"mean": mean, "scale": scale}, history, test_loss
+        train_loss, train_metrics = _pair_metrics(
+            model, tensors, trajectories, train_pairs, aggregation)
+        validation_loss, validation_metrics = _pair_metrics(
+            model, tensors, trajectories, validation_pairs, aggregation)
+    result = {
+        "best_epoch": best["epoch"],
+        "train_loss": float(train_loss), "validation_loss": float(validation_loss),
+        "train_metrics": train_metrics, "validation_metrics": validation_metrics,
+        "selected_pairs": {"train": len(train_pairs), "validation": len(validation_pairs)},
+        "aggregation": aggregation,
+    }
+    return model.cpu(), {"mean": mean, "scale": scale}, history, result
