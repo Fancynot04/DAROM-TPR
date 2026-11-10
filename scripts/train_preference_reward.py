@@ -23,6 +23,12 @@ HIDDEN_DIMS = (64, 64)
 AGGREGATION = "mean"
 
 
+def _prepare_output_dir(path):
+    if path.exists() and any(path.iterdir()):
+        raise ValueError(f"output directory is not empty: {path}")
+    path.mkdir(parents=True, exist_ok=True)
+
+
 def _jsonable(value):
     if isinstance(value, np.ndarray):
         return value.tolist()
@@ -301,8 +307,10 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default="auto")
     args = parser.parse_args()
-    if args.output_dir.exists():
-        parser.error(f"output directory exists: {args.output_dir}")
+    try:
+        _prepare_output_dir(args.output_dir)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.epochs < 1:
         parser.error("epochs must be positive")
 
@@ -310,7 +318,6 @@ def main():
     if (args.expected_data_spec_sha256
             and observed_spec_sha256 != args.expected_data_spec_sha256):
         raise SystemExit("dataset manifest SHA256 mismatch")
-    args.output_dir.mkdir(parents=True)
 
     # Role filtering happens before paths or CSVs belonging to P1 Test are read.
     trajectories, pairs, audit = load_and_audit(

@@ -12,6 +12,7 @@ from src.preference_reward import (FEATURE_DIM, NEXT_OBS_START, OBS_DIM,
                                    TransitionRewardMLP, fit_preference_reward,
                                    load_and_audit, normalize_trajectory,
                                    trajectory_score)
+from scripts.train_preference_reward import _prepare_output_dir
 
 
 def write_csv(path, fields, rows):
@@ -22,6 +23,15 @@ def write_csv(path, fields, rows):
 
 
 class PreferenceRewardTest(unittest.TestCase):
+    def test_output_directory_may_exist_only_when_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "output"
+            output.mkdir()
+            _prepare_output_dir(output)
+            (output / "occupied").write_text("x")
+            with self.assertRaisesRegex(ValueError, "not empty"):
+                _prepare_output_dir(output)
+
     def make_source(self, root, source_id, role, seed):
         group = root / source_id
         group.mkdir()

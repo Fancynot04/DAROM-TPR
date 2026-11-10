@@ -264,9 +264,9 @@ offset, the saved reward definition subtracts the selected model's mean raw
 output over selected Train transitions; this fixes the zero point without
 using Validation or changing preference margins.
 
-The new output directory contains `reward_model.pt`, `training_config.json`,
+The new or existing empty output directory contains `reward_model.pt`, `training_config.json`,
 `training_metrics.csv`, `validation_report.md`, the full audit and metrics,
-and `reward_diagnostics/` plots.
+and `reward_diagnostics/` plots. A non-empty directory is refused.
 
 The established evaluation ranges `200001-200150` and `300001-300060`
 (including P1-A `300001-300050`) are reserved. The loader rejects them as
