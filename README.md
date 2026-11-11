@@ -139,6 +139,18 @@ an error and never falls back to B0. Reports distinguish
 `-100`, non-terminal `0`) and retain per-term totals. Safety is off for the
 matched task contract unless explicitly requested for a separate diagnostic.
 
+The optional `--observation-mode ego_lateral_v1` trains a separate GRU policy
+with `paper_raw` inputs. The default `legacy` mode preserves old checkpoints.
+The new 136-value layout is Ego `[distance, lane_index, speed, lateral_position,
+lateral_speed]`, 30 unchanged neighbor triples, 20 action pairs, and delay.
+TraCI reports lateral position relative to the current lane center in meters
+and lateral speed in meters per second; positive is left in the direction of
+travel, negative is right. Position can jump when the current lane changes.
+The two values are read from the current Ego at each observation, while the
+neighbor packet and action-history masking retain the existing delay rules.
+Checkpoints record the mode and must match the environment and encoder shape;
+134-value checkpoints cannot be resumed with the 136-value mode.
+
 For read-only trajectory export, pass a new output directory. The recorder
 writes one step row and one transition row per `env.step`, plus an immutable
 manifest and column dictionary. Reward columns are derived from the

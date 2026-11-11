@@ -350,7 +350,7 @@ def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None
              ablation='full', task=exit_config.TASK_ID, potential_gamma=None,
              nav_features=False, exit_reward_profile=None,
              curriculum_stages=None, curriculum_route_dir=None,
-             progress_experiment=None, reward_config=None, reward_gamma=0.99):
+             progress_experiment=None, reward_config=None, reward_gamma=0.99, observation_mode='legacy'):
     if use_safety:
         raise ValueError('E76-to-D3 training requires Safety off; SafetyWrapper is forbidden')
     env = DelayWrapper(
@@ -359,7 +359,7 @@ def make_env(seed, scenario, delay_mode, max_delay, use_safety, render_mode=None
                 progress_experiment=progress_experiment,
                 reward_config=reward_config, reward_gamma=reward_gamma),
         max_delay=max_delay, mode='all', delay_mode=delay_mode, seed=seed,
-        ablation=ablation, nav_features=nav_features,
+        ablation=ablation, nav_features=nav_features, observation_mode=observation_mode,
     )
     if curriculum_stages is not None:
         env = ExitStartLaneCurriculum(env, curriculum_stages, seed,
@@ -414,9 +414,12 @@ def parse_args():
     parser.add_argument('--gru_input_mode', choices=DelayAwareGRUEncoder.INPUT_MODES,
                         default='paper_raw',
                         help='New GRU runs use unscaled wrapper inputs; the Antwerp legacy mode is for old checkpoints')
+    parser.add_argument('--observation-mode', choices=['legacy', 'ego_lateral_v1'], default='legacy')
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
+    if args.observation_mode == 'ego_lateral_v1' and (args.encoder_mode != 'GRU' or args.gru_input_mode != 'paper_raw' or args.ablation != 'full'):
+        parser.error('ego_lateral_v1 requires full GRU with paper_raw input')
     if args.use_safety:
         parser.error('Current E76-to-D3 experiments require Safety off; --safety is forbidden')
     try:
@@ -512,7 +515,8 @@ def main():
         progress_experiment=None,
         exit_control_profile=None,
         exit_observation_profile=None,
-        observation_dim=(136 if args.nav_features else 134),
+        observation_dim=(136 if args.observation_mode == 'ego_lateral_v1' else 134),
+        observation_mode=args.observation_mode,
         nav_distance_scale_meters=None,
         metric_schema='env_steps_v3',
         wandb_project=args.project,
@@ -554,7 +558,7 @@ def main():
                         (os.path.join('tmp', 'ai', 'e76-d3', args.exit_phase,
                                       args.run_name, 'routes')
                          if config['curriculum_stages'] is not None else None),
-                        args.progress_experiment, args.reward_config, args.gamma)
+                        args.progress_experiment, args.reward_config, args.gamma, args.observation_mode)
 
     # SB3 expects the Gym API; our env already implements gymnasium API. SB3 v2 works with gymnasium.
     vec_env = DummyVecEnv([_fn])
@@ -584,7 +588,7 @@ def main():
         net_arch=[256, 256],      # actor/critic MLP after transformer
     )
     elif encoder_mode == 'GRU':
-        policy_kwargs = dict(features_extractor_class=DelayAwareGRUEncoder, features_extractor_kwargs=dict(act_dim=act_dim, hist_len=delay_env.max_delay, delay_dim=1, features_dim=256, gru_hidden=64, input_mode=args.gru_input_mode, nav_dim=delay_env.nav_dim), net_arch=[256, 256])
+        policy_kwargs = dict(features_extractor_class=DelayAwareGRUEncoder, features_extractor_kwargs=dict(act_dim=act_dim, hist_len=delay_env.max_delay, delay_dim=1, features_dim=256, gru_hidden=64, input_mode=args.gru_input_mode, nav_dim=delay_env.nav_dim, observation_mode=args.observation_mode), net_arch=[256, 256])
     elif encoder_mode == 'MLP':
         policy_kwargs = dict(
         features_extractor_class=DelayAwareEncoder,
@@ -615,6 +619,7 @@ def main():
         resumed_from_timesteps = 0
         learn_timesteps = args.total_timesteps
 
+    model.observation_mode = args.observation_mode
     model.ablation = args.ablation
     model.antwerp_env_version = ANTWERP_ENV_VERSION
     model.antwerp_task = args.task

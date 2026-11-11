@@ -57,10 +57,16 @@ class ExitStartLaneCurriculum(Wrapper):
 
 
 class DelayWrapper(ObservationWrapper):
-    def __init__(self, env, max_delay=10, mode=['only_delayed_state' 'delayed_state_and_action', 'delayed_state_and_delay', 'all'], drl_ormoc=False, delay_mode='uniform', seed=None, ablation='full', nav_features=False):
+    def __init__(self, env, max_delay=10, mode=['only_delayed_state' 'delayed_state_and_action', 'delayed_state_and_delay', 'all'], drl_ormoc=False, delay_mode='uniform', seed=None, ablation='full', nav_features=False, observation_mode='legacy'):
         super().__init__(env)
         if ablation not in ABLATION_MODES or (ablation != 'full' and mode != 'all'):
             raise ValueError(f'Unsupported ablation/mode: {ablation}/{mode}')
+        if observation_mode not in ('legacy', 'ego_lateral_v1'):
+            raise ValueError(f'Unknown observation mode: {observation_mode}')
+        if observation_mode != 'legacy' and (mode != 'all' or nav_features or ablation != 'full'):
+            raise ValueError('ego_lateral_v1 requires full mode without navigation or ablation')
+        self.observation_mode = observation_mode
+        self.lateral_dim = 2 if observation_mode == 'ego_lateral_v1' else 0
         self.ablation = ablation
         if nav_features and mode != 'all':
             raise ValueError('Navigation features require the full observation layout')
@@ -103,7 +109,7 @@ class DelayWrapper(ObservationWrapper):
             )
         elif self.mode == 'all':
             self.observation_space = Box(
-                shape=(self.orig_shape[0] * self.orig_shape[1] + self.nav_dim + self.max_delay * self.env.action_space.shape[0] + 1,),
+                shape=(self.orig_shape[0] * self.orig_shape[1] + self.lateral_dim + self.nav_dim + self.max_delay * self.env.action_space.shape[0] + 1,),
                 low=-5000,
                 high=5000,
                 dtype=np.float32
@@ -126,6 +132,17 @@ class DelayWrapper(ObservationWrapper):
         self.delay_of_received_observation = 0
         self.delay_of_last_observation = 0
         self.obs = None
+
+    def _entities_for_policy(self, entities):
+        flat = np.asarray(entities, dtype=np.float32).reshape(-1)
+        if not self.lateral_dim:
+            return flat
+        base = self.env.unwrapped
+        lateral = [0.0, 0.0]
+        if base.ego_on_road and not base.ego_teleported:
+            lateral = [base.traci.vehicle.getLateralLanePosition(base.ego_id),
+                       base.traci.vehicle.getLateralSpeed(base.ego_id)]
+        return np.concatenate((flat[:3], np.asarray(lateral, dtype=np.float32), flat[3:]))
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
@@ -166,7 +183,7 @@ class DelayWrapper(ObservationWrapper):
         #     "global": flatten([[a.tolist() for a in self.action_history], [0]])
         # }
         nav = self.env.exit_navigation() if self.nav_features else []
-        self.newX = np.asarray(flatten([self.obs, nav, list(self.action_history), [0]]), dtype=np.float32)
+        self.newX = np.asarray(flatten([self._entities_for_policy(self.obs), nav, list(self.action_history), [0]]), dtype=np.float32)
         if self.mode == 'only_delayed_state':
             return self.obs, info
         elif self.mode == 'delayed_state_and_action':
@@ -273,7 +290,7 @@ class DelayWrapper(ObservationWrapper):
         for i in range(self.delay_of_received_observation, len(masked_action_history)):
             masked_action_history[i] = np.zeros_like(masked_action_history[i])
         nav = self.env.exit_navigation() if self.nav_features else []
-        self.newX = np.asarray(flatten([received_obs, nav, masked_action_history,
+        self.newX = np.asarray(flatten([self._entities_for_policy(received_obs), nav, masked_action_history,
                                         [self.delay_of_received_observation]]), dtype=np.float32)
         if self.mode == 'only_delayed_state':
             return received_obs

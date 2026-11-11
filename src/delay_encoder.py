@@ -67,7 +67,7 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
 
     def __init__(self, observation_space, act_dim, hist_len, delay_dim,
                  features_dim=256, gru_hidden=64,
-                 input_mode='antwerp_scaled_reversed', nav_dim=0):
+                 input_mode='antwerp_scaled_reversed', nav_dim=0, observation_mode='legacy'):
         super().__init__(observation_space, features_dim)
 
         if input_mode not in self.INPUT_MODES:
@@ -84,13 +84,15 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
         self.act_dim = act_dim
         self.hist_len = hist_len
         self.delay_dim = delay_dim
-        if self.obs_dim % 3 != 0 or delay_dim != 1 or nav_dim not in (0, 2):
-            raise ValueError('DAROM-GRU expects 3 features per vehicle and one delay value')
-        num_entities = self.obs_dim // 3
-        self.register_buffer(
-            'observation_scale',
-            th.tensor([1000., 5., 30.] + [50., 20., 30.] * (num_entities - 1)),
-        )
+        ego_dim = {'legacy': 3, 'ego_lateral_v1': 5}.get(observation_mode)
+        if ego_dim is None or (self.obs_dim - ego_dim) % 3 or delay_dim != 1 or nav_dim not in (0, 2):
+            raise ValueError('Invalid DAROM-GRU observation layout')
+        if observation_mode == 'ego_lateral_v1' and input_mode != 'paper_raw':
+            raise ValueError('ego_lateral_v1 requires paper_raw input')
+        num_neighbors = (self.obs_dim - ego_dim) // 3
+        self.register_buffer('observation_scale', th.tensor(
+            [1000., 5., 30.] + ([1., 1.] if ego_dim == 5 else [])
+            + [50., 20., 30.] * num_neighbors))
 
         # -------------------------------
         # 1) Encode observation (o_t)

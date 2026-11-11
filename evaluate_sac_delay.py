@@ -44,7 +44,7 @@ B0_REFERENCE_REWARDS = {
 def make_env(seed, scenario, delay_mode, safety, ablation, task=exit_config.TASK_ID,
              potential_gamma=None, nav_features=False, exit_reward_profile=None,
              progress_experiment=None, reward_config=None,
-             reward_gamma=exit_config.DEFAULT_GAMMA):
+             reward_gamma=exit_config.DEFAULT_GAMMA, observation_mode='legacy'):
     env = DelayWrapper(Merging(seed=seed, scenario=scenario, task=task,
                                potential_gamma=potential_gamma,
                                exit_reward_profile=exit_reward_profile,
@@ -52,7 +52,8 @@ def make_env(seed, scenario, delay_mode, safety, ablation, task=exit_config.TASK
                                reward_config=reward_config,
                                reward_gamma=reward_gamma),
                        max_delay=20, mode='all', delay_mode=delay_mode,
-                       seed=seed, ablation=ablation, nav_features=nav_features)
+                       seed=seed, ablation=ablation, nav_features=nav_features,
+                       observation_mode=observation_mode)
     return SafetyWrapper(env) if safety else env
 
 
@@ -108,7 +109,14 @@ def validate_checkpoint_setup(model, ablation, safety, task=exit_config.TASK_ID)
     if task == exit_config.TASK_ID:
         profile = getattr(model, 'exit_observation_profile', None)
         nav_features = False
-        expected_dim = 134
+        observation_mode = getattr(model, 'observation_mode', 'legacy')
+        if observation_mode not in ('legacy', 'ego_lateral_v1'):
+            raise ValueError('Unknown checkpoint observation mode')
+        expected_dim = 136 if observation_mode == 'ego_lateral_v1' else 134
+        encoder_mode = (getattr(model, 'policy_kwargs', {}) or {}).get(
+            'features_extractor_kwargs', {}).get('observation_mode', 'legacy')
+        if encoder_mode != observation_mode:
+            raise ValueError('Checkpoint encoder and observation modes disagree')
         if model.observation_space.shape != (expected_dim,):
             raise ValueError('Checkpoint E76-to-D3 observation profile and shape disagree')
         encoder_nav_dim = (getattr(model, 'policy_kwargs', {}) or {}).get(
@@ -116,7 +124,7 @@ def validate_checkpoint_setup(model, ablation, safety, task=exit_config.TASK_ID)
         if encoder_nav_dim != (2 if nav_features else 0):
             raise ValueError('Checkpoint E76-to-D3 GRU navigation split disagrees')
         potential_gamma = None
-    setup = {'training_safety': getattr(model, 'training_safety', None),
+    setup = {'observation_mode': observation_mode, 'training_safety': getattr(model, 'training_safety', None),
              'evaluation_safety': bool(safety),
              'exit_reward_profile': reward_profile,
              'reward_config': reward_config,
@@ -563,7 +571,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
                            exit_reward_profile=setup.get('exit_reward_profile'),
                            progress_experiment=setup.get('progress_experiment'),
                            reward_config=setup['reward_config'],
-                           reward_gamma=setup['reward_gamma'])
+                           reward_gamma=setup['reward_gamma'],
+                           observation_mode=setup['observation_mode'])
             try:
                 runs.append({'seed': seed, 'evaluation_seed_start': seed,
                              'episodes': episodes,
