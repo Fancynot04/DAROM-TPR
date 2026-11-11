@@ -414,12 +414,12 @@ def parse_args():
     parser.add_argument('--gru_input_mode', choices=DelayAwareGRUEncoder.INPUT_MODES,
                         default='paper_raw',
                         help='New GRU runs use unscaled wrapper inputs; the Antwerp legacy mode is for old checkpoints')
-    parser.add_argument('--observation-mode', choices=['legacy', 'ego_lateral_v1'], default='legacy')
+    parser.add_argument('--observation-mode', choices=['legacy', 'ego_lateral_v1', 'ego_spatial_v2'], default='legacy')
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
-    if args.observation_mode == 'ego_lateral_v1' and (args.encoder_mode != 'GRU' or args.gru_input_mode != 'paper_raw' or args.ablation != 'full'):
-        parser.error('ego_lateral_v1 requires full GRU with paper_raw input')
+    if args.observation_mode != 'legacy' and (args.encoder_mode != 'GRU' or args.gru_input_mode != 'paper_raw' or args.ablation != 'full'):
+        parser.error('Non-legacy observations require full GRU with paper_raw input')
     if args.use_safety:
         parser.error('Current E76-to-D3 experiments require Safety off; --safety is forbidden')
     try:
@@ -515,7 +515,7 @@ def main():
         progress_experiment=None,
         exit_control_profile=None,
         exit_observation_profile=None,
-        observation_dim=(136 if args.observation_mode == 'ego_lateral_v1' else 134),
+        observation_dim={'legacy': 134, 'ego_lateral_v1': 136, 'ego_spatial_v2': 137}[args.observation_mode],
         observation_mode=args.observation_mode,
         nav_distance_scale_meters=None,
         metric_schema='env_steps_v3',
@@ -599,6 +599,8 @@ def main():
 
     if args.resume_model:
         model = SAC.load(args.resume_model, env=vec_env, device=args.device)
+        if getattr(model, 'observation_mode', 'legacy') != args.observation_mode:
+            raise ValueError('Resume checkpoint observation mode mismatch')
         if getattr(model, 'exit_reward_config_sha256', None) != args.reward_config_hash:
             raise ValueError('Resume checkpoint reward configuration hash mismatch')
         if getattr(model, 'antwerp_task', None) != args.task:

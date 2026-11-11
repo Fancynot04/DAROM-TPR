@@ -80,6 +80,20 @@ def info(terminal=False, on_road=True, message=''):
 
 
 class RecorderTest(unittest.TestCase):
+    def test_spatial_layout_in_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rec = TrajectoryRecorder(
+                Path(tmp) / 'traj', model_label='m', checkpoint='c.zip', checkpoint_sha256='ab' * 32,
+                training_seed=42, scenario='easy', reward_config=REWARD, route_network=NET,
+                lane_change_edges={'E76'}, parse_action=lambda a: [float(a[0]), 0],
+                config={'observation_mode': 'ego_spatial_v2'})
+            rec.close()
+            manifest = json.loads((Path(tmp) / 'traj/trajectory_manifest.json').read_text())
+            self.assertEqual(manifest['obs_dim'], 137)
+            self.assertEqual(manifest['observation_mode'], 'ego_spatial_v2')
+            self.assertEqual(manifest['obs_layout']['action_history'], '96:136')
+            self.assertEqual(len(rec.obs_fields), 137)
+
     def test_vector_columns_exclude_next_obs_metadata(self):
         row = {'next_obs_000': '1', 'next_obs_133': '2',
                'next_obs_valid': '1', 'next_obs_note': ''}

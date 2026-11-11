@@ -84,14 +84,14 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
         self.act_dim = act_dim
         self.hist_len = hist_len
         self.delay_dim = delay_dim
-        ego_dim = {'legacy': 3, 'ego_lateral_v1': 5}.get(observation_mode)
-        if ego_dim is None or (self.obs_dim - ego_dim) % 3 or delay_dim != 1 or nav_dim not in (0, 2):
+        ego_dim = {'legacy': 3, 'ego_lateral_v1': 5, 'ego_spatial_v2': 6}.get(observation_mode)
+        if ego_dim is None or self.obs_dim != ego_dim + 90 or delay_dim != 1 or nav_dim not in (0, 2):
             raise ValueError('Invalid DAROM-GRU observation layout')
-        if observation_mode == 'ego_lateral_v1' and input_mode != 'paper_raw':
-            raise ValueError('ego_lateral_v1 requires paper_raw input')
+        if observation_mode != 'legacy' and input_mode != 'paper_raw':
+            raise ValueError('Non-legacy observations require paper_raw input')
         num_neighbors = (self.obs_dim - ego_dim) // 3
         self.register_buffer('observation_scale', th.tensor(
-            [1000., 5., 30.] + ([1., 1.] if ego_dim == 5 else [])
+            ([1.] * 6 if ego_dim == 6 else [1000., 5., 30.] + ([1., 1.] if ego_dim == 5 else []))
             + [50., 20., 30.] * num_neighbors))
 
         # -------------------------------

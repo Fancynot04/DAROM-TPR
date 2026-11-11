@@ -192,6 +192,11 @@ class TrajectoryRecorder:
                  lane_change_edges, parse_action, destination='D3',
                  lane_change_seconds=4.0, step_length=0.1,
                  hard_braking_threshold=-4.5, config=None, run_label=None):
+        self.observation_mode = (config or {}).get('observation_mode', 'legacy')
+        dimensions = {'legacy': 134, 'ego_lateral_v1': 136, 'ego_spatial_v2': 137}
+        if self.observation_mode not in dimensions:
+            raise ValueError(f'Unknown observation mode: {self.observation_mode}')
+        self.obs_dim = dimensions[self.observation_mode]
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=False)  # never reuse a directory
         self.model_label, self.checkpoint = model_label, str(checkpoint)
@@ -207,8 +212,8 @@ class TrajectoryRecorder:
         self.term_columns = [(f'rt_{name}_{suffix}', unit)
                              for name in self.term_names for suffix, unit in TERM_SUFFIXES]
         self.step_fields = [c[0] for c in FIXED_COLUMNS] + [c[0] for c in self.term_columns]
-        self.obs_fields = [f'obs_{i:03d}' for i in range(OBS_DIM)]
-        self.next_obs_fields = [f'next_obs_{i:03d}' for i in range(OBS_DIM)]
+        self.obs_fields = [f'obs_{i:03d}' for i in range(self.obs_dim)]
+        self.next_obs_fields = [f'next_obs_{i:03d}' for i in range(self.obs_dim)]
         self.transition_fields = (
             ['trajectory_id', 'step'] + self.obs_fields
             + ['action_policy_0', 'action_policy_1', 'action_exec_0', 'action_exec_1']
@@ -286,7 +291,7 @@ class TrajectoryRecorder:
                'action': np.array(action, dtype=np.float32, copy=True),
                'step': ep['rows'], 'on_road': bool(base.ego_on_road and not base.ego_teleporting),
                'row': {}}
-        if pre['obs'].shape != (OBS_DIM,) or pre['action'].shape != (ACTION_DIM,):
+        if pre['obs'].shape != (self.obs_dim,) or pre['action'].shape != (ACTION_DIM,):
             raise ValueError(f'Unexpected obs/action shape: {pre["obs"].shape}, {pre["action"].shape}')
         row = pre['row']
         parsed = self.parse_action(pre['action'])
@@ -372,7 +377,7 @@ class TrajectoryRecorder:
         row = pre['row']
         terminal = bool(terminated or truncated)
         next_obs = np.asarray(next_observation, dtype=np.float32)
-        if next_obs.shape != (OBS_DIM,):
+        if next_obs.shape != (self.obs_dim,):
             raise ValueError(f'Unexpected next_obs shape: {next_obs.shape}')
         obs_hash = hashlib.sha1(pre['obs'].tobytes()).hexdigest()
         if ep['prev_obs_hash'] is not None and ep['prev_obs_hash'] != obs_hash:
@@ -455,8 +460,8 @@ class TrajectoryRecorder:
         _update_summary_stats(ep['summary_stats'], row)
 
         self._steps.writerow({k: _fmt(row.get(k)) for k in self.step_fields})
-        valid = alive
-        note = '' if valid else 'synthetic: env returns a stale copy (ego removed/collided/teleporting)'
+        valid = alive and not (terminal and self.observation_mode == 'ego_spatial_v2')
+        note = ('' if valid else 'synthetic: ego unavailable or terminal spatial state is zero')
         trans = {'trajectory_id': ep['trajectory_id'], 'step': pre['step'],
                  'action_policy_0': _fmt(float(raw[0])), 'action_policy_1': _fmt(float(raw[1])),
                  'action_exec_0': _fmt(row.get('action_exec_acc_raw')),
@@ -500,7 +505,16 @@ class TrajectoryRecorder:
             'step_length_s': self.dt, 'hard_braking_threshold_mps2': self.hard_braking_threshold,
             'ttc_min_closing_speed_mps': TTC_MIN_CLOSING_SPEED_MPS,
             'neighbor_search_m': NEIGHBOR_SEARCH_M,
-            'obs_dim': OBS_DIM, 'action_dim': ACTION_DIM, 'obs_layout': OBS_LAYOUT,
+            'obs_dim': self.obs_dim, 'action_dim': ACTION_DIM,
+            'observation_mode': self.observation_mode,
+            'obs_layout': (OBS_LAYOUT if self.observation_mode == 'legacy' else {
+                'ego': ('0:5: odometer, lane, speed, lateral position, lateral speed'
+                        if self.observation_mode == 'ego_lateral_v1' else
+                        '0:6: x, y, speed, lateral position, acceleration, distance to D3 entrance'),
+                'neighbors': ('5:95' if self.observation_mode == 'ego_lateral_v1' else '6:96'),
+                'action_history': ('95:135' if self.observation_mode == 'ego_lateral_v1' else '96:136'),
+                'delay': ('135' if self.observation_mode == 'ego_lateral_v1' else '136'),
+            }),
             'episodes': self.episodes, 'diagnostic_read_errors': dict(self.errors),
             'reward_terms_not_in_config': dict(self.unknown_terms),
             'files': {name: hashlib.sha256((self.out_dir / name).read_bytes()).hexdigest()

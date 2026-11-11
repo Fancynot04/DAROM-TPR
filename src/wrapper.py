@@ -61,12 +61,12 @@ class DelayWrapper(ObservationWrapper):
         super().__init__(env)
         if ablation not in ABLATION_MODES or (ablation != 'full' and mode != 'all'):
             raise ValueError(f'Unsupported ablation/mode: {ablation}/{mode}')
-        if observation_mode not in ('legacy', 'ego_lateral_v1'):
+        if observation_mode not in ('legacy', 'ego_lateral_v1', 'ego_spatial_v2'):
             raise ValueError(f'Unknown observation mode: {observation_mode}')
         if observation_mode != 'legacy' and (mode != 'all' or nav_features or ablation != 'full'):
-            raise ValueError('ego_lateral_v1 requires full mode without navigation or ablation')
+            raise ValueError('Non-legacy observations require full mode without navigation or ablation')
         self.observation_mode = observation_mode
-        self.lateral_dim = 2 if observation_mode == 'ego_lateral_v1' else 0
+        self.lateral_dim = {'legacy': 0, 'ego_lateral_v1': 2, 'ego_spatial_v2': 3}[observation_mode]
         self.ablation = ablation
         if nav_features and mode != 'all':
             raise ValueError('Navigation features require the full observation layout')
@@ -138,6 +138,21 @@ class DelayWrapper(ObservationWrapper):
         if not self.lateral_dim:
             return flat
         base = self.env.unwrapped
+        if self.observation_mode == 'ego_spatial_v2':
+            ego = np.zeros(6, dtype=np.float32)
+            if base.ego_on_road and not base.ego_teleported and not getattr(base, 'done', False):
+                vehicle = base.traci.vehicle
+                ego_id = base.ego_id
+                x, y = vehicle.getPosition(ego_id)
+                road = vehicle.getRoadID(ego_id)
+                distance = 0.0 if road == 'D3' else float(
+                    vehicle.getDrivingDistance(ego_id, 'D3', 0.0))
+                ego = np.asarray([x, y, vehicle.getSpeed(ego_id),
+                                  vehicle.getLateralLanePosition(ego_id),
+                                  vehicle.getAcceleration(ego_id), distance], dtype=np.float32)
+                if not np.isfinite(ego).all() or distance < 0:
+                    raise ValueError(f'Invalid live ego spatial observation on {road!r}: {ego!r}')
+            return np.concatenate((ego, flat[3:]))
         lateral = [0.0, 0.0]
         if base.ego_on_road and not base.ego_teleported:
             lateral = [base.traci.vehicle.getLateralLanePosition(base.ego_id),
@@ -183,7 +198,10 @@ class DelayWrapper(ObservationWrapper):
         #     "global": flatten([[a.tolist() for a in self.action_history], [0]])
         # }
         nav = self.env.exit_navigation() if self.nav_features else []
-        self.newX = np.asarray(flatten([self._entities_for_policy(self.obs), nav, list(self.action_history), [0]]), dtype=np.float32)
+        entities = self._entities_for_policy(self.obs)
+        self.newX = np.asarray(flatten([entities, nav, list(self.action_history), [0]]), dtype=np.float32)
+        if self.observation_mode == 'ego_spatial_v2':
+            self.newX[:6] = entities[:6]
         if self.mode == 'only_delayed_state':
             return self.obs, info
         elif self.mode == 'delayed_state_and_action':
@@ -290,8 +308,11 @@ class DelayWrapper(ObservationWrapper):
         for i in range(self.delay_of_received_observation, len(masked_action_history)):
             masked_action_history[i] = np.zeros_like(masked_action_history[i])
         nav = self.env.exit_navigation() if self.nav_features else []
-        self.newX = np.asarray(flatten([self._entities_for_policy(received_obs), nav, masked_action_history,
+        entities = self._entities_for_policy(received_obs)
+        self.newX = np.asarray(flatten([entities, nav, masked_action_history,
                                         [self.delay_of_received_observation]]), dtype=np.float32)
+        if self.observation_mode == 'ego_spatial_v2':
+            self.newX[:6] = entities[:6]
         if self.mode == 'only_delayed_state':
             return received_obs
         elif self.mode == 'delayed_state_and_action':

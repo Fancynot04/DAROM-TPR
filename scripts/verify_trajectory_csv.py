@@ -129,7 +129,8 @@ def main():
     for tid, rows in tr_by.items():
         obs_keys = vector_columns(rows[0], 'obs_')
         nxt_keys = vector_columns(rows[0], 'next_obs_')
-        check(f'[{tid}] obs/next_obs dim 134', len(obs_keys) == 134 == len(nxt_keys))
+        obs_dim = manifest.get('obs_dim', 134)
+        check(f'[{tid}] obs/next_obs dim {obs_dim}', len(obs_keys) == obs_dim == len(nxt_keys))
         check(f'[{tid}] action dim 2 and finite', all(
             math.isfinite(float(r[k])) for r in rows for k in ('action_policy_0', 'action_policy_1')))
         check(f'[{tid}] all obs finite', all(math.isfinite(float(r[k])) for r in rows
@@ -137,7 +138,8 @@ def main():
         check(f'[{tid}] obs_t+1 == next_obs_t', all(
             [a[k] for k in nxt_keys] == [b[k] for k in obs_keys] for a, b in zip(rows, rows[1:])))
         step_last = by_id[tid][-1]
-        expected_valid = '1' if step_last['ego_on_road_after'] == '1' else '0'
+        expected_valid = ('1' if step_last['ego_on_road_after'] == '1'
+                          and manifest.get('observation_mode', 'legacy') != 'ego_spatial_v2' else '0')
         check(f'[{tid}] terminal next_obs validity matches Ego availability',
               rows[-1]['next_obs_valid'] == expected_valid,
               f"(actual={rows[-1]['next_obs_valid']}, expected={expected_valid}, "

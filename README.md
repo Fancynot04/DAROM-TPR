@@ -151,6 +151,20 @@ neighbor packet and action-history masking retain the existing delay rules.
 Checkpoints record the mode and must match the environment and encoder shape;
 134-value checkpoints cannot be resumed with the 136-value mode.
 
+`--observation-mode ego_spatial_v2` selects a separately initialized 137-value
+GRU policy: indices 0:6 are live TraCI `[x, y, speed, lateral_position,
+acceleration, distance_to_d3]`, 6:96 are unchanged delayed neighbours,
+96:136 are the existing masked action history, and 136 is the delay. Distance
+is `getDrivingDistance(ego, "D3", 0)` along the route including junction
+connectors, in meters to the start of D3; it is zero once on D3. An invalid
+nonterminal query raises an error. The six live values retain float32 precision;
+on a terminal step, or when Ego is unavailable, the six values are zero and
+the terminal observation is not a physical state. `paper_raw` performs no input normalization; absolute
+map coordinates can be much larger than the other features. Old 134- and
+136-value models cannot be loaded into this mode. The prior lateral mode stays
+available for checkpoint compatibility. Observation mode is included in the
+checkpoint and evaluation/trajectory metadata.
+
 For read-only trajectory export, pass a new output directory. The recorder
 writes one step row and one transition row per `env.step`, plus an immutable
 manifest and column dictionary. Reward columns are derived from the
