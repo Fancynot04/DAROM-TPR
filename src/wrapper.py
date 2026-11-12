@@ -10,23 +10,10 @@ from .merging import parseAction
 from .geometry import align_delayed_neighbors
 # from state_predictor import predictor_infer, load_predictor
 import torch
-_INTERNAL_LANE_INCOMING = {
-    ':J102_0': (0, 1), ':J102_2': (0, 1, 2),
-    ':J103_0': (0,), ':J103_1': (0, 1, 2, 3, 4),
-    ':J104_0': (0, 1, 2, 3, 4, 5), ':J105_0': (0, 0, 1, 2, 3, 4),
-    ':J106_0': (0,), ':J106_1': (1, 2, 3, 4, 5),
-    ':J107_0': (0, 1, 2, 2, 3, 4), ':J111_0': (0, 1, 2),
-    ':J111_3': (3, 4, 5),
-}
 
 
 def _ego_lane_index(vehicle, ego_id, road):
     lane = vehicle.getLaneIndex(ego_id)
-    if road.startswith(':'):
-        lanes = _INTERNAL_LANE_INCOMING.get(road)
-        if lanes is None or not 0 <= lane < len(lanes):
-            raise ValueError(f'Unknown internal lane: {road!r}, index={lane}')
-        lane = lanes[lane]
     if not 0 <= lane < 6:
         raise ValueError(f'Invalid ego lane: {road!r}, index={lane}')
     return lane

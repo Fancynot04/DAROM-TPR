@@ -1,6 +1,4 @@
 import unittest
-import xml.etree.ElementTree as ET
-from pathlib import Path
 from types import SimpleNamespace
 
 import gymnasium as gym
@@ -9,7 +7,7 @@ import torch
 from stable_baselines3 import SAC
 from stable_baselines3.common.buffers import ReplayBuffer
 
-from src.wrapper import DelayWrapper, _INTERNAL_LANE_INCOMING
+from src.wrapper import DelayWrapper
 from src.delay_encoder import DelayAwareGRUEncoder
 
 
@@ -72,23 +70,18 @@ class LateralObservationTests(unittest.TestCase):
         env.env.done = True
         np.testing.assert_array_equal(env._entities_for_policy(env.env.observation)[:12], np.zeros(12))
 
-    def test_internal_mappings_match_network(self):
-        network = ET.parse(Path(__file__).resolve().parents[1] / 'sumo_new/Antwerp.net.xml')
-        connections = [c for c in network.findall('connection') if c.get('via')]
-        self.assertEqual(sum(map(len, _INTERNAL_LANE_INCOMING.values())), len(connections))
-        for c in connections:
-            internal, lane = c.get('via').rsplit('_', 1)
-            self.assertEqual(_INTERNAL_LANE_INCOMING[internal][int(lane)], int(c.get('fromLane')))
+    def test_internal_lanes_use_sumo_index(self):
         env = DelayWrapper(FakeEnv(), max_delay=20, mode='all', observation_mode='ego_spatial_onehot_v3')
         vehicle = env.env.traci.vehicle
-        for road, internal_lane, expected in [(':J105_0', 1, 0), (':J105_0', 2, 1),
-                                               (':J106_1', 0, 1), (':J106_0', 0, 0)]:
+        for road, internal_lane in [(':J105_0', 1), (':J105_0', 2),
+                                    (':J106_1', 0), (':J106_0', 0), (':unknown', 5)]:
             vehicle.getRoadID = lambda _, road=road: road
             vehicle.getLaneIndex = lambda _, lane=internal_lane: lane
             obs, _ = env.reset()
-            np.testing.assert_array_equal(obs[6:12], np.eye(6, dtype=np.float32)[expected])
-        vehicle.getRoadID = lambda _: ':unknown'
-        with self.assertRaises(ValueError): env.reset()
+            np.testing.assert_array_equal(obs[6:12], np.eye(6, dtype=np.float32)[internal_lane])
+        for invalid in (-1, 6):
+            vehicle.getLaneIndex = lambda _, lane=invalid: lane
+            with self.assertRaises(ValueError): env.reset()
 
     def test_delay_and_layout(self):
         old = DelayWrapper(FakeEnv(), max_delay=20, mode='all', seed=5)

@@ -44,9 +44,10 @@ class SumoIntegrationTests(unittest.TestCase):
             lane = traci.vehicle.getLaneIndex('ego')
             np.testing.assert_array_equal(obs[6:12], np.eye(6, dtype=np.float32)[lane])
         for lane_id, expected in [('E76_0', 0), ('E76_4', 4),
-                                  (':J105_0_1', 0), (':J105_0_2', 1),
+                                  (':J105_0_1', 1), (':J105_0_2', 2),
                                   ('E77_5', 5), (':J106_0_0', 0)]:
             traci.vehicle.moveTo('ego', lane_id, 0.1)
+            self.assertEqual(traci.vehicle.getLaneIndex('ego'), expected)
             obs = env._entities_for_policy(base.observation)
             np.testing.assert_array_equal(obs[6:12], np.eye(6, dtype=np.float32)[expected])
         self.assertEqual(env.observation_space.shape, (143,))
