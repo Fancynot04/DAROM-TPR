@@ -414,7 +414,7 @@ def parse_args():
     parser.add_argument('--gru_input_mode', choices=DelayAwareGRUEncoder.INPUT_MODES,
                         default='paper_raw',
                         help='New GRU runs use unscaled wrapper inputs; the Antwerp legacy mode is for old checkpoints')
-    parser.add_argument('--observation-mode', choices=['legacy', 'ego_lateral_v1', 'ego_spatial_v2'], default='legacy')
+    parser.add_argument('--observation-mode', choices=['legacy', 'ego_lateral_v1', 'ego_spatial_v2', 'ego_spatial_onehot_v3'], default='legacy')
     parser.add_argument('--ablation', choices=ABLATION_MODES, default='full')
     parser.add_argument('--delay_mode', type=str, default='uniform', choices=['uniform', 'exponential', 'triangular', 'bursty', 'bimodal'])
     args = parser.parse_args()
@@ -515,7 +515,7 @@ def main():
         progress_experiment=None,
         exit_control_profile=None,
         exit_observation_profile=None,
-        observation_dim={'legacy': 134, 'ego_lateral_v1': 136, 'ego_spatial_v2': 137}[args.observation_mode],
+        observation_dim={'legacy': 134, 'ego_lateral_v1': 136, 'ego_spatial_v2': 137, 'ego_spatial_onehot_v3': 143}[args.observation_mode],
         observation_mode=args.observation_mode,
         nav_distance_scale_meters=None,
         metric_schema='env_steps_v3',

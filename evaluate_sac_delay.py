@@ -110,9 +110,9 @@ def validate_checkpoint_setup(model, ablation, safety, task=exit_config.TASK_ID)
         profile = getattr(model, 'exit_observation_profile', None)
         nav_features = False
         observation_mode = getattr(model, 'observation_mode', 'legacy')
-        if observation_mode not in ('legacy', 'ego_lateral_v1', 'ego_spatial_v2'):
+        if observation_mode not in ('legacy', 'ego_lateral_v1', 'ego_spatial_v2', 'ego_spatial_onehot_v3'):
             raise ValueError('Unknown checkpoint observation mode')
-        expected_dim = {'legacy': 134, 'ego_lateral_v1': 136, 'ego_spatial_v2': 137}[observation_mode]
+        expected_dim = {'legacy': 134, 'ego_lateral_v1': 136, 'ego_spatial_v2': 137, 'ego_spatial_onehot_v3': 143}[observation_mode]
         encoder_mode = (getattr(model, 'policy_kwargs', {}) or {}).get(
             'features_extractor_kwargs', {}).get('observation_mode', 'legacy')
         if encoder_mode != observation_mode:

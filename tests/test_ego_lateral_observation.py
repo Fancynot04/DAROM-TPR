@@ -1,4 +1,6 @@
 import unittest
+import xml.etree.ElementTree as ET
+from pathlib import Path
 from types import SimpleNamespace
 
 import gymnasium as gym
@@ -7,7 +9,7 @@ import torch
 from stable_baselines3 import SAC
 from stable_baselines3.common.buffers import ReplayBuffer
 
-from src.wrapper import DelayWrapper
+from src.wrapper import DelayWrapper, _INTERNAL_LANE_INCOMING
 from src.delay_encoder import DelayAwareGRUEncoder
 
 
@@ -19,6 +21,7 @@ class Vehicle:
     def getSpeed(self, ego): return 12. + self.position
     def getAcceleration(self, ego): return -0.25
     def getRoadID(self, ego): return 'E76'
+    def getLaneIndex(self, ego): return 0
     def getDrivingDistance(self, ego, edge, pos): return 500. - self.position
 
 
@@ -42,6 +45,51 @@ class FakeEnv(gym.Env):
 
 
 class LateralObservationTests(unittest.TestCase):
+    def test_onehot_layout_and_sac(self):
+        old = DelayWrapper(FakeEnv(), max_delay=20, mode='all', seed=5, observation_mode='ego_spatial_v2')
+        env = DelayWrapper(FakeEnv(), max_delay=20, mode='all', seed=5, observation_mode='ego_spatial_onehot_v3')
+        a, _ = old.reset(seed=5)
+        obs, _ = env.reset(seed=5)
+        for lane in range(6):
+            env.env.traci.vehicle.getLaneIndex = lambda _, lane=lane: lane
+            a, *_ = old.step([1., -2.])
+            obs, *_ = env.step([1., -2.])
+            self.assertEqual(obs.shape, (143,))
+            self.assertEqual(obs.dtype, np.float32)
+            np.testing.assert_array_equal(obs[:6], a[:6])
+            np.testing.assert_array_equal(obs[6:12], np.eye(6, dtype=np.float32)[lane])
+            np.testing.assert_array_equal(obs[12:], a[6:])
+        kw = dict(features_extractor_class=DelayAwareGRUEncoder,
+                  features_extractor_kwargs=dict(act_dim=2, hist_len=20, delay_dim=1,
+                      input_mode='paper_raw', observation_mode='ego_spatial_onehot_v3'))
+        model = SAC('MlpPolicy', env, policy_kwargs=kw, buffer_size=10, device='cpu')
+        tensor = torch.as_tensor(obs[None])
+        action = model.actor(tensor)
+        self.assertEqual(action.shape, (1, 2))
+        self.assertEqual(len(model.critic(tensor, action)), 2)
+        model.replay_buffer.add(obs[None], obs[None], action.detach().numpy(), np.array([0.]), np.array([0.]), [{}])
+        self.assertEqual(model.replay_buffer.sample(1).observations.shape, (1, 143))
+        env.env.done = True
+        np.testing.assert_array_equal(env._entities_for_policy(env.env.observation)[:12], np.zeros(12))
+
+    def test_internal_mappings_match_network(self):
+        network = ET.parse(Path(__file__).resolve().parents[1] / 'sumo_new/Antwerp.net.xml')
+        connections = [c for c in network.findall('connection') if c.get('via')]
+        self.assertEqual(sum(map(len, _INTERNAL_LANE_INCOMING.values())), len(connections))
+        for c in connections:
+            internal, lane = c.get('via').rsplit('_', 1)
+            self.assertEqual(_INTERNAL_LANE_INCOMING[internal][int(lane)], int(c.get('fromLane')))
+        env = DelayWrapper(FakeEnv(), max_delay=20, mode='all', observation_mode='ego_spatial_onehot_v3')
+        vehicle = env.env.traci.vehicle
+        for road, internal_lane, expected in [(':J105_0', 1, 0), (':J105_0', 2, 1),
+                                               (':J106_1', 0, 1), (':J106_0', 0, 0)]:
+            vehicle.getRoadID = lambda _, road=road: road
+            vehicle.getLaneIndex = lambda _, lane=internal_lane: lane
+            obs, _ = env.reset()
+            np.testing.assert_array_equal(obs[6:12], np.eye(6, dtype=np.float32)[expected])
+        vehicle.getRoadID = lambda _: ':unknown'
+        with self.assertRaises(ValueError): env.reset()
+
     def test_delay_and_layout(self):
         old = DelayWrapper(FakeEnv(), max_delay=20, mode='all', seed=5)
         new = DelayWrapper(FakeEnv(), max_delay=20, mode='all', seed=5, observation_mode='ego_lateral_v1')

@@ -165,6 +165,20 @@ map coordinates can be much larger than the other features. Old 134- and
 available for checkpoint compatibility. Observation mode is included in the
 checkpoint and evaluation/trajectory metadata.
 
+`--observation-mode ego_spatial_onehot_v3` creates a separate 143-value
+`paper_raw` GRU policy. It inserts a six-value float32 lane one-hot at indices
+6:12 after the v2 physical state; delayed neighbours occupy 12:102, action
+history 102:142, and delay index 142. Ordinary roads use the current SUMO lane
+index. For internal connectors the hardcoded Antwerp network mapping uses the
+incoming lane index: for example J105 internal lanes 0–5 map to 0,0,1,2,3,4,
+and J106's D3 connector maps to 0 while its straight connectors map to
+1,2,3,4,5. The index can therefore change at an edge boundary without a
+physical lane change. Unknown internal lanes or indices outside 0–5 fail
+explicitly. When Ego is unavailable or the episode terminates, the complete
+12-value Ego state is zero. The mapping must be updated if the network changes.
+Existing checkpoints retain their original observation modes and dimensions;
+v3 requires a newly initialized compatible policy.
+
 For read-only trajectory export, pass a new output directory. The recorder
 writes one step row and one transition row per `env.step`, plus an immutable
 manifest and column dictionary. Reward columns are derived from the

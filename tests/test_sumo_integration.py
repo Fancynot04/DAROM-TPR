@@ -30,6 +30,28 @@ class SumoIntegrationTests(unittest.TestCase):
         if traci.isLoaded():
             traci.close()
 
+    def test_onehot_live_lane_and_connectors(self):
+        base = Merging(seed=579071, scenario='easy')
+        env = DelayWrapper(base, max_delay=20, mode='all', seed=579071,
+                           observation_mode='ego_spatial_onehot_v3')
+        obs, _ = env.reset()
+        self.assertEqual(obs.shape, (143,))
+        self.assertEqual(obs.dtype, np.float32)
+        for _ in range(10):
+            obs, _, terminated, truncated, _ = env.step([0., 0.])
+            self.assertFalse(terminated or truncated)
+            self.assertTrue(env.observation_space.contains(obs))
+            lane = traci.vehicle.getLaneIndex('ego')
+            np.testing.assert_array_equal(obs[6:12], np.eye(6, dtype=np.float32)[lane])
+        for lane_id, expected in [('E76_0', 0), ('E76_4', 4),
+                                  (':J105_0_1', 0), (':J105_0_2', 1),
+                                  ('E77_5', 5), (':J106_0_0', 0)]:
+            traci.vehicle.moveTo('ego', lane_id, 0.1)
+            obs = env._entities_for_policy(base.observation)
+            np.testing.assert_array_equal(obs[6:12], np.eye(6, dtype=np.float32)[expected])
+        self.assertEqual(env.observation_space.shape, (143,))
+        env.close()
+
     def test_three_scenarios_and_delayed_safety(self):
         for scenario in ('easy', 'medium', 'hard'):
             with self.subTest(scenario=scenario):

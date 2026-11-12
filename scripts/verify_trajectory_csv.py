@@ -139,7 +139,7 @@ def main():
             [a[k] for k in nxt_keys] == [b[k] for k in obs_keys] for a, b in zip(rows, rows[1:])))
         step_last = by_id[tid][-1]
         expected_valid = ('1' if step_last['ego_on_road_after'] == '1'
-                          and manifest.get('observation_mode', 'legacy') != 'ego_spatial_v2' else '0')
+                          and manifest.get('observation_mode', 'legacy') not in ('ego_spatial_v2', 'ego_spatial_onehot_v3') else '0')
         check(f'[{tid}] terminal next_obs validity matches Ego availability',
               rows[-1]['next_obs_valid'] == expected_valid,
               f"(actual={rows[-1]['next_obs_valid']}, expected={expected_valid}, "

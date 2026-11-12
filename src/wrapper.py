@@ -10,6 +10,28 @@ from .merging import parseAction
 from .geometry import align_delayed_neighbors
 # from state_predictor import predictor_infer, load_predictor
 import torch
+_INTERNAL_LANE_INCOMING = {
+    ':J102_0': (0, 1), ':J102_2': (0, 1, 2),
+    ':J103_0': (0,), ':J103_1': (0, 1, 2, 3, 4),
+    ':J104_0': (0, 1, 2, 3, 4, 5), ':J105_0': (0, 0, 1, 2, 3, 4),
+    ':J106_0': (0,), ':J106_1': (1, 2, 3, 4, 5),
+    ':J107_0': (0, 1, 2, 2, 3, 4), ':J111_0': (0, 1, 2),
+    ':J111_3': (3, 4, 5),
+}
+
+
+def _ego_lane_index(vehicle, ego_id, road):
+    lane = vehicle.getLaneIndex(ego_id)
+    if road.startswith(':'):
+        lanes = _INTERNAL_LANE_INCOMING.get(road)
+        if lanes is None or not 0 <= lane < len(lanes):
+            raise ValueError(f'Unknown internal lane: {road!r}, index={lane}')
+        lane = lanes[lane]
+    if not 0 <= lane < 6:
+        raise ValueError(f'Invalid ego lane: {road!r}, index={lane}')
+    return lane
+
+
 ABLATION_MODES = ('full', 'delayed_state_only', 'delayed_state_delay',
                   'delayed_state_action', 'linear_predictor')
 
@@ -61,12 +83,12 @@ class DelayWrapper(ObservationWrapper):
         super().__init__(env)
         if ablation not in ABLATION_MODES or (ablation != 'full' and mode != 'all'):
             raise ValueError(f'Unsupported ablation/mode: {ablation}/{mode}')
-        if observation_mode not in ('legacy', 'ego_lateral_v1', 'ego_spatial_v2'):
+        if observation_mode not in ('legacy', 'ego_lateral_v1', 'ego_spatial_v2', 'ego_spatial_onehot_v3'):
             raise ValueError(f'Unknown observation mode: {observation_mode}')
         if observation_mode != 'legacy' and (mode != 'all' or nav_features or ablation != 'full'):
             raise ValueError('Non-legacy observations require full mode without navigation or ablation')
         self.observation_mode = observation_mode
-        self.lateral_dim = {'legacy': 0, 'ego_lateral_v1': 2, 'ego_spatial_v2': 3}[observation_mode]
+        self.lateral_dim = {'legacy': 0, 'ego_lateral_v1': 2, 'ego_spatial_v2': 3, 'ego_spatial_onehot_v3': 9}[observation_mode]
         self.ablation = ablation
         if nav_features and mode != 'all':
             raise ValueError('Navigation features require the full observation layout')
@@ -138,7 +160,7 @@ class DelayWrapper(ObservationWrapper):
         if not self.lateral_dim:
             return flat
         base = self.env.unwrapped
-        if self.observation_mode == 'ego_spatial_v2':
+        if self.observation_mode in ('ego_spatial_v2', 'ego_spatial_onehot_v3'):
             ego = np.zeros(6, dtype=np.float32)
             if base.ego_on_road and not base.ego_teleported and not getattr(base, 'done', False):
                 vehicle = base.traci.vehicle
@@ -152,6 +174,11 @@ class DelayWrapper(ObservationWrapper):
                                   vehicle.getAcceleration(ego_id), distance], dtype=np.float32)
                 if not np.isfinite(ego).all() or distance < 0:
                     raise ValueError(f'Invalid live ego spatial observation on {road!r}: {ego!r}')
+            if self.observation_mode == 'ego_spatial_onehot_v3':
+                onehot = np.zeros(6, dtype=np.float32)
+                if base.ego_on_road and not base.ego_teleported and not getattr(base, 'done', False):
+                    onehot = np.eye(6, dtype=np.float32)[_ego_lane_index(vehicle, ego_id, road)]
+                return np.concatenate((ego, onehot, flat[3:]))
             return np.concatenate((ego, flat[3:]))
         lateral = [0.0, 0.0]
         if base.ego_on_road and not base.ego_teleported:
@@ -200,7 +227,7 @@ class DelayWrapper(ObservationWrapper):
         nav = self.env.exit_navigation() if self.nav_features else []
         entities = self._entities_for_policy(self.obs)
         self.newX = np.asarray(flatten([entities, nav, list(self.action_history), [0]]), dtype=np.float32)
-        if self.observation_mode == 'ego_spatial_v2':
+        if self.observation_mode in ('ego_spatial_v2', 'ego_spatial_onehot_v3'):
             self.newX[:6] = entities[:6]
         if self.mode == 'only_delayed_state':
             return self.obs, info
@@ -311,7 +338,7 @@ class DelayWrapper(ObservationWrapper):
         entities = self._entities_for_policy(received_obs)
         self.newX = np.asarray(flatten([entities, nav, masked_action_history,
                                         [self.delay_of_received_observation]]), dtype=np.float32)
-        if self.observation_mode == 'ego_spatial_v2':
+        if self.observation_mode in ('ego_spatial_v2', 'ego_spatial_onehot_v3'):
             self.newX[:6] = entities[:6]
         if self.mode == 'only_delayed_state':
             return received_obs

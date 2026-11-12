@@ -193,7 +193,7 @@ class TrajectoryRecorder:
                  lane_change_seconds=4.0, step_length=0.1,
                  hard_braking_threshold=-4.5, config=None, run_label=None):
         self.observation_mode = (config or {}).get('observation_mode', 'legacy')
-        dimensions = {'legacy': 134, 'ego_lateral_v1': 136, 'ego_spatial_v2': 137}
+        dimensions = {'legacy': 134, 'ego_lateral_v1': 136, 'ego_spatial_v2': 137, 'ego_spatial_onehot_v3': 143}
         if self.observation_mode not in dimensions:
             raise ValueError(f'Unknown observation mode: {self.observation_mode}')
         self.obs_dim = dimensions[self.observation_mode]
@@ -460,7 +460,7 @@ class TrajectoryRecorder:
         _update_summary_stats(ep['summary_stats'], row)
 
         self._steps.writerow({k: _fmt(row.get(k)) for k in self.step_fields})
-        valid = alive and not (terminal and self.observation_mode == 'ego_spatial_v2')
+        valid = alive and not (terminal and self.observation_mode in ('ego_spatial_v2', 'ego_spatial_onehot_v3'))
         note = ('' if valid else 'synthetic: ego unavailable or terminal spatial state is zero')
         trans = {'trajectory_id': ep['trajectory_id'], 'step': pre['step'],
                  'action_policy_0': _fmt(float(raw[0])), 'action_policy_1': _fmt(float(raw[1])),
