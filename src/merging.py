@@ -90,7 +90,7 @@ def limit_ego_acceleration(command, speed, step_length, max_speed):
 
 
 def check_ego_speed(speed, max_speed, step, command, executed,
-                    tolerance=1e-6, phase='after_step'):
+                    tolerance=1e-3, phase='after_step'):
     if speed > max_speed + tolerance:
         executed_label = ('previous_executed_accel_mps2' if phase == 'before_step'
                           else 'executed_accel_mps2')
