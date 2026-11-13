@@ -81,10 +81,23 @@ def parseAction(action):
     return [acc, lc]
 
 
-def limit_ego_acceleration(command, speed, step_length, max_speed, max_decel):
-    """Bound the next speed while respecting the vehicle's braking capability."""
-    speed_bound = (max_speed - speed) / step_length
-    return max(-max_decel, min(float(command), speed_bound))
+def limit_ego_acceleration(command, speed, step_length, max_speed):
+    """Clip positive acceleration at the speed limit; preserve braking commands."""
+    command = float(command)
+    if command <= 0:
+        return command
+    return min(command, max(0.0, (max_speed - speed) / step_length))
+
+
+def check_ego_speed(speed, max_speed, step, command, executed,
+                    tolerance=1e-6, phase='after_step'):
+    if speed > max_speed + tolerance:
+        executed_label = ('previous_executed_accel_mps2' if phase == 'before_step'
+                          else 'executed_accel_mps2')
+        raise RuntimeError(
+            f'Ego overspeed: speed_mps={speed}, max_speed_mps={max_speed}, '
+            f'sac_accel_command_mps2={command}, {executed_label}={executed}, '
+            f'control_step={step}, phase={phase}')
 
 def set_ego_lane_mode(vehicle_name):
     traci.vehicle.setLaneChangeMode(vehicle_name, 0)
@@ -1032,6 +1045,11 @@ class Merging(gym.Env):
         self.boundary_diagnostic = road_boundary.observe(self) if was_on_road else {'status': 'unknown'}
         parsed_action = parseAction(action)
         self.ego_accel_command = float(action[0]) if was_on_road else None
+        if was_on_road:
+            check_ego_speed(float(self.traci.vehicle.getSpeed(self.ego_id)),
+                            exit_config.ROAD_SPEED_LIMIT_MPS, self.counter,
+                            self.ego_accel_command, self.ego_accel_executed,
+                            phase='before_step')
         self.exit_applied_lane_change_direction = 0
         self.exit_actor_request_direction = (
             int(parsed_action[1]) if was_on_road and self.task == exit_config.TASK_ID
@@ -1048,8 +1066,7 @@ class Merging(gym.Env):
             self.ego_accel_after_safety = float(parsed_action[0])
             self.ego_accel_executed = limit_ego_acceleration(
                 self.ego_accel_after_safety, float(self.traci.vehicle.getSpeed(self.ego_id)),
-                float(self.traci.simulation.getDeltaT()), exit_config.ROAD_SPEED_LIMIT_MPS,
-                float(self.traci.vehicle.getDecel(self.ego_id)))
+                float(self.traci.simulation.getDeltaT()), exit_config.ROAD_SPEED_LIMIT_MPS)
             self.ego_speed_limiter_active = self.ego_accel_executed < self.ego_accel_after_safety
             self.traci.vehicle.setAcceleration(self.ego_id, self.ego_accel_executed, 1)
         self.counter += 1
@@ -1070,6 +1087,10 @@ class Merging(gym.Env):
             self.ego_teleporting = False
         self.ego_on_road = (self.ego_id in self.traci.vehicle.getIDList()
                             and not self.ego_teleporting)
+        if self.ego_on_road:
+            check_ego_speed(float(self.traci.vehicle.getSpeed(self.ego_id)),
+                            exit_config.ROAD_SPEED_LIMIT_MPS, self.counter,
+                            self.ego_accel_command, self.ego_accel_executed)
         self.teleport_transition = started or ended or not was_on_road
         self.missed_exit = False
         previous_road = self.lane_name

@@ -228,9 +228,11 @@ speedFactor 1), departSpeed 10 m/s, and a `setSpeedMode(96)` call after insertio
 SUMO 1.20.0 currently reports speed mode 32 when queried afterward. The routes pin the Ego
 trip to `speedFactor=1.0`. Background vehicle types retain their original
 speed-factor behavior.
-The longitudinal command remains `setAcceleration`; each control step caps its
-requested acceleration against the measured Ego speed and the 120 km/h limit,
-with braking bounded by Ego `decel`. Step diagnostics report the raw command,
+The longitudinal command remains `setAcceleration`; each control step clips
+positive acceleration against the measured Ego speed and the 120 km/h limit.
+SAC braking commands pass through. An actual overspeed above a 1e-6 m/s tolerance
+raises an error with speed, command, executed acceleration, and control step.
+Step diagnostics report the raw command,
 post-safety command, executed command, and whether the limiter intervened.
 The base observation contains SUMO's measured Ego speed; the delay wrapper
 retains its existing delayed-observation semantics and 134-dimensional default layout.

@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 from src import exit_e76_d3_config as exit_config
 from src import exit_progress_reward
-from src.merging import ANTWERP_TASKS, Merging, limit_ego_acceleration
+from src.merging import ANTWERP_TASKS, Merging, check_ego_speed, limit_ego_acceleration
 from train_sac_delay import parse_args
 
 
@@ -20,10 +20,18 @@ ROUTES = ROOT / 'sumo_new'
 class E76D3ContractTests(unittest.TestCase):
     def test_ego_speed_limiter_preserves_braking_and_caps_acceleration(self):
         vmax = exit_config.ROAD_SPEED_LIMIT_MPS
-        self.assertEqual(limit_ego_acceleration(5, 10, 0.1, vmax, 5), 5)
-        self.assertAlmostEqual(limit_ego_acceleration(5, vmax - 0.2, 0.1, vmax, 5), 2)
-        self.assertEqual(limit_ego_acceleration(-3, 20, 0.1, vmax, 5), -3)
-        self.assertEqual(limit_ego_acceleration(5, vmax + 2, 0.1, vmax, 5), -5)
+        self.assertEqual(limit_ego_acceleration(5, 10, 0.1, vmax), 5)
+        self.assertAlmostEqual(limit_ego_acceleration(5, vmax - 0.2, 0.1, vmax), 2)
+        self.assertEqual(limit_ego_acceleration(-3, 20, 0.1, vmax), -3)
+        self.assertEqual(limit_ego_acceleration(5, vmax + 1e-7, 0.1, vmax), 0)
+        check_ego_speed(vmax + 1e-7, vmax, 20, 5, 0)
+        with self.assertRaisesRegex(RuntimeError, 'control_step=20') as error:
+            check_ego_speed(vmax + 0.01, vmax, 20, 5, 0)
+        self.assertIn('sac_accel_command_mps2=5', str(error.exception))
+        self.assertIn('executed_accel_mps2=0', str(error.exception))
+        with self.assertRaisesRegex(RuntimeError, 'previous_executed_accel_mps2=-3'):
+            check_ego_speed(vmax + 0.01, vmax, 21, 5, -3,
+                            phase='before_step')
 
     def test_only_exit_task_is_registered(self):
         self.assertEqual(ANTWERP_TASKS, {
