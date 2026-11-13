@@ -26,7 +26,7 @@ src/road_boundary.py       road-boundary diagnostics
 src/rewards/events.py      terminal-event rewards
 src/rewards/config.py      Hydra/OmegaConf reward configuration
 src/rewards/terms.py       RewardTerm and RewardTracker accounting
-sumo_new/Antwerp.net.xml   Antwerp network with the fixed corridor limit
+sumo_new/Antwerp.net.xml   Antwerp network with a 120 km/h limit on all lanes
 sumo_new/Antwerp_*_exit_e76_d3.rou.xml
                             Easy/Medium/Hard E76→D3 routes
 sumo_new/Antwerp.sumocfg   Easy E76→D3 GUI configuration
