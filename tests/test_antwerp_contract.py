@@ -45,6 +45,10 @@ class E76D3ContractTests(unittest.TestCase):
             args = parse_args()
         self.assertEqual(args.task, exit_config.TASK_ID)
         self.assertEqual(args.scenario, 'hard')
+        with patch.object(sys, 'argv', ['train_sac_delay.py', '--save-final-replay-buffer']):
+            final_only = parse_args()
+        self.assertTrue(final_only.save_final_replay_buffer)
+        self.assertFalse(final_only.save_replay_buffer)
         with patch.object(sys, 'argv', [
                 'train_sac_delay.py', '--load_path', 'old.zip']):
             with self.assertRaises(SystemExit):

@@ -385,6 +385,8 @@ def parse_args():
     parser.add_argument('--checkpoint_freq', type=int, default=exit_config.DEFAULT_CHECKPOINT_FREQ)
     parser.add_argument('--save_replay_buffer', action='store_true',
                         help='Save replay buffers alongside periodic and final models')
+    parser.add_argument('--save-final-replay-buffer', action='store_true',
+                        help='Save the replay buffer only after training completes')
     parser.add_argument('--resume-model', default=None,
                         help='SAC checkpoint to resume with its matching Replay Buffer')
     parser.add_argument('--resume-replay-buffer', default=None,
@@ -523,6 +525,7 @@ def main():
         device=args.device,
         torch_threads=args.torch_threads,
         save_replay_buffer=args.save_replay_buffer,
+        save_final_replay_buffer=args.save_final_replay_buffer,
         resume_model=args.resume_model,
         resume_replay_buffer=args.resume_replay_buffer,
         target_total_timesteps=args.target_total_timesteps,
@@ -693,7 +696,7 @@ def main():
         model.learn(total_timesteps=learn_timesteps, callback=callbacks,
                     reset_num_timesteps=not bool(args.resume_model))
         save_model(model, model_path)
-        if args.save_replay_buffer:
+        if args.save_replay_buffer or args.save_final_replay_buffer:
             replay_path = os.path.join(args.save_dir, f'{args.run_name}_replay_buffer.pkl')
             model.save_replay_buffer(replay_path)
             print(f'Saved final replay buffer to {replay_path}', flush=True)

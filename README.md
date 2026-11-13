@@ -71,6 +71,8 @@ python3 train_sac_delay.py \
 The command-line values are final; no historical Phase or reward file can
 override seed, scenario, budget, checkpoint interval, or gamma. The default
 resolved reward configuration is `conf/config.yaml` → `conf/reward/e76_d3.yaml`.
+Use `--save-final-replay-buffer` to save a Replay Buffer only after training
+completes; `--save_replay_buffer` also saves one at every periodic checkpoint.
 The B0 reward is zero on non-terminal steps and settles exactly one event:
 success `+50`, collision/missed-exit/teleport/timeout `-100`.
 
