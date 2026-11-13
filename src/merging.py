@@ -717,6 +717,7 @@ class Merging(gym.Env):
             for vehicle_name in self.traci.simulation.getDepartedIDList():
                 if vehicle_name == 'ego':
                     self.traci.vehicle.setLaneChangeMode(vehicle_name, 0)
+                    self.traci.vehicle.setSpeedMode(vehicle_name, 96)
                     if self.traci.vehicle.getRoadID(vehicle_name) != self.origin:
                         self.traci.close()
                         raise RuntimeError(f'The scheduled ego did not enter on {self.origin}')

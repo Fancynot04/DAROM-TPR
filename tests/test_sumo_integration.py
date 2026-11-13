@@ -41,6 +41,13 @@ class SumoIntegrationTests(unittest.TestCase):
                 self.assertEqual(traci.vehicle.getLaneChangeMode('ego'), 0)
                 self.assertEqual(info['ego_lane_change_mode'], 0)
                 self.assertEqual(info['ego_speed_mode'], traci.vehicle.getSpeedMode('ego'))
+                # SUMO 1.20 reports 32 after setSpeedMode(96).
+                self.assertIn(info['ego_speed_mode'], (32, 96))
+                self.assertEqual(traci.vehicle.getTypeID('ego'), 'ego')
+                self.assertAlmostEqual(traci.vehicle.getSpeed('ego'), 10.0)
+                self.assertAlmostEqual(traci.vehicle.getMaxSpeed('ego'), 32.0)
+                self.assertAlmostEqual(traci.vehicle.getAccel('ego'), 5.0)
+                self.assertAlmostEqual(traci.vehicle.getDecel('ego'), 5.0)
                 self.assertEqual(info['sumo_version'], list(traci.getVersion()))
                 self.assertEqual(info['step_length'], 0.1)
                 self.assertEqual(info['episode_limit_steps'], 4000)

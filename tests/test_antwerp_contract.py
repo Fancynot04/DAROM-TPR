@@ -60,7 +60,7 @@ class E76D3ContractTests(unittest.TestCase):
     def test_merging_does_not_reset_speed_in_code(self):
         source = inspect.getsource(Merging)
         self.assertNotIn('setMaxSpeed', source)
-        self.assertNotIn('vehicle.setSpeed', source)
+        self.assertNotIn('vehicle.setSpeed(', source)
 
     def test_pending_off_submits_repeated_requests(self):
         env = Merging(seed=42, scenario='easy', task=exit_config.TASK_ID,
