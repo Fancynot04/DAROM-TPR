@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 from src import exit_e76_d3_config as exit_config
 from src import exit_progress_reward
-from src.merging import ANTWERP_TASKS, Merging
+from src.merging import ANTWERP_TASKS, Merging, limit_ego_acceleration
 from train_sac_delay import parse_args
 
 
@@ -18,6 +18,13 @@ ROUTES = ROOT / 'sumo_new'
 
 
 class E76D3ContractTests(unittest.TestCase):
+    def test_ego_speed_limiter_preserves_braking_and_caps_acceleration(self):
+        vmax = exit_config.ROAD_SPEED_LIMIT_MPS
+        self.assertEqual(limit_ego_acceleration(5, 10, 0.1, vmax, 5), 5)
+        self.assertAlmostEqual(limit_ego_acceleration(5, vmax - 0.2, 0.1, vmax, 5), 2)
+        self.assertEqual(limit_ego_acceleration(-3, 20, 0.1, vmax, 5), -3)
+        self.assertEqual(limit_ego_acceleration(5, vmax + 2, 0.1, vmax, 5), -5)
+
     def test_only_exit_task_is_registered(self):
         self.assertEqual(ANTWERP_TASKS, {
             exit_config.TASK_ID: ('E76', 'D3', 'exit'),

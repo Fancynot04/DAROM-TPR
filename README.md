@@ -223,11 +223,17 @@ SUMO `Emergency Stopping` diagnostics and the kinematic hard-braking threshold
 episode counts and episode rates; neither changes termination or B0 reward.
 
 The network lane speed is 120 km/h. All three formal route files give Ego a
-separate vehicle type (maxSpeed 32 m/s, accel/decel 5 m/s², sigma 0,
+separate vehicle type (maxSpeed 33.3333333333 m/s, accel/decel 5 m/s², sigma 0,
 speedFactor 1), departSpeed 10 m/s, and a `setSpeedMode(96)` call after insertion.
 SUMO 1.20.0 currently reports speed mode 32 when queried afterward. The routes pin the Ego
 trip to `speedFactor=1.0`. Background vehicle types retain their original
 speed-factor behavior.
+The longitudinal command remains `setAcceleration`; each control step caps its
+requested acceleration against the measured Ego speed and the 120 km/h limit,
+with braking bounded by Ego `decel`. Step diagnostics report the raw command,
+post-safety command, executed command, and whether the limiter intervened.
+The base observation contains SUMO's measured Ego speed; the delay wrapper
+retains its existing delayed-observation semantics and 134-dimensional default layout.
 
 ## GUI inspection
 

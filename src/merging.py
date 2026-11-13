@@ -80,6 +80,12 @@ def parseAction(action):
         lc = 1
     return [acc, lc]
 
+
+def limit_ego_acceleration(command, speed, step_length, max_speed, max_decel):
+    """Bound the next speed while respecting the vehicle's braking capability."""
+    speed_bound = (max_speed - speed) / step_length
+    return max(-max_decel, min(float(command), speed_bound))
+
 def set_ego_lane_mode(vehicle_name):
     traci.vehicle.setLaneChangeMode(vehicle_name, 0)
 
@@ -168,6 +174,10 @@ class Merging(gym.Env):
         self.lane_name = ''
         self.lane_idx = 0
         self.parsed_action = None
+        self.ego_accel_command = None
+        self.ego_accel_after_safety = None
+        self.ego_accel_executed = None
+        self.ego_speed_limiter_active = False
         self.exit_actor_request_direction = 0
         self.ego_start_lane = None
         self.curriculum_depart_lane = None
@@ -271,6 +281,10 @@ class Merging(gym.Env):
         self._behind_state = []
         self.action = None
         self.parsed_action = None
+        self.ego_accel_command = None
+        self.ego_accel_after_safety = None
+        self.ego_accel_executed = None
+        self.ego_speed_limiter_active = False
         self.lane_id = self.lane_name = ""
         self.lane_idx = 0
         self.observation = np.zeros((31, 3), dtype=np.float32)
@@ -1017,6 +1031,7 @@ class Merging(gym.Env):
                 self._update_directional_lane_reward()
         self.boundary_diagnostic = road_boundary.observe(self) if was_on_road else {'status': 'unknown'}
         parsed_action = parseAction(action)
+        self.ego_accel_command = float(action[0]) if was_on_road else None
         self.exit_applied_lane_change_direction = 0
         self.exit_actor_request_direction = (
             int(parsed_action[1]) if was_on_road and self.task == exit_config.TASK_ID
@@ -1030,7 +1045,13 @@ class Merging(gym.Env):
 
         if was_on_road:
             self._apply_lane_change(parsed_action[1])
-            self.traci.vehicle.setAcceleration(self.ego_id, parsed_action[0], 1)
+            self.ego_accel_after_safety = float(parsed_action[0])
+            self.ego_accel_executed = limit_ego_acceleration(
+                self.ego_accel_after_safety, float(self.traci.vehicle.getSpeed(self.ego_id)),
+                float(self.traci.simulation.getDeltaT()), exit_config.ROAD_SPEED_LIMIT_MPS,
+                float(self.traci.vehicle.getDecel(self.ego_id)))
+            self.ego_speed_limiter_active = self.ego_accel_executed < self.ego_accel_after_safety
+            self.traci.vehicle.setAcceleration(self.ego_id, self.ego_accel_executed, 1)
         self.counter += 1
         self.parsed_action = parsed_action
         return was_on_road
@@ -1133,6 +1154,10 @@ class Merging(gym.Env):
         
         reward_summary = self.reward_tracker.summary(terminated, truncated) if self.done else None
         info.update({'lane': self.lane_id, 'action': self.action, 'merged': bool(self.merged),
+                     'ego_accel_command_mps2': self.ego_accel_command,
+                     'ego_accel_after_safety_mps2': self.ego_accel_after_safety,
+                     'ego_accel_executed_mps2': self.ego_accel_executed,
+                     'ego_speed_limiter_active': self.ego_speed_limiter_active,
                      'reward_components': self.reward_components.copy(),
                      'reward_terms': [{'name': term.name, 'raw': term.raw,
                                        'weight': term.weight, 'enabled': term.enabled,
