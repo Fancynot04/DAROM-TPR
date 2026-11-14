@@ -24,7 +24,7 @@ EGO_DEPART_TIME = 120.0
 EGO_DEPARTURE_DEADLINE = 1200.0
 SUMO_STEP_LENGTH = 0.1
 LANE_CHANGE_EDGES = frozenset(('E75', 'E76', 'E77', 'E78', 'E82'))
-ANTWERP_ENV_VERSION = 4
+ANTWERP_ENV_VERSION = 5
 
 
 def curriculum_route_file(source, lane, output_dir):
@@ -567,6 +567,52 @@ class Merging(gym.Env):
         lane_id = self.traci.vehicle.getLaneID(self.ego_id)
         return max(0.0, self.traci.lane.getLength(lane_id)
                    - self.traci.vehicle.getLanePosition(self.ego_id))
+        
+    def _e77_irrecoverably_missed(self):
+        """Return True only when the ego is effectively unable to save the D3 exit."""
+
+        # 只处理 E77
+        if self.lane_name != 'E77':
+            return False
+
+        # 已经在 E77_0，可以直接去 D3
+        if self.lane_idx == 0:
+            return False
+
+        remaining = self._e77_remaining()
+
+        # 还没进入最后 10 m，不判断
+        if remaining > exit_config.MISSED_EXIT_CHECK_DISTANCE_METERS:
+            return False
+
+        # 如果正在执行向 E77_0 的换道，先让它完成，避免误杀
+        if self.exit_maneuver is not None and self.exit_maneuver.get('target') == 0:
+            return False
+
+        speed = max(0.0, float(
+            self.traci.vehicle.getSpeed(self.ego_id)
+        ))
+
+        # 使用 Ego 实际可执行的最大制动能力
+        emergency_decel = float(
+            self.traci.vehicle.getEmergencyDecel(self.ego_id)
+        )
+        action_decel = -float(self.action_space.low[0])
+
+        brake = min(emergency_decel, action_decel)
+
+        if not math.isfinite(brake) or brake <= 0:
+            raise ValueError(f'Invalid ego braking capability: {brake!r}')
+
+        stopping_distance = speed ** 2 / (2.0 * brake)
+
+        # 能在道路末端前停下来：
+        # 可能只是堵车/排队，之后仍有机会换道，不判 Missed
+        if stopping_distance <= remaining:
+            return False
+
+        # 错误车道 + 最后10m + 刹不住
+        return True
 
     def _e77_exit_lane_ready(self):
         if self.traci.vehicle.getLaneIndex(self.ego_id) != 0:
@@ -1103,15 +1149,8 @@ class Merging(gym.Env):
                 self.exit_maneuver = None
             elif self.task == exit_config.TASK_ID:
                 self._update_exit_maneuver()
-            if (self.task == exit_config.TASK_ID and self.lane_name == 'E77'
-                    and self._e77_remaining() <= exit_config.LANE_END_EPSILON_METERS
-                    and not self._e77_exit_lane_ready()
-                    and not self._e77_maneuver_can_finish()):
-                self.missed_exit = True
-            if (self.task == exit_config.TASK_ID and previous_road == 'E77'
-                    and (self.lane_name == 'E78'
-                         or (self.lane_name.startswith(':J106')
-                             and self.lane_id != ':J106_0_0'))):
+            # 唯一的 Missed Exit 判断
+            if (self.task == exit_config.TASK_ID and self._e77_irrecoverably_missed()):
                 self.missed_exit = True
             if self.stage_name == 'exit':
                 if self.lane_name == 'D3':
