@@ -154,6 +154,22 @@ def diagnostic_reward_without_potential(reward, info, task):
     return 0.0, float(reward)
 
 
+def measured_jerk(before_acc, after_acc, before_time, after_time, step, valid):
+    """Match trajectory_steps.csv's valid measured acceleration transitions."""
+    if step == 0 or not valid or before_acc is None or after_acc is None:
+        return None
+    dt = after_time - before_time
+    if not math.isfinite(dt) or dt <= 0:
+        raise ValueError(f'Invalid SUMO step length for measured jerk: {dt}')
+    return (after_acc - before_acc) / dt
+
+
+def mean_valid_episode_jerk(episodes):
+    values = [row['mean_abs_jerk_mps3'] for row in episodes
+              if row['mean_abs_jerk_mps3'] is not None]
+    return float(np.mean(values)) if values else None
+
+
 def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
              urgency_trace=None, route_network=None, recorder=None):
     if episodes < 1:
@@ -193,6 +209,7 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
         max_stopped_streak = 0
         e77_zero_traffic_samples = []
         speed_samples = []
+        jerk_samples = []
         commands_sent = Counter()
         previous_step_request = 0
         same_direction_repeat_requests = 0
@@ -201,6 +218,7 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
         last_nonzero_request = None
         short_horizon_request_reversals = 0
         while True:
+            acceleration_before = time_before = None
             if (getattr(base, 'ego_on_road', False)
                     and not getattr(base, 'ego_teleporting', False)
                     and hasattr(base, 'traci')):
@@ -208,6 +226,10 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                 if not math.isfinite(measured_speed):
                     raise ValueError('Non-finite evaluation speed')
                 speed_samples.append(measured_speed)
+                acceleration_before = float(base.traci.vehicle.getAcceleration(base.ego_id))
+                time_before = float(base.traci.simulation.getTime())
+                if not all(map(math.isfinite, (acceleration_before, time_before))):
+                    raise ValueError('Non-finite evaluation acceleration or time')
             if secrm and base.ego_on_road:
                 vehicle = base.traci.vehicle
                 speed = float(vehicle.getSpeed(base.ego_id))
@@ -248,6 +270,17 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
             trajectory_pre = (recorder.capture_pre(base, observation, action)
                               if recorder is not None else None)
             observation, reward, terminated, truncated, info = env.step(action)
+            if (acceleration_before is not None and not (terminated or truncated)
+                    and info.get('ego_on_road') and base.ego_on_road
+                    and not getattr(base, 'ego_teleporting', False)):
+                acceleration_after = float(base.traci.vehicle.getAcceleration(base.ego_id))
+                time_after = float(base.traci.simulation.getTime())
+                if not all(map(math.isfinite, (acceleration_after, time_after))):
+                    raise ValueError('Non-finite evaluation acceleration or time')
+                jerk = measured_jerk(acceleration_before, acceleration_after,
+                                     time_before, time_after, steps, True)
+                if jerk is not None:
+                    jerk_samples.append(abs(jerk))
             if recorder is not None:
                 recorder.record_step(trajectory_pre, base, observation, reward,
                                      terminated, truncated, info)
@@ -369,6 +402,8 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
                                                          / (steps * 0.1)),
                                 'mean_speed_mps': (float(np.mean(speed_samples))
                                                    if speed_samples else None),
+                                'mean_abs_jerk_mps3': (float(np.mean(jerk_samples))
+                                                       if jerk_samples else None),
                                 'policy_reward_return': episode_return,
                                 'b0_reference_return': b0_return,
                                 'reward_term_totals': dict(reward_term_totals),
@@ -441,6 +476,7 @@ def evaluate(model, env, episodes, seed, task=exit_config.TASK_ID,
             'mean_return': float(np.mean(policy_returns)),
             'mean_return_alias': 'mean_policy_reward_return',
             'episode_results': records}
+    result['mean_abs_jerk_mps3'] = mean_valid_episode_jerk(records)
     if ANTWERP_TASKS[task][2] != 'exit':
         result['no_merge_rate'] = result['timeout_rate']  # historical report field
     else:
@@ -598,6 +634,8 @@ def evaluate_runs(model, scenario, delay_mode, safety, ablation, episodes, seeds
             'runs': runs, 'aggregate': summarize_runs(
                 runs, tuple(key for key in REPORT_METRICS
                             if ANTWERP_TASKS[task][2] != 'exit' or key != 'no_merge_rate'))}
+    report['mean_abs_jerk_mps3'] = mean_valid_episode_jerk(
+        episode for run in runs for episode in run['episode_results'])
     if task == exit_config.TASK_ID:
         report['e77_zero_redeparture_episodes'] = sum(
             run['e77_zero_redeparture_episodes'] for run in runs)
@@ -698,6 +736,21 @@ def main():
         else:
             print(f"  {key}: mean={values['mean']:.4f}, std={values['std']:.4f}, "
                   f"CI95 half-width={values['ci95_half_width']:.4f}")
+    print('| 训练 seed | checkpoint | 评估种子 | 成功率 | 碰撞率 | 错过出口率 | '
+          'Teleport 率 | 超时率 | 平均速度 (m/s) | 平均绝对 Jerk (m/s³) |')
+    print('|---|---|---|---:|---:|---:|---:|---:|---:|---:|')
+    for run in report['runs']:
+        first = run['evaluation_seed_start']
+        last = first + run['episodes'] - 1
+        speed = run.get('mean_speed_mps')
+        jerk = run['mean_abs_jerk_mps3']
+        speed_text = f'{speed:.3f}' if speed is not None else 'N/A'
+        jerk_text = f'{jerk:.3f}' if jerk is not None else 'N/A'
+        print(f"| {report['training_seed']} | {checkpoint.name} | {first}–{last} | "
+              f"{run['success_rate']:.2f}% | {run['collision_rate']:.2f}% | "
+              f"{run['missed_exit_rate']:.2f}% | {run['ego_teleport_rate']:.2f}% | "
+              f"{run['timeout_rate']:.2f}% | "
+              f"{speed_text} | {jerk_text} |")
     print('success_rate is SUMO route completion; timeout_rate counts terminal '
           'Timeout events. Road-boundary and emergency-stop values remain diagnostics.')
     print('policy_reward_return uses the checkpoint-authenticated reward configuration; '

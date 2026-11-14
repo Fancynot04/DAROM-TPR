@@ -140,6 +140,12 @@ an error and never falls back to B0. Reports distinguish
 `b0_reference_return` (common terminal-event scoring: success `+50`, failure
 `-100`, non-terminal `0`) and retain per-term totals. Safety is off for the
 matched task contract unless explicitly requested for a separate diagnostic.
+The default evaluation JSON includes `mean_abs_jerk_mps3` for each episode and
+the batch mean of valid episode means. It uses successive on-road SUMO
+`getAcceleration()` measurements divided by elapsed simulation time, excluding
+the first and terminal steps. The existing `mean_speed_mps` definition is
+unchanged. The terminal report displays these metrics with the training seed,
+checkpoint, and explicit evaluation seed range.
 
 For read-only trajectory export, pass a new output directory. The recorder
 writes one step row and one transition row per `env.step`, plus an immutable

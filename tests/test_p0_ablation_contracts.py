@@ -40,6 +40,63 @@ class EvaluationRewardContractTests(unittest.TestCase):
     def setUp(self):
         self.default = exit_progress_reward.load_experiment()
 
+    def test_measured_jerk_and_episode_aggregation(self):
+        samples = [evaluation.measured_jerk(1.0, 2.0, 1.0, 1.2, 1, True),
+                   evaluation.measured_jerk(2.0, 1.0, 1.2, 1.3, 2, True)]
+        self.assertAlmostEqual(samples[0], 5.0)
+        self.assertAlmostEqual(samples[1], -10.0)
+        self.assertIsNone(evaluation.measured_jerk(1.0, 9.0, 0.0, 0.1, 0, True))
+        self.assertIsNone(evaluation.measured_jerk(1.0, None, 1.3, 1.4, 3, False))
+        self.assertAlmostEqual(evaluation.mean_valid_episode_jerk([
+            {'mean_abs_jerk_mps3': np.mean(np.abs(samples))},
+            {'mean_abs_jerk_mps3': 2.0},
+            {'mean_abs_jerk_mps3': None}]), 4.75)
+        self.assertIsNone(evaluation.mean_valid_episode_jerk([
+            {'mean_abs_jerk_mps3': None}]))
+
+    def test_default_evaluation_uses_measured_acceleration_per_episode(self):
+        class Vehicle:
+            def __init__(self, base): self.base = base
+            def getSpeed(self, ego): return 20.0
+            def getAcceleration(self, ego):
+                return (1.0, 2.0, 4.0, 99.0)[self.base.step_index]
+
+        class Base:
+            ego_id = 'ego'
+            ego_on_road = True
+            ego_teleporting = False
+            lane_name = 'E76'
+            lane_idx = 2
+            def __init__(self):
+                self.step_index = 0
+                self.traci = SimpleNamespace(
+                    vehicle=Vehicle(self),
+                    simulation=SimpleNamespace(getTime=lambda: self.step_index * 0.1))
+
+        class Env:
+            def __init__(self): self.unwrapped = Base()
+            def reset(self, seed):
+                self.unwrapped.step_index = 0
+                return np.zeros(134), {}
+            def step(self, action):
+                self.unwrapped.step_index += 1
+                terminal = self.unwrapped.step_index == 3
+                return np.zeros(134), 0.0, terminal, False, {
+                    'message': 'Arrived' if terminal else None,
+                    'ego_on_road': not terminal, 'ego_teleported': False,
+                    'reward_terms': (), 'sumo_emergency_stopping_steps': 0,
+                    'sumo_emergency_stopping_episode': False,
+                    'hard_braking_steps': 0, 'hard_braking_episode': False,
+                    'hard_braking_threshold_mps2': -4.5,
+                }
+
+        model = SimpleNamespace(predict=lambda obs, deterministic: (np.zeros(2), None))
+        result = evaluation.evaluate(model, Env(), 2, 200001)
+        # Only step 1 contributes: (4 - 2) / 0.1 = 20; step 0 and terminal step 2 do not.
+        self.assertEqual([row['mean_abs_jerk_mps3']
+                          for row in result['episode_results']], [20.0, 20.0])
+        self.assertEqual(result['mean_abs_jerk_mps3'], 20.0)
+
     def test_policy_return_changes_but_b0_reference_does_not(self):
         modified = copy.deepcopy(self.default)
         modified['terms']['success']['weight'] = 0.5
