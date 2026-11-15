@@ -36,5 +36,5 @@
     <flow id="easy_O3_D3_car_van" type="car_van" begin="0" end="3600" number="48" from="O3" to="D3" departLane="free" departSpeed="speedLimit" />
     <flow id="easy_O3_D3_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="2" from="O3" to="D3" departLane="free" departSpeed="speedLimit" />
     <flow id="easy_O3_D3_long_vehicle" type="long_vehicle" begin="0" end="3600" number="1" from="O3" to="D3" departLane="free" departSpeed="speedLimit" />
-    <trip id="ego" type="ego" depart="120.00" color="red" from="E76" to="D3" departLane="random" departSpeed="10.0" speedFactor="1.0" />
+    <trip id="ego" type="ego" depart="120.00" color="red" from="O3" to="D3" departLane="0" departSpeed="10.0" speedFactor="1.0" />
 </routes>
