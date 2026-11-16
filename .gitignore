@@ -84,3 +84,6 @@ models_experiments/
 # Generated SUMO simulation results
 tripinfo.xml
 E1_DS*_L*.xml
+
+!problem_exists.md
+

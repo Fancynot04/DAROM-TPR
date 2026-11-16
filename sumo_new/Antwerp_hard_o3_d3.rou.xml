@@ -8,33 +8,33 @@
     <vType id="long_vehicle" vClass="trailer" length="16.6" width="2.5" maxSpeed="22" accel="1.0" decel="3.0" sigma="0.5" color="blue" guiShape="truck/trailer" />
     <flow id="hard_O1_D1_motorbike" type="motorbike" begin="0" end="3600" number="2" from="O1" to="D1" departLane="free" departSpeed="speedLimit" />
     <flow id="hard_O1_D1_car_van" type="car_van" begin="0" end="3600" number="1002" from="O1" to="D1" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O1_D1_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="77" from="O1" to="D1" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O1_D1_long_vehicle" type="long_vehicle" begin="0" end="3600" number="391" from="O1" to="D1" departLane="free" departSpeed="speedLimit" />
+    <flow id="hard_O1_D1_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="77" from="O1" to="D1" departLane="free" departSpeed="max" />
+    <flow id="hard_O1_D1_long_vehicle" type="long_vehicle" begin="0" end="3600" number="391" from="O1" to="D1" departLane="free" departSpeed="max" />
     <flow id="hard_O1_D2_motorbike" type="motorbike" begin="0" end="3600" number="9" from="O1" to="D2" departLane="free" departSpeed="speedLimit" />
     <flow id="hard_O1_D2_car_van" type="car_van" begin="0" end="3600" number="1547" from="O1" to="D2" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O1_D2_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="118" from="O1" to="D2" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O1_D2_long_vehicle" type="long_vehicle" begin="0" end="3600" number="388" from="O1" to="D2" departLane="free" departSpeed="speedLimit" />
+    <flow id="hard_O1_D2_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="118" from="O1" to="D2" departLane="free" departSpeed="max" />
+    <flow id="hard_O1_D2_long_vehicle" type="long_vehicle" begin="0" end="3600" number="388" from="O1" to="D2" departLane="free" departSpeed="max" />
     <flow id="hard_O1_D3_car_van" type="car_van" begin="0" end="3600" number="218" from="O1" to="D3" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O1_D3_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="18" from="O1" to="D3" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O1_D3_long_vehicle" type="long_vehicle" begin="0" end="3600" number="21" from="O1" to="D3" departLane="free" departSpeed="speedLimit" />
+    <flow id="hard_O1_D3_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="18" from="O1" to="D3" departLane="free" departSpeed="max" />
+    <flow id="hard_O1_D3_long_vehicle" type="long_vehicle" begin="0" end="3600" number="21" from="O1" to="D3" departLane="free" departSpeed="max" />
     <flow id="hard_O2_D1_motorbike" type="motorbike" begin="0" end="3600" number="4" from="O2" to="D1" departLane="free" departSpeed="speedLimit" />
     <flow id="hard_O2_D1_car_van" type="car_van" begin="0" end="3600" number="434" from="O2" to="D1" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O2_D1_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="58" from="O2" to="D1" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O2_D1_long_vehicle" type="long_vehicle" begin="0" end="3600" number="210" from="O2" to="D1" departLane="free" departSpeed="speedLimit" />
+    <flow id="hard_O2_D1_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="58" from="O2" to="D1" departLane="free" departSpeed="max" />
+    <flow id="hard_O2_D1_long_vehicle" type="long_vehicle" begin="0" end="3600" number="210" from="O2" to="D1" departLane="free" departSpeed="max" />
     <flow id="hard_O2_D2_car_van" type="car_van" begin="0" end="3600" number="1147" from="O2" to="D2" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O2_D2_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="86" from="O2" to="D2" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O2_D2_long_vehicle" type="long_vehicle" begin="0" end="3600" number="297" from="O2" to="D2" departLane="free" departSpeed="speedLimit" />
+    <flow id="hard_O2_D2_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="86" from="O2" to="D2" departLane="free" departSpeed="max" />
+    <flow id="hard_O2_D2_long_vehicle" type="long_vehicle" begin="0" end="3600" number="297" from="O2" to="D2" departLane="free" departSpeed="max" />
     <flow id="hard_O2_D3_car_van" type="car_van" begin="0" end="3600" number="216" from="O2" to="D3" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O2_D3_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="9" from="O2" to="D3" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O2_D3_long_vehicle" type="long_vehicle" begin="0" end="3600" number="35" from="O2" to="D3" departLane="free" departSpeed="speedLimit" />
+    <flow id="hard_O2_D3_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="9" from="O2" to="D3" departLane="free" departSpeed="max" />
+    <flow id="hard_O2_D3_long_vehicle" type="long_vehicle" begin="0" end="3600" number="35" from="O2" to="D3" departLane="free" departSpeed="max" />
     <flow id="hard_O3_D1_car_van" type="car_van" begin="0" end="3600" number="103" from="O3" to="D1" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O3_D1_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="4" from="O3" to="D1" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O3_D1_long_vehicle" type="long_vehicle" begin="0" end="3600" number="7" from="O3" to="D1" departLane="free" departSpeed="speedLimit" />
+    <flow id="hard_O3_D1_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="4" from="O3" to="D1" departLane="free" departSpeed="max" />
+    <flow id="hard_O3_D1_long_vehicle" type="long_vehicle" begin="0" end="3600" number="7" from="O3" to="D1" departLane="free" departSpeed="max" />
     <flow id="hard_O3_D2_car_van" type="car_van" begin="0" end="3600" number="468" from="O3" to="D2" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O3_D2_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="23" from="O3" to="D2" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O3_D2_long_vehicle" type="long_vehicle" begin="0" end="3600" number="13" from="O3" to="D2" departLane="free" departSpeed="speedLimit" />
+    <flow id="hard_O3_D2_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="23" from="O3" to="D2" departLane="free" departSpeed="max" />
+    <flow id="hard_O3_D2_long_vehicle" type="long_vehicle" begin="0" end="3600" number="13" from="O3" to="D2" departLane="free" departSpeed="max" />
     <flow id="hard_O3_D3_car_van" type="car_van" begin="0" end="3600" number="190" from="O3" to="D3" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O3_D3_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="8" from="O3" to="D3" departLane="free" departSpeed="speedLimit" />
-    <flow id="hard_O3_D3_long_vehicle" type="long_vehicle" begin="0" end="3600" number="4" from="O3" to="D3" departLane="free" departSpeed="speedLimit" />
+    <flow id="hard_O3_D3_rigid_lorry" type="rigid_lorry" begin="0" end="3600" number="8" from="O3" to="D3" departLane="free" departSpeed="max" />
+    <flow id="hard_O3_D3_long_vehicle" type="long_vehicle" begin="0" end="3600" number="4" from="O3" to="D3" departLane="free" departSpeed="max" />
     <trip id="ego" type="ego" depart="120.00" color="red" from="O3" to="D3" departLane="0" departSpeed="10.0" speedFactor="1.0" />
 </routes>
