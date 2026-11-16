@@ -12,7 +12,7 @@ SUMO_DIR = Path(__file__).resolve().parents[2] / "sumo_new"
 class SumoWorld:
     """管理一个 SUMO 仿真世界，不负责具体 Ego 的决策。"""
 
-    def __init__(self, scenario="easy", seed=42, gui=False):
+    def __init__(self, scenario="easy", seed=42, gui=False, route_file=None):
         if scenario not in ("easy", "medium", "hard"):
             raise ValueError(f"Unknown scenario: {scenario}")
 
@@ -25,7 +25,9 @@ class SumoWorld:
 
         self.net_file = SUMO_DIR / "Antwerp.net.xml"
         self.route_file = (
-            SUMO_DIR / f"Antwerp_{scenario}_o3_d3.rou.xml"
+            Path(route_file)
+            if route_file is not None
+            else SUMO_DIR / f"Antwerp_{scenario}_o3_d3.rou.xml"
         )
 
         self.conn = None
