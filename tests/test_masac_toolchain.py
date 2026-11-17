@@ -210,3 +210,11 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
     episodes = [r for r in records if r['event'] == 'episode']
     assert episodes and episodes[0]['episode_global_steps'] == 31
     assert episodes[0]['rolling_episodes'] == 1
+
+
+def test_formal_training_defaults():
+    from train_masac import build_parser
+    args = build_parser().parse_args([])
+    assert (args.total_steps, args.buffer_capacity, args.batch_size, args.learning_starts) == (1000000, 1000000, 512, 1000)
+    assert args.learning_rate == 3e-5 and args.gamma == .999 and args.tau == .005
+    assert args.checkpoint_every == 500000

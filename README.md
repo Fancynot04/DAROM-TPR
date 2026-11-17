@@ -97,7 +97,7 @@ python3 train_masac.py \
   --output-dir runs/masac_smoke_2500
 ```
 
-默认配置还包括 `tau=0.005`，两辆 Ego 的 α 独立学习。训练开始的前 `learning-starts` 个全局步使用均匀随机动作，后续使用随机 Actor 策略。
+正式训练默认参数为 1,000,000 个共享 SUMO 全局步、Replay 容量 1,000,000、batch 512、Learning Starts 1,000、学习率 3e-5、γ=0.999、`--tau=0.005`、seed 42，每 500,000 步保存 checkpoint，默认输出 `runs/masac`。两辆 Ego 的 α 独立学习。上述 2,500 步命令显式使用小参数，仅为历史冒烟配置。训练开始的前 `learning-starts` 个全局步使用均匀随机动作，后续使用随机 Actor 策略。
 
 训练结束保存 `runs/masac_smoke_2500/checkpoints/masac_seed42_step_2500.pt`，其中包含 Actor、Critic、Target Critic、α 和优化器状态；**不包含 Replay Buffer、SUMO 物理状态或随机数全状态，不能精确续训**。`runs/` 由 `.gitignore` 排除，模型文件需另行归档。
 
@@ -149,16 +149,16 @@ python3 evaluate_masac.py \
 
 ### 6.1 训练记录与周期 checkpoint
 
-新增训练参数 `--checkpoint-every 100000`；每 100,000 个共享 SUMO 控制步保存一次，结束时保存最终状态，恰逢节点只保存一次。`--tensorboard` 默认开启，可用 `--no-tensorboard` 关闭；JSONL 始终开启。动作窗口复用 `--log-every`（默认 40 步），最后不足窗口仍写实际长度。实验目录不可重复写入已有 `train/metrics.jsonl`，避免混合两次训练。
+训练参数 `--checkpoint-every 500000`；默认每 500,000 个共享 SUMO 控制步保存一次，结束时保存最终状态，恰逢节点只保存一次。`--tensorboard` 默认开启，可用 `--no-tensorboard` 关闭；JSONL 始终开启。动作窗口复用 `--log-every`（默认 40 步），最后不足窗口仍写实际长度。实验目录不可重复写入已有 `train/metrics.jsonl`，避免混合两次训练。
 
 ```text
 runs/<experiment_id>/
   train/metrics.jsonl
   train/tb/
-  checkpoints/masac_seed42_step_100000.pt
+  checkpoints/masac_seed42_step_500000.pt
   checkpoints/index.json
-  eval/step_100000/summary.json
-  eval/step_100000/episodes.csv
+  eval/step_500000/summary.json
+  eval/step_500000/episodes.csv
   eval/index.json
   figures/
 ```
@@ -172,7 +172,7 @@ JSONL 以 `event` 区分：
 
 TensorBoard 的标量标签统一带 `exploration_training/` 前缀，以 `global_step` 为横轴；例如 `tensorboard --logdir runs/<experiment_id>/train/tb`。JSONL 不使用最后 minibatch 冒充窗口均值，绘图保留原始更新值，不默认平滑。
 
-checkpoint 保留原有模型/优化器字段，并增加 Git 和源码 SHA256；索引记录训练 seed、global_step、绝对路径、文件 SHA256、提交、源码哈希和配置。文件先写 `.partial`，flush/fsync 后原子替换，索引同样原子写入；残留 `.partial` 不参与发现。checkpoint 仍缺 Replay、SUMO 状态、全部 RNG 状态，**不提供精确续训**。
+checkpoint 保留原有模型/优化器字段，并增加 Git 和源码 SHA256；索引记录训练 seed、global_step、绝对路径、文件 SHA256、提交、源码哈希和配置。文件先写 `.partial`，flush/fsync 后原子替换，索引同样原子写入；残留 `.partial` 不参与发现。双 Ego 联合 Replay 的 float32 数组容量 1,000,000 时约 3.435 GiB/组（不含模型、Python 和采样临时张量）；同样的容量数值不代表与单 Ego 相同的内存或样本结构。checkpoint 仍缺 Replay、SUMO 状态、全部 RNG 状态，**不提供精确续训**。
 
 ### 6.2 固定种子评估与只读行为诊断
 

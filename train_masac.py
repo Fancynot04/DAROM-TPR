@@ -146,7 +146,8 @@ def main(args):
     if args.train_every <= 0 or args.log_every <= 0:
         raise ValueError("Invalid interval")
 
-    args.checkpoint_every = getattr(args, "checkpoint_every", 100000)
+    args.tau = getattr(args, "tau", 0.005)
+    args.checkpoint_every = getattr(args, "checkpoint_every", 500000)
     args.tensorboard = getattr(args, "tensorboard", True)
     if args.checkpoint_every <= 0:
         raise ValueError("checkpoint_every must be positive")
@@ -171,6 +172,7 @@ def main(args):
         actors=actors,
         critic=critic,
         gamma=args.gamma,
+        tau=args.tau,
         learning_rate=args.learning_rate,
         alpha=(args.initial_alpha,) * len(AGENT_IDS),
     )
@@ -430,23 +432,23 @@ def main(args):
         log.close()
 
 
-if __name__ == "__main__":
+def build_parser():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--total-steps", type=int, default=120
+        "--total-steps", type=int, default=1000000
     )
     parser.add_argument(
         "--seed", type=int, default=42
     )
     parser.add_argument(
-        "--learning-starts", type=int, default=32
+        "--learning-starts", type=int, default=1000
     )
     parser.add_argument(
-        "--batch-size", type=int, default=32
+        "--batch-size", type=int, default=512
     )
     parser.add_argument(
-        "--buffer-capacity", type=int, default=5000
+        "--buffer-capacity", type=int, default=1000000
     )
     parser.add_argument(
         "--train-every", type=int, default=10
@@ -465,9 +467,14 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--output-dir",
-        default="runs/masac_smoke",
+        default="runs/masac",
     )
 
-    parser.add_argument("--checkpoint-every", type=int, default=100000)
+    parser.add_argument("--checkpoint-every", type=int, default=500000)
+    parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--tensorboard", action=argparse.BooleanOptionalAction, default=True)
-    main(parser.parse_args())
+    return parser
+
+
+if __name__ == "__main__":
+    main(build_parser().parse_args())
