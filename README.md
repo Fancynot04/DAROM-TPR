@@ -79,7 +79,7 @@ python3 -m pip install pytest
 
 ## 5. 训练
 
-当前入口提供**从零训练**、联合采样、梯度更新及训练结束时的 checkpoint 保存，不提供中途定期 checkpoint 或精确断点续训。训练步数是 SUMO 全局控制步，不是两车活跃步数之和。
+当前入口提供**从零训练**、联合采样、梯度更新、结构化日志及周期 checkpoint，不提供精确断点续训。训练步数是 SUMO 全局控制步，不是两车活跃步数之和。
 
 ```bash
 # 已经过本地 2,500 全局步的训练冒烟验证
@@ -99,21 +99,21 @@ python3 train_masac.py \
 
 默认配置还包括 `tau=0.005`，两辆 Ego 的 α 独立学习。训练开始的前 `learning-starts` 个全局步使用均匀随机动作，后续使用随机 Actor 策略。
 
-训练结束保存 `runs/masac_smoke_2500/masac_step_2500.pt`，其中包含 Actor、Critic、Target Critic、α 和优化器状态；**不包含 Replay Buffer、SUMO 物理状态或随机数全状态，不能精确续训**。`runs/` 由 `.gitignore` 排除，模型文件需另行归档。
+训练结束保存 `runs/masac_smoke_2500/checkpoints/masac_seed42_step_2500.pt`，其中包含 Actor、Critic、Target Critic、α 和优化器状态；**不包含 Replay Buffer、SUMO 物理状态或随机数全状态，不能精确续训**。`runs/` 由 `.gitignore` 排除，模型文件需另行归档。
 
 ## 6. 独立评估
 
 ```bash
 # 确定性策略（正式汇报优先使用）
 python3 evaluate_masac.py \
-  --checkpoint runs/masac_smoke_2500/masac_step_2500.pt \
+  --checkpoint runs/masac_smoke_2500/checkpoints/masac_seed42_step_2500.pt \
   --episodes 10 \
   --seed-start 200001 \
   --output runs/masac_eval_2500/deterministic_10/summary.json
 
 # 随机采样策略（探索行为诊断，不与确定性评估混为一谈）
 python3 evaluate_masac.py \
-  --checkpoint runs/masac_smoke_2500/masac_step_2500.pt \
+  --checkpoint runs/masac_smoke_2500/checkpoints/masac_seed42_step_2500.pt \
   --episodes 10 \
   --seed-start 200001 \
   --stochastic \
@@ -146,6 +146,71 @@ python3 evaluate_masac.py \
 缺失/空终止原因、Unknown/UnknownRemoval、环境异常和步数上限导致的未完成评估直接报错，不计完整回合，也不输出本次最终文件。`Other` 仅用于环境正常返回的其他非空合法终止事件，原始原因同时保留。
 
 验证：`.venv/bin/python -m pytest tests/test_evaluation_metrics.py -q` 包括固定提交函数对照、独立掩码/分母、真实 SUMO 诊断开关前后确定性行为和随机状态对照、随机重复性、完整输出重算与中断拒绝。该验证属于小规模本地功能验证，不是正式远程性能评估。
+
+### 6.1 训练记录与周期 checkpoint
+
+新增训练参数 `--checkpoint-every 100000`；每 100,000 个共享 SUMO 控制步保存一次，结束时保存最终状态，恰逢节点只保存一次。`--tensorboard` 默认开启，可用 `--no-tensorboard` 关闭；JSONL 始终开启。动作窗口复用 `--log-every`（默认 40 步），最后不足窗口仍写实际长度。实验目录不可重复写入已有 `train/metrics.jsonl`，避免混合两次训练。
+
+```text
+runs/<experiment_id>/
+  train/metrics.jsonl
+  train/tb/
+  checkpoints/masac_seed42_step_100000.pt
+  checkpoints/index.json
+  eval/step_100000/summary.json
+  eval/step_100000/episodes.csv
+  eval/index.json
+  figures/
+```
+
+JSONL 以 `event` 区分：
+
+- `config`：完整 CLI、Git 提交及工作树是否有修改；`global_step=0`。
+- `episode`：仅两车均完整终止后写入，包含 `episode_index`、`episode_global_steps`、每车终止原因/奖励/严格成功/有效控制步数、联合成功；最近 100 回合的 O3/E74 成功、碰撞、Missed Exit、Timeout 百分率和平均奖励，以及联合成功率和两车奖励和的均值。`rolling_episodes` 是实际分母，`policy=exploration_training`，不能冒充正式评估。
+- `update`：每次更新写原始 `critic_loss`、双 Q 均值 `mean_q`、`mean_target`、`valid_agents`、`update_index`；各车 `actor_loss`、`alpha`、`alpha_loss`、`mean_log_prob`、`valid_samples`。log-prob 是当前 actor 更新中已有采样的实际动作 log-prob，未再额外前向；无有效样本的损失为 null、样本数为 0。
+- `runtime`：窗口实际步数、速度（SUMO 全局训练步/墙钟秒）、Replay 大小、累计更新数、各车动作样本数/有效动作占比、加速度均值与总体标准差、横向动作均值、换道请求比例。只统计真正执行动作的样本；换道比例直接调用当前控制器 `parse_action()`，不另定义阈值。
+
+TensorBoard 的标量标签统一带 `exploration_training/` 前缀，以 `global_step` 为横轴；例如 `tensorboard --logdir runs/<experiment_id>/train/tb`。JSONL 不使用最后 minibatch 冒充窗口均值，绘图保留原始更新值，不默认平滑。
+
+checkpoint 保留原有模型/优化器字段，并增加 Git 和源码 SHA256；索引记录训练 seed、global_step、绝对路径、文件 SHA256、提交、源码哈希和配置。文件先写 `.partial`，flush/fsync 后原子替换，索引同样原子写入；残留 `.partial` 不参与发现。checkpoint 仍缺 Replay、SUMO 状态、全部 RNG 状态，**不提供精确续训**。
+
+### 6.2 固定种子评估与只读行为诊断
+
+```bash
+# 以下是正式评估入口示例；本次开发验证没有执行 100 回合评估
+.venv/bin/python scripts/evaluate_masac_checkpoints.py runs/<experiment_id>
+# 配置不一致或损坏时默认报错；明确重算时加 --rerun
+```
+
+入口按 checkpoint 内部 `global_step` 排序；每个模型固定 Easy、两车、确定性 Actor、100 回合、种子 `200001–200100`，不提供修改这些设置的选项。`--max-steps` 默认 4500；只限制未完成回合的报错预算，不改变环境 4000 活跃步终止规则。批量评估不在训练过程中自动运行。
+
+复用结果前核对 JSON/CSV 所有回合字段、分组汇总重算、checkpoint SHA256、种子序列、协议版本、Git 提交、源码哈希、路网/路线和 SUMO 二进制哈希、环境配置及实际 speed mode 读回记录。任何失败记录到 `eval/index.json` 后报错，后续项保留 pending，不能当作已评估；索引缺少模型文件也报错。
+
+单模型入口新增 `--trace`，默认关闭首回合 TRACE。请求 `speed_mode=96` 保持不变，实际 `getSpeedMode()` 的所有读回值按车保留在每回合和环境元数据中。本机 SUMO 1.20.0 的短程测试读回为 32（请求为 96）；工具原样记录，不将请求值冒充实际值，也不修改控制模式。JSON 同时记录 checkpoint SHA256、训练配置、Git/源码哈希、SUMO 版本、NumPy/PyTorch 版本、路网/路线哈希及关键评估配置。
+
+核心统计仍为 `dual-ego-v1`，扩展输出协议版本为 2；旧 JSON 字段和单位保留。新增联合无碰撞率为没有任一 Ego 碰撞的完整回合比例（不代表成功）。所有回合率提供 `*_stats`，包含分子、分母和 Wilson 95% CI（单位与对应比例一致）；100 个评估回合不是 100 个独立训练重复。
+
+新增只读行为指标：成功驶离时间为 SUMO 终止时刻减实测 depart_time，仅严格成功回合有效；停车定义为有效步前速度 `<0.5 m/s`，报告停车步数/速度有效样本数及 Wilson CI，汇总按有效步池化。换道请求按实际执行动作经控制器解析的非零方向统计，朝向目标车道为负方向且当前 lane>0，远离为正方向；请求可能被道路/边界条件限制，不等于实际 SUMO 换道。物理换道为同 Edge 连续有效实测 lane index 的变化，另报有效观测对数；跨 Edge 全部排除，计数仅代表可观测变化，不能宣称完整运动总数。首次进入 E77 的车道读取有效实测 road/lane；未观测到记 null，分布只使用有观测的回合。无法采集或不适用的时间、行为统计为 null，并保留诊断说明及有效分母。
+
+### 6.3 论文图表与统计方法
+
+```bash
+.venv/bin/python scripts/plot_masac_experiments.py \
+  --experiment MASAC 42 runs/seed42 \
+  --experiment MASAC 43 runs/seed43 \
+  --experiment IndependentSAC 42 runs/baseline42 \
+  --output runs/comparison/figures
+```
+
+每个 `--experiment ALGORITHM TRAINING_SEED DIRECTORY` 明确算法、独立训练 seed 和目录；输入一个 seed 即绘制单 seed。对照算法需导出同一评估 JSON/CSV 协议。绘图完全离线，不调用 SUMO；论文评估曲线拒绝随机或非固定 100 seeds 结果。
+
+生成七组 PNG、PDF 及各自源 CSV：成功率；碰撞与 Missed Exit；Critic loss/Q/target；Actor loss/alpha；速度/Jerk/急刹回合率；换道请求与可观测物理换道；首次 E77 车道分布。横轴统一训练 global_step，探索训练滚动曲线用虚线、checkpoint 正式评估用实线，标签明确区分。
+
+同算法多个训练 seed 在相同训练步上等权取均值及样本标准差（ddof=1），阴影为 ±1 SD；只有全部输入训练 seed 在该步都有观测时才画跨 seed 点。单 seed 不绘制 SD 阴影。训练回合结束步不同不插值、不补点，因此跨 seed 训练滚动曲线可能没有共同横坐标；可分别输入各 seed 查看。失败/缺失 checkpoint 写入 `missing_checkpoints.json`，曲线在已知缺失步断开，不插值；不使用残留失败结果。
+
+`plot_source.csv` 保存逐 seed、逐 global_step 原值、分母和已有 CI；`final_metrics_per_seed.csv` 保存每个 seed 最后实际有效 checkpoint 的各车/联合指标与有效 n；`final_metrics.csv` 按算法、实际训练预算、指标分组，输出有效训练 seed 数、输入训练 seed 数、均值、样本 SD 和有效样本数合计；全部缺失的指标保留 NA、有效 seed 数 0。不同最终预算不合并，单 seed 的 SD 留空。最后有效模型可能不是计划最终模型，应结合缺失索引使用；不得隐去缺失后宣称相同预算。
+
+Wilson CI 描述给定模型的评估回合比例；停车步 CI 按观测步作二项描述，时间相关性意味着它不能作为独立样本推断的证据。跨 seed SD 描述训练重复之间的离散性，不能用回合数替代独立训练 seed 数。本文档不声称因果差异或统计显著性。
 
 ## 7. 当前验证记录（非训练性能结论）
 
@@ -181,7 +246,7 @@ python3 -m pytest tests/test_full_episode_replay.py -s -v
 ## 9. 限制与后续工作
 
 1. 双 Ego 仅实现 Easy；Medium/Hard 目前只有单 Ego 路线文件。
-2. 训练入口尚无断点恢复、周期 checkpoint、W&B、规范化实验 manifest 与多种子自动评估。
+2. 训练入口尚无精确断点恢复或 W&B；已有周期 checkpoint、训练配置与 SHA256 索引、独立固定种子批量评估。多训练 seed 仍须分别启动和归档。
 3. 当前连续横向 Actor / 连续 Q 输入与 SUMO 离散换道执行之间存在潜在不匹配，需要后续实验评估。
 4. `laneChangeMode=0` 不对请求换道提供常规安全保护；高碰撞率是必须测量的任务结果，不代表策略已安全。
 5. 现有历史 E76→D3 单 Ego SAC / 奖励消融代码保留用于研究追溯及后续对照，但不作为当前双 Ego CTDE-MASAC 的运行说明。

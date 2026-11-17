@@ -1,11 +1,12 @@
 
 """DAROM 双 Ego CTDE-MASAC 训练入口。
 
-第一版：用于本地短程冒烟测试。
-不包含正式评估、断点恢复或 W&B。
+结构化训练记录与周期 checkpoint；正式评估由独立入口执行。
+不提供精确断点恢复或 W&B。
 """
 
 import argparse
+import random
 from pathlib import Path
 import time
 
@@ -19,6 +20,10 @@ from src.agents.replay_buffer import JointReplayBuffer
 from src.agents.transition_collector import JointTransitionCollector
 from src.agents.masac_trainer import MASACTrainer
 
+
+from src.experiment_tracking import (TrainingLog, ActionWindow, EpisodeWindow,
+    checkpoint_due, atomic_write, atomic_json, sha256, git_metadata, evaluation_fingerprint)
+from src.evaluation_metrics import AgentMetrics
 
 AGENT_IDS = JointReplayBuffer.AGENT_IDS
 
@@ -99,11 +104,14 @@ def save_checkpoint(
 ):
     """保存模型和优化器状态。"""
 
-    torch.save({
+    atomic_write(path, lambda stream: torch.save({
+        "git": git_metadata(),
+        "source_sha256": evaluation_fingerprint(),
         "global_step": global_step,
         "episodes": episodes,
         "agent_ids": AGENT_IDS,
         "config": vars(config),
+        "trainer_config": {"gamma": trainer.gamma, "tau": trainer.tau, "target_entropy": trainer.target_entropy},
         "actors": actors.state_dict(),
         "critic": critic.state_dict(),
         "target_critic":
@@ -119,7 +127,7 @@ def save_checkpoint(
             k: v.state_dict()
             for k, v in trainer.alpha_optimizers.items()
         },
-    }, path)
+    }, stream))
 
 
 def main(args):
@@ -138,11 +146,18 @@ def main(args):
     if args.train_every <= 0 or args.log_every <= 0:
         raise ValueError("Invalid interval")
 
+    args.checkpoint_every = getattr(args, "checkpoint_every", 100000)
+    args.tensorboard = getattr(args, "tensorboard", True)
+    if args.checkpoint_every <= 0:
+        raise ValueError("checkpoint_every must be positive")
+    random.seed(args.seed)
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    if list((output_dir / "checkpoints").glob("*.pt")):
+        raise FileExistsError("Experiment directory already contains checkpoints")
 
     # 1. 创建网络及优化器
     actors = MultiAgentGaussianActor(
@@ -171,7 +186,23 @@ def main(args):
     env = MultiEgoEnv(
         scenario="easy",
         speed_mode=96,
+        collect_metrics=True,
     )
+
+    log = TrainingLog(output_dir / "train", args.tensorboard)
+    provenance = git_metadata()
+    log.write("config", 0, config=vars(args), git=provenance, policy="exploration_training")
+    action_window = ActionWindow(AGENT_IDS)
+    episode_window = EpisodeWindow()
+    checkpoint_index = []
+
+    def checkpoint_at(step, episodes):
+        path = output_dir / "checkpoints" / f"masac_seed{args.seed}_step_{step}.pt"
+        save_checkpoint(path, actors, critic, trainer, step, episodes, args)
+        checkpoint_index.append(dict(training_seed=args.seed, global_step=step,
+            path=str(path.resolve()), sha256=sha256(path), git=provenance, source_sha256=evaluation_fingerprint(), config=vars(args)))
+        atomic_json(output_dir / "checkpoints" / "index.json", checkpoint_index)
+        return path
 
     completed_episodes = 0
     update_count = 0
@@ -186,6 +217,8 @@ def main(args):
             len(AGENT_IDS), dtype=np.float64
         )
         outcomes = {}
+        episode_start = 0
+        episode_metrics = {key: AgentMetrics() for key in AGENT_IDS}
 
         for global_step in range(1, args.total_steps + 1):
 
@@ -237,6 +270,11 @@ def main(args):
             ], dtype=np.float32)
 
             acted_mask = active_mask * (1.0 - pre_step)
+            action_window.observe(joint_actions, acted_mask)
+            for key in AGENT_IDS:
+                if key not in outcomes:
+                    episode_metrics[key].observe(infos[key]["evaluation_metrics"],
+                        terminations[key] or truncations[key])
 
             dones = np.asarray([
                 float(
@@ -300,7 +338,19 @@ def main(args):
                     **alpha_stats,
                 }
 
+                for i, key in enumerate(AGENT_IDS):
+                    last_losses.setdefault(key + "_alpha", float(trainer.alpha_values()[i].detach()))
+                    last_losses.setdefault(key + "_actor_loss", None)
+                    last_losses.setdefault(key + "_alpha_loss", None)
+                    last_losses.setdefault(key + "_mean_log_prob", None)
+                    last_losses.setdefault(key + "_valid_samples", 0)
                 update_count += 1
+                log.write("update", global_step, update_index=update_count, **last_losses)
+
+            if global_step % args.log_every == 0 or global_step == args.total_steps:
+                log.write("runtime", global_step, replay_size=len(buffer), update_count=update_count,
+                          **action_window.result())
+                action_window.clear()
 
             # G. 打印训练进度
             if global_step % args.log_every == 0:
@@ -324,6 +374,16 @@ def main(args):
                 collector.flush()
 
                 completed_episodes += 1
+                agents = {key: episode_metrics[key].finish(outcomes[key], episode_rewards[i])
+                          for i, key in enumerate(AGENT_IDS)}
+                episode_values = {}
+                for key, row in agents.items():
+                    for name in ("terminal_reason", "success", "agent_steps", "mean_policy_reward_return"):
+                        episode_values[key + "_" + name] = row[name]
+                log.write("episode", global_step, episode_index=completed_episodes,
+                    episode_global_steps=global_step - episode_start,
+                    joint_success=all(r["success"] for r in agents.values()),
+                    **episode_values, **episode_window.add(agents))
 
                 print(
                     f"episode={completed_episodes} "
@@ -342,26 +402,14 @@ def main(args):
                     )
 
                     outcomes = {}
+                    episode_start = global_step
+                    episode_metrics = {key: AgentMetrics() for key in AGENT_IDS}
                     episode_rewards = np.zeros(
                         len(AGENT_IDS), dtype=np.float64
                     )
 
-        # 预算截断时不把未确认的 pending
-        # 误当成已完成回合的最终 transition。
-        checkpoint = (
-            output_dir
-            / f"masac_step_{args.total_steps}.pt"
-        )
-
-        save_checkpoint(
-            checkpoint,
-            actors,
-            critic,
-            trainer,
-            global_step=args.total_steps,
-            episodes=completed_episodes,
-            config=args,
-        )
+            if checkpoint_due(global_step, args.total_steps, args.checkpoint_every):
+                checkpoint = checkpoint_at(global_step, completed_episodes)
 
         print("\n===== Training smoke summary =====")
         print("Global steps:", args.total_steps)
@@ -379,6 +427,7 @@ def main(args):
 
     finally:
         env.close()
+        log.close()
 
 
 if __name__ == "__main__":
@@ -419,4 +468,6 @@ if __name__ == "__main__":
         default="runs/masac_smoke",
     )
 
+    parser.add_argument("--checkpoint-every", type=int, default=100000)
+    parser.add_argument("--tensorboard", action=argparse.BooleanOptionalAction, default=True)
     main(parser.parse_args())

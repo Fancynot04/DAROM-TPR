@@ -235,6 +235,7 @@ class MASACTrainer:
         return {
             "critic_loss": float(loss.item()),
             "valid_agents": int(valid_count.item()),
+            "mean_q": float((((q1.detach() + q2.detach()) / 2) * acted_mask).sum().item() / valid_count.item()),
             "mean_target": float(
                 (
                     targets * acted_mask
@@ -344,6 +345,7 @@ class MASACTrainer:
 
                 optimizer.step()
 
+                results[f"{ego_id}_mean_log_prob"] = float((log_prob_i.detach() * valid).sum().item() / count.item())
                 results[f"{ego_id}_actor_loss"] = (
                     float(actor_loss.item())
                 )

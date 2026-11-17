@@ -5,7 +5,7 @@ import numpy as np
 
 from .sumo_world import SumoWorld, SUMO_DIR
 from .ego import Ego
-from .control import EgoController
+from .control import EgoController, parse_action
 from .observation import build_observation
 
 from .exit_rules import missed_exit_before_step
@@ -353,6 +353,10 @@ class MultiEgoEnv:
                         "speed": float(conn.vehicle.getSpeed(ego_id)),
                         "acceleration": float(conn.vehicle.getAcceleration(ego_id)),
                         "time": float(sim.getTime()),
+                        "road": conn.vehicle.getRoadID(ego_id),
+                        "lane": int(conn.vehicle.getLaneIndex(ego_id)),
+                        "speed_mode": int(conn.vehicle.getSpeedMode(ego_id)),
+                        "request_direction": parse_action(actions[ego_id])[1],
                     }
 
         # 1. 每辆车独立进行 Missed Exit 预判
@@ -431,6 +435,9 @@ class MultiEgoEnv:
                                           if on_road else None),
                     "post_time": float(sim.getTime()),
                     "on_road": on_road,
+                    "post_road": conn.vehicle.getRoadID(ego_id) if on_road else None,
+                    "post_lane": int(conn.vehicle.getLaneIndex(ego_id)) if on_road else None,
+                    "depart_time": self.egos[ego_id].state.depart_time,
                     "teleport_started": ego_id in started,
                     "teleport_ended": ego_id in ended,
                     "emergency_stopping": ego_id in emergency,
@@ -517,7 +524,10 @@ class MultiEgoEnv:
 
         for ego_id in self.AGENTS:
             if self.collect_metrics:
-                infos[ego_id]["evaluation_metrics"] = metric_steps.get(ego_id)
+                sample = metric_steps.get(ego_id)
+                if sample is not None:
+                    sample["depart_time"] = self.egos[ego_id].state.depart_time
+                infos[ego_id]["evaluation_metrics"] = sample
             infos[ego_id]["pre_step_terminal"] = (
                 ego_id in pre_terminated
             )

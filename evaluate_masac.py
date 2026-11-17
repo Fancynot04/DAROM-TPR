@@ -2,9 +2,7 @@
 """独立评估双 Ego CTDE-MASAC 策略。"""
 
 import argparse
-import csv
 import random
-import json
 from collections import Counter
 from pathlib import Path
 
@@ -14,7 +12,10 @@ import torch
 from src.envs.multi_ego_env import MultiEgoEnv
 from src.agents.masac import MultiAgentGaussianActor
 from train_masac import snapshot, AGENT_IDS
-from src.evaluation_metrics import AgentMetrics, aggregate, joint_record, REFERENCE_COMMIT
+from src.evaluation_metrics import AgentMetrics, aggregate, joint_record, REFERENCE_COMMIT, wilson
+from src.experiment_tracking import sha256, git_metadata, evaluation_fingerprint, runtime_versions
+from src.evaluation_results import write_results, EVALUATION_PROTOCOL_VERSION
+from sumolib import checkBinary
 
 
 @torch.inference_mode()
@@ -46,6 +47,7 @@ def evaluate(args):
     )
 
     records = []
+    sumo_version = None
 
     try:
         for episode in range(args.episodes):
@@ -54,6 +56,7 @@ def evaluate(args):
             torch.manual_seed(seed)
             np.random.seed(seed)
             observations, _ = env.reset(seed=seed)
+            sumo_version = list(env.world.conn.getVersion())
 
             outcomes = {}
             metrics = {ego_id: AgentMetrics() for ego_id in AGENT_IDS}
@@ -89,7 +92,7 @@ def evaluate(args):
                 
                 
                 # 仅在第一个评估回合采样打印，避免日志过多
-                if episode == 0 and step % 100 == 0:
+                if getattr(args, "trace", False) and episode == 0 and step % 100 == 0:
                     for i, ego_id in enumerate(AGENT_IDS):
                         if active_mask[i] == 0:
                             continue
@@ -185,6 +188,26 @@ def evaluate(args):
                  for ego_id in AGENT_IDS}
     summary = {
         "metric_version": "dual-ego-v1",
+        "evaluation_protocol_version": EVALUATION_PROTOCOL_VERSION,
+        "checkpoint_sha256": sha256(args.checkpoint),
+        "evaluation_code_sha256": evaluation_fingerprint(),
+        "runtime_versions": runtime_versions(),
+        "git": git_metadata(),
+        "training_seed": checkpoint.get("config", {}).get("seed"),
+        "training_config": checkpoint.get("config", {}),
+        "checkpoint_git": checkpoint.get("git"),
+        "checkpoint_source_sha256": checkpoint.get("source_sha256"),
+        "trainer_config": checkpoint.get("trainer_config"),
+        "sumo_version": sumo_version,
+        "environment": {
+            "sumo_binary_sha256": sha256(checkBinary("sumo")),
+            "scenario": "easy", "agent_ids": list(AGENT_IDS), "requested_speed_mode": 96,
+            "actual_speed_modes": {key: sorted({mode for record in records for mode in record["per_agent"][key]["speed_modes"]}) for key in AGENT_IDS},
+            "step_length_s": 0.1, "max_steps": args.max_steps,
+            "net_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp.net.xml"),
+            "route_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp_easy_o3_d3_dual.rou.xml"),
+            "stopped_speed_threshold_mps": 0.5,
+        },
         "reference_commit": REFERENCE_COMMIT,
         "rate_unit": "fraction for legacy success_rates/joint_success_rate; percent in per_agent/joint",
         "stochastic": args.stochastic,
@@ -208,6 +231,8 @@ def evaluate(args):
         "training_step": checkpoint["global_step"],
         "episodes": len(records),
         "success_rates": {},
+        "success_rates_stats": {key: wilson(sum(r["per_agent"][key]["success"] for r in records), len(records), scale=1) for key in AGENT_IDS},
+        "joint_success_rate_stats": wilson(sum(r["both_success"] for r in records), len(records), scale=1),
         "outcome_counts": {},
         "joint_success_rate": float(
             np.mean([
@@ -232,27 +257,7 @@ def evaluate(args):
     output.parent.mkdir(
         parents=True, exist_ok=True
     )
-    output.write_text(
-        json.dumps(
-            summary,
-            ensure_ascii=False,
-            indent=2,
-            allow_nan=False,
-        ),
-        encoding="utf-8",
-    )
-
-    csv_rows = []
-    for record in records:
-        row = {key: record[key] for key in ("seed", "global_steps", "agent_steps_sum")}
-        for ego_id, prefix in (("ego_o3", "o3"), ("ego_e74", "e74")):
-            row.update({f"{prefix}_{key}": value for key, value in record["per_agent"][ego_id].items()})
-        row.update({f"joint_{key}": value for key, value in record["joint"].items()})
-        csv_rows.append(row)
-    with output.with_name("episodes.csv").open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(csv_rows[0]))
-        writer.writeheader()
-        writer.writerows(csv_rows)
+    write_results(output, summary)
 
     print("\n===== MASAC Evaluation =====")
     print("Training step:", checkpoint["global_step"])
@@ -290,6 +295,7 @@ if __name__ == "__main__":
         help="Sample stochastic Actor actions for diagnosis",
     )
 
+    parser.add_argument("--trace", action="store_true", help="Print first episode trace")
     args = parser.parse_args()
 
     if args.max_steps <= 0:
