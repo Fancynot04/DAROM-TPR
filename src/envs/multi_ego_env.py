@@ -17,7 +17,7 @@ from .delay_buffer import MultiEgoDelayBuffer
 class MultiEgoEnv:
     """双 Ego 环境的第一版交互接口。"""
 
-    AGENTS = ("ego_o3", "ego_e74")
+    AGENTS = ("ego_1", "ego_2")
     OBS_SHAPE = (31, 3)
 
     def __init__(self, scenario="easy", speed_mode=96, collect_metrics=False):
@@ -239,7 +239,7 @@ class MultiEgoEnv:
         self.close()
 
         route_file = (
-            SUMO_DIR / "Antwerp_easy_o3_d3_dual.rou.xml"
+            SUMO_DIR / "Antwerp_easy_o3_d3_homogeneous_dual.rou.xml"
         )
 
         self.world = SumoWorld(

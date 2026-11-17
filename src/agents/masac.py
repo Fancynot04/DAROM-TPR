@@ -112,7 +112,7 @@ class MultiAgentGaussianActor(nn.Module):
 
     def __init__(
         self,
-        ego_ids=("ego_o3", "ego_e74"),
+        ego_ids=("ego_1", "ego_2"),
     ):
         super().__init__()
 

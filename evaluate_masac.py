@@ -187,7 +187,7 @@ def evaluate(args):
     per_agent = {ego_id: aggregate([r["per_agent"][ego_id] for r in records])
                  for ego_id in AGENT_IDS}
     summary = {
-        "metric_version": "dual-ego-v1",
+        "metric_version": "homogeneous-dual-ego-v1",
         "evaluation_protocol_version": EVALUATION_PROTOCOL_VERSION,
         "checkpoint_sha256": sha256(args.checkpoint),
         "evaluation_code_sha256": evaluation_fingerprint(),
@@ -205,7 +205,7 @@ def evaluate(args):
             "actual_speed_modes": {key: sorted({mode for record in records for mode in record["per_agent"][key]["speed_modes"]}) for key in AGENT_IDS},
             "step_length_s": 0.1, "max_steps": args.max_steps,
             "net_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp.net.xml"),
-            "route_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp_easy_o3_d3_dual.rou.xml"),
+            "route_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp_easy_o3_d3_homogeneous_dual.rou.xml"),
             "stopped_speed_threshold_mps": 0.5,
         },
         "reference_commit": REFERENCE_COMMIT,

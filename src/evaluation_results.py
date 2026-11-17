@@ -7,6 +7,8 @@ from pathlib import Path
 from src.evaluation_metrics import aggregate, joint_record
 from src.experiment_tracking import atomic_write, atomic_json
 
+from src.agents.replay_buffer import JointReplayBuffer
+
 EVALUATION_PROTOCOL_VERSION = 2
 
 
@@ -14,8 +16,11 @@ def episode_rows(records):
     rows = []
     for record in records:
         row = {key: record[key] for key in ('seed', 'global_steps', 'agent_steps_sum')}
-        for ego, prefix in (('ego_o3', 'o3'), ('ego_e74', 'e74')):
-            row.update({f'{prefix}_{key}': value for key, value in record['per_agent'][ego].items()})
+        for ego in JointReplayBuffer.AGENT_IDS:
+            row.update({
+                f"{ego}_{key}": value
+                for key, value in record["per_agent"][ego].items()
+            })
         row.update({f'joint_{key}': value for key, value in record['joint'].items()})
         rows.append({k: json.dumps(v, sort_keys=True) if isinstance(v, (dict, list)) else v for k, v in row.items()})
     return rows

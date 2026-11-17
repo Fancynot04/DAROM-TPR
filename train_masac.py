@@ -470,7 +470,7 @@ def build_parser():
         default="runs/masac",
     )
 
-    parser.add_argument("--checkpoint-every", type=int, default=500000)
+    parser.add_argument("--checkpoint-every", type=int, default=200000)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--tensorboard", action=argparse.BooleanOptionalAction, default=True)
     return parser

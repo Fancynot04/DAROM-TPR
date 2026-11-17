@@ -8,7 +8,7 @@ import torch
 class JointReplayBuffer:
     """每个 SUMO 全局步保存一条双 Ego 联合经验。"""
 
-    AGENT_IDS = ("ego_o3", "ego_e74")
+    AGENT_IDS = ("ego_1", "ego_2")
 
     SHAPES = {
         "policy_obs": (2, 134),
