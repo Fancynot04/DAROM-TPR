@@ -1,7 +1,7 @@
 <configuration>
     <input>
         <net-file value="Antwerp.net.xml"/>
-        <route-files value="Antwerp_easy_exit_e76_d3.rou.xml"/>
+        <route-files value="Antwerp_easy_o3_d3_dual.rou.xml"/>
     </input>
     <time>
         <begin value="0"/>

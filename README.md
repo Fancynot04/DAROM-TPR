@@ -1,293 +1,169 @@
-# DAROM-TPR: E76→D3 single-agent driving
+# DAROM-TPR — Dual-Ego CTDE-MASAC for Highway D3 Exit
 
-This repository contains the single-agent DAROM SAC/GRU environment for an Ego
-vehicle that starts on E76 and reaches D3 through E77. The task is fixed:
+> **状态：研究原型 / v0.1 训练管线基线（尚未证明策略收敛）。** 适用分支：`exp/o3-d3-ctde-v1`。本分支的主要任务是让两辆独立决策的 Ego 在同一个 SUMO 仿真中驶离 D3，而不是人为制造车辆冲突或同步出发时差。
 
-- Ego origin: E76; destination: D3; departure lane: random legal E76 lane
-- scenarios: `easy`, `medium`, `hard`
-- SUMO step: 0.1 s; episode limit: 400 s / 4,000 steps
-- road limit: 120 km/h (`33.3333333333 m/s`) in `sumo_new/Antwerp.net.xml`
-- one Ego agent, `laneChangeMode=0`, custom safety interception disabled
-- pending lane-change requests are observational only and never block a new command
-- original DAROM delayed observation, action semantics, SAC and GRU encoder are retained
+## 1. 研究任务
 
-## Layout
+使用 DAROM 的延迟感知 GRU 观测编码器，在 Antwerp 路网构建双 Ego 驶离场景，采用集中训练、分散执行（CTDE）的多智能体 SAC（MASAC）：
+
+| 项目      | 当前实现                                                     |
+| --------- | ------------------------------------------------------------ |
+| 场景      | Antwerp **Easy**（双 Ego；Medium/Hard 双 Ego 尚未接入）      |
+| `ego_o3`  | O3 → D3；计划 120 s 出发；`O3_0` 起步                        |
+| `ego_e74` | E74 → D3；计划 120 s 出发；`E74_2` 起步                      |
+| 仿真      | 一个 SUMO 进程、一个 0.1 s 全局时钟；各车实际插入时刻可不同  |
+| 速度      | 道路及 Ego 限速 120 km/h（33.333 m/s）；Ego 出发速度 10 m/s  |
+| Episode   | 每辆 Ego 最多 **4,000 个活跃控制步**；分别终止，双方结束后重置 |
+| Ego 控制  | 纵向加速度 + 横向换道请求；`laneChangeMode=0`、无自定义安全拦截 |
+| 奖励      | B0 纯事件：Arrived +50；Collision/Missed Exit/Ego Teleported/Timeout −100；非终止 0 |
+
+**训练目标**：分别提高两辆 Ego 的安全抵达率，最终提高**同一回合两车同时抵达 D3 的联合成功率**。当前没有规则换道器替模型决策，也没有人为设置出发时间差 Δt。
+
+## 2. CTDE-MASAC 结构
+
+- **分散 Actor**：每辆 Ego 使用独立的 `GaussianActor`（DAROM `DelayAwareGRUEncoder` + tanh-Gaussian 策略）；仅使用自己的 134 维延迟策略输入。
+- **Actor 输入（134）**：当前 Ego 状态及最多 30 辆邻车的 31×3 基础观测（93）＋20×2 自身动作历史（40）＋观测年龄（1）。邻车状态带通信延迟；Ego 自身状态实时更新。新动作位于历史开头，按实际观测年龄决定保留数量。
+- **集中 Critic**：`CentralizedTwinQ` 接收两辆 Ego 的当前真实 93 维观测、联合请求动作及 active mask，拼接为 192 维输入；两套 Q 网络分别对两辆车输出 Q 值。**Critic 不使用 Actor 的 256 维 GRU 特征。**
+- **联合 Replay**：每个 SUMO 全局步对应一条双 Ego 联合经验，分别保存奖励、done、active/acted/next-active mask。`JointTransitionCollector` 延迟一个全局步提交，以正确归因 pre-step Missed Exit。
+- **优化**：SAC Twin-Q 目标、Polyak 目标网络、分 Ego Actor 优化器和独立自动熵系数 α；Critic 使用真实联合状态，执行时只需各自 Actor。
+
+Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度（m/s²）；横向值经阈值离散化：小于 `−5/3` 请求朝车道 0 换道，在 `[-5/3, 5/3)` 保持，大于等于 `5/3` 请求反方向换道。当前训练中的 Critic 看到**连续请求动作**，而 SUMO 执行的是离散换道命令；这是后续需要检验的建模限制。
+
+## 3. 目录结构
 
 ```text
-train_sac_delay.py          fresh SAC training entry
-evaluate_sac_delay.py      checkpoint evaluation entry
-src/merging.py             single-agent SUMO environment
-src/wrapper.py             delay/action wrappers
-src/delay_encoder.py       DAROM delayed-state encoders
-src/exit_e76_d3_config.py  E76→D3 experiment profiles
-src/geometry.py            traffic geometry helpers
-src/utils.py               shared utilities
-src/road_boundary.py       road-boundary diagnostics
-src/rewards/events.py      terminal-event rewards
-src/rewards/config.py      Hydra/OmegaConf reward configuration
-src/rewards/terms.py       RewardTerm and RewardTracker accounting
-sumo_new/Antwerp.net.xml   Antwerp network with a 120 km/h limit on all lanes
-sumo_new/Antwerp_*_exit_e76_d3.rou.xml
-                            Easy/Medium/Hard E76→D3 routes
-sumo_new/Antwerp.sumocfg   Easy E76→D3 GUI configuration
+train_masac.py                     双 Ego CTDE-MASAC 训练（当前为基础训练入口）
+evaluate_masac.py                  双 Ego 独立评估（deterministic / --stochastic）
+src/agents/
+  masac.py                         两个独立 DAROM-GRU Gaussian Actor
+  centralized_critic.py            集中式 Twin-Q，当前输入 192 维
+  replay_buffer.py                 联合经验回放
+  transition_collector.py          pre-step 终止奖励归因
+  masac_trainer.py                 Critic / Actor / alpha 更新
+src/envs/
+  multi_ego_env.py                 双 Ego 独立状态与统一 SUMO 时钟
+  sumo_world.py                    SUMO 启动、推进、关闭
+  ego.py                            Ego 生命周期
+  observation.py                    每车 31×3 交通观测
+  delay_buffer.py                   每车独立通信延迟队列
+  action_history.py                 每车动作历史掩码及 134 维编码
+  control.py                        连续动作映射及 TraCI 控制
+  exit_rules.py / lane_change.py    D3 终止判定与换道状态跟踪
+src/delay_encoder.py                DAROM 延迟感知 GRU
+src/rewards/events.py               事件奖励映射（由单 Ego 环境复用）
+sumo_new/
+  Antwerp.net.xml                   Antwerp 路网
+  Antwerp_easy_o3_d3_dual.rou.xml   当前双 Ego Easy 路线
+  Antwerp_easy_o3_d3.rou.xml        单 Ego O3 参考路线
+  Antwerp_medium_o3_d3.rou.xml      单 Ego Medium 路线
+  Antwerp_hard_o3_d3.rou.xml        单 Ego Hard 路线
+tests/                               环境、模型、真实 SUMO、完整回合回归测试
+train_sac_delay.py / evaluate_sac_delay.py
+                                     历史单 Ego DAROM-SAC 入口（非当前 MASAC 入口）
 ```
 
-Old entry, legacy O3→D1, dual-agent routes, detector definitions, root
-`config.yaml`, old model archives, and continuation/replay-resume paths are not
-part of the current task.
+`conf/` 中的旧 E76 配置及尚未接入代码的空 YAML **不是当前 MASAC 训练参数来源**；当前参数来自 `train_masac.py` 的 CLI 默认值和对应模块的构造参数。
 
-## Environment setup
+## 4. 运行环境
 
-Install the dependencies in `requirements.txt`, install SUMO, and export
-`SUMO_HOME` so that its Python tools are available:
+需要 Python、PyTorch、Gymnasium、TraCI/SUMO。当前本地集成验证使用 **SUMO 1.20.0**；不同 SUMO 版本可能改变碰撞、换道与交通动力学，正式比较应统一版本。
 
 ```bash
-export SUMO_HOME=/path/to/sumo
+# 先确认 SUMO 可执行文件在 PATH 中
+sumo --version
 python3 -m pip install -r requirements.txt
+python3 -m pip install pytest
 ```
 
-The training and evaluation code starts SUMO directly with the selected route
-file. It does not load detector `additional` files and does not modify lane
-speed limits through TraCI.
+如安装方式需要 SUMO Python tools，再配置 `SUMO_HOME`。代码通过 `sumolib.checkBinary('sumo')` 启动仿真。运行命令应从仓库根目录执行。
 
-## Training
+## 5. 训练
 
-Every run starts from fresh random weights and an empty replay buffer. Models
-and logs should use a new run name and remain in ignored output directories.
-The E76→D3 training contract always keeps custom Safety interception off;
-passing `--safety` is rejected rather than creating a `SafetyWrapper`.
+当前入口提供**从零训练**、联合采样、梯度更新及训练结束时的 checkpoint 保存，不提供中途定期 checkpoint 或精确断点续训。训练步数是 SUMO 全局控制步，不是两车活跃步数之和。
 
 ```bash
-python3 train_sac_delay.py \
-  --scenario easy \
-  --seed 42 \
-  --total_timesteps 200000 \
-  --checkpoint_freq 50000 \
+# 已经过本地 2,500 全局步的训练冒烟验证
+python3 train_masac.py \
+  --total-steps 2500 \
+  --learning-starts 32 \
+  --batch-size 32 \
+  --buffer-capacity 5000 \
+  --train-every 10 \
+  --log-every 500 \
   --gamma 0.999 \
-  --reward-config configs/rewards/events_only_v1.json \
-  --wandb_mode disabled
+  --learning-rate 3e-5 \
+  --initial-alpha 0.01 \
+  --seed 42 \
+  --output-dir runs/masac_smoke_2500
 ```
 
-The command-line values are final; no historical Phase or reward file can
-override seed, scenario, budget, checkpoint interval, or gamma. The default
-resolved reward configuration is `conf/config.yaml` → `conf/reward/e76_d3.yaml`.
-Use `--save-final-replay-buffer` to save a Replay Buffer only after training
-completes; `--save_replay_buffer` also saves one at every periodic checkpoint.
-The B0 reward is zero on non-terminal steps and settles exactly one event:
-success `+50`, collision/missed-exit/teleport/timeout `-100`.
+默认配置还包括 `tau=0.005`，两辆 Ego 的 α 独立学习。训练开始的前 `learning-starts` 个全局步使用均匀随机动作，后续使用随机 Actor 策略。
 
-The B0–B3 reward ablations use Hydra reward groups; these are candidate
-calibration settings, not claims of optimal weights.  B1 enables clipped SECRM
-efficiency, B2 enables clipped topology route guidance, and B3 enables both.
-All preserve the terminal-event values and environment contract.
+训练结束保存 `runs/masac_smoke_2500/masac_step_2500.pt`，其中包含 Actor、Critic、Target Critic、α 和优化器状态；**不包含 Replay Buffer、SUMO 物理状态或随机数全状态，不能精确续训**。`runs/` 由 `.gitignore` 排除，模型文件需另行归档。
+
+## 6. 独立评估
 
 ```bash
-# B1 / B2 / B3 respectively
-python3 train_sac_delay.py --hydra-override reward=e76_d3_b1_efficiency
-python3 train_sac_delay.py --hydra-override reward=e76_d3_b2_route
-python3 train_sac_delay.py --hydra-override reward=e76_d3_b3_combined
+# 确定性策略（正式汇报优先使用）
+python3 evaluate_masac.py \
+  --checkpoint runs/masac_smoke_2500/masac_step_2500.pt \
+  --episodes 10 \
+  --seed-start 200001 \
+  --output runs/masac_eval_2500/deterministic_10.json
+
+# 随机采样策略（探索行为诊断，不与确定性评估混为一谈）
+python3 evaluate_masac.py \
+  --checkpoint runs/masac_smoke_2500/masac_step_2500.pt \
+  --episodes 10 \
+  --seed-start 200001 \
+  --stochastic \
+  --output runs/masac_eval_2500/stochastic_10.json
 ```
 
-Both dense components have candidate `weight=0.005` and clip their raw value
-to `[-1, 0]`.  Efficiency uses the existing SECRM safe-speed formula with a
-2 m/s denominator floor.  In B1/B3, only the efficiency payment weight is
-linearly decayed by the remaining route distance to D3: it is `0.005` at the
-E76 reference state, `0.0025` at 50% remaining distance, and zero at the D3
-endpoint.  The raw and clipped SECRM values remain unchanged and are logged
-separately from the effective weight.  Route guidance computes the minimum legal lane
-changes and applies `-min(1, n*200/max(d,200))`, where `d` is the remaining
-distance through the final on-route edge that can still host a required lane
-change; it is not distance to the D3 endpoint.  Internal connectors are marked
-unavailable and pay no route term, rather than being treated as `n=0`; the
-efficiency distance factor, in contrast, follows the full route through those
-connectors and D3.
+评估器加载已冻结的 Actor，不更新参数。随机评估对每个 episode 设置 PyTorch / NumPy 种子。JSON 包含各 Ego 的事件分布、分别的 Arrived 成功率及同一回合两车同时 Arrived 的联合成功率。**两车联合成功率不是两个单车成功率的乘积。**
 
-Reward terms can be disabled or reweighted with Hydra-style overrides. These
-change only payment, not termination or SUMO control:
+## 7. 当前验证记录（非训练性能结论）
+
+截至本版本整理时：
+
+- 模型与经验链路的针对性测试已通过；真实 SUMO 30 步采样和完整回合 Replay 奖励一致性测试已通过。
+- 本地 2,500 SUMO 全局步冒烟训练完成 247 次梯度更新、1 个完整 episode，能够重置后继续训练并生成 checkpoint。
+- 该 2,500 步 checkpoint 的 5 回合确定性评估：两车均 0/5 Arrived。
+- 同 checkpoint 的 10 回合随机采样评估：`ego_o3` 1/10 Arrived、`ego_e74` 1/10 Arrived、联合成功 0/10；随机策略碰撞很多。
+
+**这些记录仅证明训练与评估管线可运行，以及随机采样存在个别成功轨迹；不能据此声称 CTDE-MASAC 已经学会安全驶离或优于单 Ego SAC。** 尚缺多种子训练、正式评估、与独立 SAC 对照及统计检验。
+
+## 8. 测试
 
 ```bash
-python3 train_sac_delay.py \
-  --hydra-override reward.terms.collision.enabled=false \
-  --hydra-override reward.terms.timeout.weight=0.5 \
-  --total_timesteps 200000 --checkpoint_freq 50000 \
-  --wandb_mode disabled
+# 单元和集成测试（含需要 SUMO 的测试）
+python3 -m pytest tests/ -q
+
+# 训练核心与回放归因
+python3 -m pytest \
+  tests/test_masac_actor.py \
+  tests/test_centralized_critic.py \
+  tests/test_joint_replay_buffer.py \
+  tests/test_masac_trainer.py \
+  tests/test_transition_collector.py -q
+
+# 真实 SUMO 完整回合回放（需要 SUMO）
+python3 -m pytest tests/test_full_episode_replay.py -s -v
 ```
 
-Each run records the resolved reward YAML, configuration hashes and Git SHA in
-the episode-log manifest. It also records `git_dirty` and the porcelain status
-so an uncommitted source snapshot is never presented as a clean commit.
-Episode-level raw, weighted, discounted, active,
-tail-quantile and clipping statistics use the training gamma and are emitted
-under `reward/episode/*` and `reward/total/*`. W&B training, reward and
-diagnostic series all use monotonic `env_steps`; TensorBoard remains a separate
-local log and is not auto-synchronized into W&B.
+当前 `tests/test_e74_rule_lane.py` 是非学习式诊断，不是 MASAC 训练使用的安全控制器。
 
-## Evaluation
+## 9. 限制与后续工作
 
-```bash
-python3 evaluate_sac_delay.py \
-  models_experiments/e76-d3/<run>.zip \
-  --scenario easy \
-  --episodes 50 --seed 200001 \
-  --no-safety \
-  --output tmp/ai/e76-d3/eval.json
-```
+1. 双 Ego 仅实现 Easy；Medium/Hard 目前只有单 Ego 路线文件。
+2. 训练入口尚无断点恢复、周期 checkpoint、W&B、规范化实验 manifest 与多种子自动评估。
+3. 当前连续横向 Actor / 连续 Q 输入与 SUMO 离散换道执行之间存在潜在不匹配，需要后续实验评估。
+4. `laneChangeMode=0` 不对请求换道提供常规安全保护；高碰撞率是必须测量的任务结果，不代表策略已安全。
+5. **发布前应同步修复** `sumo_new/Antwerp.sumocfg` 的旧路线名，以及 `scripts/build_dual_ego_routes.py` 无法重建当前 E74_2 路线的问题。不要把 `conf/` 的空配置文件描述为已启用训练配置。
+6. 现有历史 E76→D3 单 Ego SAC / 奖励消融代码保留用于研究追溯及后续对照，但不作为当前双 Ego CTDE-MASAC 的运行说明。
 
-Evaluation requires the checkpoint's complete E76→D3 reward configuration,
-profile and matching configuration hash; missing or inconsistent provenance is
-an error and never falls back to B0. Reports distinguish
-`policy_reward_return` (the checkpoint reward configuration) from
-`b0_reference_return` (common terminal-event scoring: success `+50`, failure
-`-100`, non-terminal `0`) and retain per-term totals. Safety is off for the
-matched task contract unless explicitly requested for a separate diagnostic.
-The default evaluation JSON includes `mean_abs_jerk_mps3` for each episode and
-the batch mean of valid episode means. It uses successive on-road SUMO
-`getAcceleration()` measurements divided by elapsed simulation time, excluding
-the first and terminal steps. The existing `mean_speed_mps` definition is
-unchanged. The terminal report displays these metrics with the training seed,
-checkpoint, and explicit evaluation seed range.
+## 10. 版本固定建议
 
-For read-only trajectory export, pass a new output directory. The recorder
-writes one step row and one transition row per `env.step`, plus an immutable
-manifest and column dictionary. Reward columns are derived from the
-checkpoint-authenticated reward configuration; for B0 they are `success`,
-`collision`, `missed_exit`, `teleport`, and `timeout`. Terminal transitions
-whose Ego has already left SUMO retain the environment-returned observation
-but mark it invalid rather than presenting it as a physical next state.
+在文件一致性修复、测试及 README 更新后，再提交并创建不可变的 Git tag。发布时记录 Git SHA、SUMO 版本、Python/PyTorch 版本、路网与路线 SHA256、训练 CLI 参数、训练 seed 和评估 seed；模型权重与评估 JSON 应放入独立实验档案。
 
-```bash
-python3 evaluate_sac_delay.py \
-  models_experiments/e76-d3/<run>.zip \
-  --scenario easy --episodes 1 --seeds 200051 200052 \
-  --no-safety --trajectory-dir tmp/ai/e76-d3/trajectory-export \
-  --model-label B0 --run-label <experiment-id> \
-  --output tmp/ai/e76-d3/trajectory-eval.json
-
-python3 -m scripts.verify_trajectory_csv \
-  --trajectory-dir tmp/ai/e76-d3/trajectory-export \
-  --report-on tmp/ai/e76-d3/trajectory-eval.json \
-  --report-off tmp/ai/e76-d3/baseline-eval.json
-```
-
-The optional baseline report must use the same checkpoint, arguments, and
-seeds without `--trajectory-dir`; the verifier then checks that recording did
-not change the evaluation report. Exported `next_obs_valid=0` rows must not be
-used as physical successor states in downstream transition learning.
-
-Each current export also contains `episode_summary.csv`, with one row per
-trajectory. It aggregates the existing route diagnostics, E76/E77 request and
-command stages, physical lane changes, braking/TTC safety diagnostics, and
-available efficiency/route reward terms; a missing reward term remains empty.
-It does not create labels or change any environment behavior. Compare several
-recording directories read-only with:
-
-```bash
-python3 -m scripts.analyze_trajectory_collection \
-  --group B0=/path/to/B0/trajectory \
-  --group B1=/path/to/B1/trajectory \
-  --group B2=/path/to/B2/trajectory \
-  --group B3=/path/to/B3/trajectory \
-  --output-dir tmp/ai/e76-d3/trajectory-comparison
-```
-
-The comparison reports evaluation-episode summaries, not independent
-training-seed statistics. `exit_reachable_fraction` is computed over only the
-steps where the route diagnostic is defined; request, command, and physical
-lane-change counts remain separate quantities.
-
-Existing preference exports can be audited without changing the rule or the
-source CSV files. The audit replays the exact comparator branch for every pair,
-checks A/B reversal and strict three-way cycles, and writes a cross-tab, 20
-review samples, and a Markdown report to a new output directory:
-
-```bash
-python3 -m scripts.audit_trajectory_preferences \
-  --group B0=/path/to/B0 --group B1=/path/to/B1 \
-  --group B2=/path/to/B2 --group B3=/path/to/B3 \
-  --preferences-dir /path/to/preferences \
-  --output-dir tmp/ai/e76-d3/preference-audit
-```
-
-The P3-only v2 candidate is a separate implementation and never overwrites the
-v1 CSV. It audits whether stable `min_lane_changes_required=0` has false
-negatives among successful trajectories before enabling completion-dependent
-branches, then writes only a candidate CSV and short comparison report:
-
-```bash
-python3 -m scripts.compare_trajectory_preferences_v2_candidate \
-  --group B0=/path/to/B0 --group B1=/path/to/B1 \
-  --group B2=/path/to/B2 --group B3=/path/to/B3 \
-  --v1-preferences /path/to/trajectory_preferences.csv \
-  --output-dir tmp/ai/e76-d3/preference-v2-candidate
-```
-
-Training defaults are Easy, training seed 42, gamma 0.999, 200,000 environment
-steps and 50,000-step checkpoints. Evaluation defaults are Easy, 50 episodes
-and evaluation seed range beginning at 200001. Training seed and evaluation
-seeds are separate provenance fields. Explicit CLI values remain final.
-
-SUMO `Emergency Stopping` diagnostics and the kinematic hard-braking threshold
-(`acceleration <= -4.5 m/s²`) are logged separately. Both report step counts,
-episode counts and episode rates; neither changes termination or B0 reward.
-
-The network lane speed is 120 km/h. All three formal route files give Ego a
-separate vehicle type (maxSpeed 33.3333333333 m/s, accel/decel 5 m/s², sigma 0,
-speedFactor 1), departSpeed 10 m/s, and a `setSpeedMode(96)` call after insertion.
-SUMO 1.20.0 currently reports speed mode 32 when queried afterward. The routes pin the Ego
-trip to `speedFactor=1.0`. Background vehicle types retain their original
-speed-factor behavior.
-The longitudinal command remains `setAcceleration`; each control step clips
-positive acceleration against the measured Ego speed and the 120 km/h limit.
-SAC braking commands pass through. An actual overspeed above a 1e-6 m/s tolerance
-raises an error with speed, command, executed acceleration, and control step.
-Step diagnostics report the raw command,
-post-safety command, executed command, and whether the limiter intervened.
-The base observation contains SUMO's measured Ego speed; the delay wrapper
-retains its existing delayed-observation semantics and 134-dimensional default layout.
-
-## GUI inspection
-
-`sumo_new/Antwerp.sumocfg` opens the Easy E76→D3 route with a 600-second GUI
-end time and 0.1-second step. The 400-second/4,000-step task timeout is owned
-by the environment and is independent of this GUI end time. For Medium or Hard inspection, replace the route file
-in the GUI configuration with the corresponding
-`Antwerp_<scenario>_exit_e76_d3.rou.xml` file.
-
-## E0 reachability diagnostic
-
-`src.e0_reachability` is a privileged, non-learning diagnostic controller. It
-uses the real SUMO state and the parsed lane-connection graph only to choose
-ordinary `[acceleration, lateral_action]` environment actions. It does not
-change vehicle position, route, speed limits, or the SAC observation.
-
-Run the five fixed E76 departure lanes against the same ten traffic seeds in a
-fresh, ignored output directory:
-
-```bash
-SUMO_HOME=/path/to/sumo python3 -m src.e0_reachability \
-  --output-dir tmp/ai/e0-reachability/<run-id> \
-  --lanes 0 1 2 3 4 \
-  --seeds 100001 100002 100003 100004 100005 100006 100007 100008 100009 100010 \
-  --run-label <experiment-id>
-```
-
-The command writes an immutable manifest, route/network/configuration hashes,
-`episodes.csv`, per-lane outcome counts, and JSONL traces per episode. It
-validates B0 reward settlement on every transition and rejects any terminal
-truncation. These privileged-controller results are environment reachability
-evidence, not SAC-policy performance.
-
-## Tests
-
-```bash
-python3 -m unittest discover -s tests -p 'test_*.py'
-```
-
-The real SUMO integration suite is opt-in:
-
-```bash
-python3 -m tests.test_sumo_integration
-```
-
-It checks all three scenarios, the fixed route contract, 0.1-second stepping,
-4,000-step episode limits, `laneChangeMode=0`, and the 120 km/h network speed.
+项目基于 DAROM 的延迟感知强化学习思路进行研究性扩展；本分支是实验实现，不应当作原论文算法或结果的官方复现声明。
