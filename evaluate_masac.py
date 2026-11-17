@@ -2,6 +2,8 @@
 """独立评估双 Ego CTDE-MASAC 策略。"""
 
 import argparse
+import csv
+import random
 import json
 from collections import Counter
 from pathlib import Path
@@ -12,10 +14,13 @@ import torch
 from src.envs.multi_ego_env import MultiEgoEnv
 from src.agents.masac import MultiAgentGaussianActor
 from train_masac import snapshot, AGENT_IDS
+from src.evaluation_metrics import AgentMetrics, aggregate, joint_record, REFERENCE_COMMIT
 
 
 @torch.inference_mode()
 def evaluate(args):
+    if args.episodes <= 0 or args.max_steps <= 0:
+        raise ValueError("episodes and max_steps must be positive")
     checkpoint = torch.load(
         args.checkpoint,
         map_location="cpu",
@@ -37,6 +42,7 @@ def evaluate(args):
     env = MultiEgoEnv(
         scenario="easy",
         speed_mode=96,
+        collect_metrics=True,
     )
 
     records = []
@@ -44,11 +50,14 @@ def evaluate(args):
     try:
         for episode in range(args.episodes):
             seed = args.seed_start + episode
+            random.seed(seed)
             torch.manual_seed(seed)
             np.random.seed(seed)
             observations, _ = env.reset(seed=seed)
 
             outcomes = {}
+            metrics = {ego_id: AgentMetrics() for ego_id in AGENT_IDS}
+            agent_records = {}
             rewards_total = {
                 ego_id: 0.0 for ego_id in AGENT_IDS
             }
@@ -115,6 +124,11 @@ def evaluate(args):
                 ) = env.step(actions)
 
                 for ego_id in AGENT_IDS:
+                    if ego_id not in outcomes:
+                        metrics[ego_id].observe(
+                            infos[ego_id]["evaluation_metrics"],
+                            terminations[ego_id] or truncations[ego_id],
+                        )
                     rewards_total[ego_id] += float(
                         rewards[ego_id]
                     )
@@ -126,9 +140,9 @@ def evaluate(args):
                             or truncations[ego_id]
                         )
                     ):
-                        outcomes[ego_id] = infos[
-                            ego_id
-                        ].get("terminal_reason", "Unknown")
+                        reason = infos[ego_id].get("terminal_reason")
+                        agent_records[ego_id] = metrics[ego_id].finish(reason, rewards_total[ego_id])
+                        outcomes[ego_id] = reason
 
                 if len(outcomes) == len(AGENT_IDS):
                     break
@@ -140,12 +154,16 @@ def evaluate(args):
                 )
 
             both_success = all(
-                outcomes[ego_id] == "Arrived"
+                agent_records[ego_id]["success"]
                 for ego_id in AGENT_IDS
             )
 
             record = {
                 "seed": seed,
+                "global_steps": step + 1,
+                "agent_steps_sum": sum(r["agent_steps"] for r in agent_records.values()),
+                "per_agent": agent_records,
+                "joint": joint_record(agent_records),
                 "steps": step + 1,
                 "outcomes": outcomes,
                 "rewards": rewards_total,
@@ -163,7 +181,29 @@ def evaluate(args):
     finally:
         env.close()
 
+    per_agent = {ego_id: aggregate([r["per_agent"][ego_id] for r in records])
+                 for ego_id in AGENT_IDS}
     summary = {
+        "metric_version": "dual-ego-v1",
+        "reference_commit": REFERENCE_COMMIT,
+        "rate_unit": "fraction for legacy success_rates/joint_success_rate; percent in per_agent/joint",
+        "stochastic": args.stochastic,
+        "protocol": {
+            "speed": "valid pre-step TraCI speed; episode means equally weighted",
+            "jerk": "absolute measured acceleration difference / simulation dt; exclude first and terminal transitions",
+            "hard_braking": "valid post-step acceleration <= -4.5 m/s^2, including terminal",
+            "success": "Arrived and no starting/ending teleport event",
+            "joint_continuous": "equal agents within episode, then equal valid episodes",
+            "global_steps": "env.step calls, excludes reset bootstrap simulation steps",
+            "agent_steps_sum": "sum of environment active_steps (actions applied); excludes pre-step Missed Exit",
+            "missing": "JSON null / CSV empty; separate speed, jerk, braking and event sample counts",
+        },
+        "seed_start": args.seed_start,
+        "actor_sampling_order": list(AGENT_IDS),
+        "global_steps": sum(r["global_steps"] for r in records),
+        "agent_steps_sum": sum(r["agent_steps_sum"] for r in records),
+        "per_agent": per_agent,
+        "joint": aggregate([r["joint"] for r in records]),
         "checkpoint": str(args.checkpoint),
         "training_step": checkpoint["global_step"],
         "episodes": len(records),
@@ -185,7 +225,7 @@ def evaluate(args):
 
         summary["outcome_counts"][ego_id] = dict(reasons)
         summary["success_rates"][ego_id] = (
-            reasons["Arrived"] / len(records)
+            per_agent[ego_id]["success_rate"] / 100
         )
 
     output = Path(args.output)
@@ -197,9 +237,22 @@ def evaluate(args):
             summary,
             ensure_ascii=False,
             indent=2,
+            allow_nan=False,
         ),
         encoding="utf-8",
     )
+
+    csv_rows = []
+    for record in records:
+        row = {key: record[key] for key in ("seed", "global_steps", "agent_steps_sum")}
+        for ego_id, prefix in (("ego_o3", "o3"), ("ego_e74", "e74")):
+            row.update({f"{prefix}_{key}": value for key, value in record["per_agent"][ego_id].items()})
+        row.update({f"joint_{key}": value for key, value in record["joint"].items()})
+        csv_rows.append(row)
+    with output.with_name("episodes.csv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(csv_rows[0]))
+        writer.writeheader()
+        writer.writerows(csv_rows)
 
     print("\n===== MASAC Evaluation =====")
     print("Training step:", checkpoint["global_step"])
@@ -208,6 +261,7 @@ def evaluate(args):
     print("Joint success:", summary["joint_success_rate"])
     print("Outcome counts:", summary["outcome_counts"])
     print("Report:", output)
+    return summary
 
 
 if __name__ == "__main__":
@@ -227,7 +281,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--output",
-        default="runs/masac_eval/report.json",
+        default="runs/masac_eval/summary.json",
     )
     
     parser.add_argument(
@@ -238,6 +292,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    if args.max_steps <= 0:
+        parser.error("--max-steps must be positive")
     if args.episodes <= 0:
         parser.error("--episodes must be positive")
 

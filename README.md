@@ -109,7 +109,7 @@ python3 evaluate_masac.py \
   --checkpoint runs/masac_smoke_2500/masac_step_2500.pt \
   --episodes 10 \
   --seed-start 200001 \
-  --output runs/masac_eval_2500/deterministic_10.json
+  --output runs/masac_eval_2500/deterministic_10/summary.json
 
 # 随机采样策略（探索行为诊断，不与确定性评估混为一谈）
 python3 evaluate_masac.py \
@@ -117,10 +117,35 @@ python3 evaluate_masac.py \
   --episodes 10 \
   --seed-start 200001 \
   --stochastic \
-  --output runs/masac_eval_2500/stochastic_10.json
+  --output runs/masac_eval_2500/stochastic_10/summary.json
 ```
 
-评估器加载已冻结的 Actor，不更新参数。随机评估对每个 episode 设置 PyTorch / NumPy 种子。JSON 包含各 Ego 的事件分布、分别的 Arrived 成功率及同一回合两车同时 Arrived 的联合成功率。**两车联合成功率不是两个单车成功率的乘积。**
+评估器加载已冻结的 Actor，不更新参数。默认生成 `runs/masac_eval/summary.json` 和同目录 `episodes.csv`；自定义 `--output` 保留 JSON 文件名，CSV 固定为同目录 `episodes.csv`。CSV 每个 seed 一行，以 `o3_`、`e74_`、`joint_` 区分。JSON 保留旧字段，并增加 `per_agent`、`joint`、统计版本和参考提交。旧 `success_rates` / `joint_success_rate` 使用 [0,1]；新增分组中的率使用百分数。
+
+指标标准 `dual-ego-v1` 的统计参考固定为 `913a73fef22be64ca1ac0ade5426874374b566cd`，通过 `git show` 核实实现，不能用工作树后续版本替代。定义如下：
+
+| 指标 | 采集与汇总 | 与旧版关系 |
+| --- | --- | --- |
+| 速度 m/s | 有效在路步前 TraCI 实测值；回合内均值，再对有效回合等权 | 与旧评估器采样、权重一致；双车各自从插入后开始 |
+| Jerk m/s³ | 实测步后/步前加速度差除以实际时间差，取绝对值；排除每车首个控制转换和终止转换 | 与旧评估器一致；旧 recorder 使用固定 dt，只有 dt=0.1s 时数值一致 |
+| 急刹 | 有效步后实际加速度 ≤ −4.5 m/s²，包含仍在路上的终止步；报告步数、发生回合数、回合率 | 阈值和终止步规则与旧 merging 一致 |
+| SUMO emergency stopping | 原始 SUMO 事件，报告步数和发生回合率 | 与旧事件统计一致；不等同于急刹 |
+| Teleport | 累计 starting 或 ending 事件，即使碰撞为最终原因也保留 | 与旧累计规则一致 |
+| 成功 / raw arrival | 成功为 Arrived 且从未 Teleport；raw arrival 只判断 Arrived | 成功公式与旧评估器一致；旧 recorder 的 success 仅判断 Arrived，非严格一致 |
+
+上述一致指同一有效输入上的统计规则；双 Ego 的插入时刻、路径和现有终止实现不同，不代表跨场景的成功事件或性能可直接等同。环境终止规则不因指标适配改变。
+
+速度、Jerk、急刹分别记录 `speed_samples`、`jerk_samples`、`hard_braking_samples`；事件记录 `event_samples`，不得共用分母。连续量无有效样本时 JSON 为 `null`、CSV 为空；汇总另记各自有效回合数。急刹等回合率以完整回合数为分母，不以速度/Jerk 样本数为分母。
+
+联合成功要求同回合两车均成功，联合 raw arrival 要求两车均 Arrived；联合碰撞、Timeout、Missed Exit、Teleport、急刹及 emergency stopping 回合率表示任一车发生，步数和样本数相加。联合速度/Jerk 先对同回合有效车辆等权，再跨有效回合等权；CSV 保留各回合有效车辆数。这些联合指标是新增口径，无旧单车严格对应项。**联合成功率不是两个单车成功率的乘积。**
+
+`global_steps` 是评估循环中 SUMO 共享推进次数（不含 reset 的插入预热）；`agent_steps_sum` 是两车实际控制步数之和（与环境 `active_steps` 一致，不含步前 Missed Exit 已终止的车）。兼容字段 `steps` 等于 `global_steps`，不能将控制步数之和当作仿真推进次数。
+
+随机模式每回合固定 Python、NumPy、PyTorch、SUMO 和 delay buffer 种子。Actor 保持 O3→E74 的固定采样顺序，包括 inactive Actor 采样后掩码；诊断只读且不消耗随机数。确定性和随机模式分别汇报，不混合。复现保证限于相同模型、软件与硬件环境。
+
+缺失/空终止原因、Unknown/UnknownRemoval、环境异常和步数上限导致的未完成评估直接报错，不计完整回合，也不输出本次最终文件。`Other` 仅用于环境正常返回的其他非空合法终止事件，原始原因同时保留。
+
+验证：`.venv/bin/python -m pytest tests/test_evaluation_metrics.py -q` 包括固定提交函数对照、独立掩码/分母、真实 SUMO 诊断开关前后确定性行为和随机状态对照、随机重复性、完整输出重算与中断拒绝。该验证属于小规模本地功能验证，不是正式远程性能评估。
 
 ## 7. 当前验证记录（非训练性能结论）
 
@@ -159,8 +184,7 @@ python3 -m pytest tests/test_full_episode_replay.py -s -v
 2. 训练入口尚无断点恢复、周期 checkpoint、W&B、规范化实验 manifest 与多种子自动评估。
 3. 当前连续横向 Actor / 连续 Q 输入与 SUMO 离散换道执行之间存在潜在不匹配，需要后续实验评估。
 4. `laneChangeMode=0` 不对请求换道提供常规安全保护；高碰撞率是必须测量的任务结果，不代表策略已安全。
-5. **发布前应同步修复** `sumo_new/Antwerp.sumocfg` 的旧路线名，以及 `scripts/build_dual_ego_routes.py` 无法重建当前 E74_2 路线的问题。不要把 `conf/` 的空配置文件描述为已启用训练配置。
-6. 现有历史 E76→D3 单 Ego SAC / 奖励消融代码保留用于研究追溯及后续对照，但不作为当前双 Ego CTDE-MASAC 的运行说明。
+5. 现有历史 E76→D3 单 Ego SAC / 奖励消融代码保留用于研究追溯及后续对照，但不作为当前双 Ego CTDE-MASAC 的运行说明。
 
 ## 10. 版本固定建议
 

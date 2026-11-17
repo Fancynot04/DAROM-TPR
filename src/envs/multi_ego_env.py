@@ -20,13 +20,14 @@ class MultiEgoEnv:
     AGENTS = ("ego_o3", "ego_e74")
     OBS_SHAPE = (31, 3)
 
-    def __init__(self, scenario="easy", speed_mode=96):
+    def __init__(self, scenario="easy", speed_mode=96, collect_metrics=False):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
             raise ValueError(
                 "Only Easy dual-Ego route is available"
             )
 
+        self.collect_metrics = collect_metrics
         self.scenario = scenario
         self.speed_mode = speed_mode
 
@@ -344,6 +345,16 @@ class MultiEgoEnv:
 
         pre_terminated = set()
 
+        metric_pre = {}
+        if self.collect_metrics:
+            for ego_id in self.AGENTS:
+                if ego_id in active_ids:
+                    metric_pre[ego_id] = {
+                        "speed": float(conn.vehicle.getSpeed(ego_id)),
+                        "acceleration": float(conn.vehicle.getAcceleration(ego_id)),
+                        "time": float(sim.getTime()),
+                    }
+
         # 1. 每辆车独立进行 Missed Exit 预判
         for ego_id in active_ids:
             controller = self.controllers[ego_id]
@@ -402,6 +413,29 @@ class MultiEgoEnv:
         arrivals = set(
             sim.getArrivedIDList()
         )
+
+        metric_steps = {}
+        if self.collect_metrics:
+            present = set(conn.vehicle.getIDList())
+            started = set(sim.getStartingTeleportIDList())
+            ended = set(sim.getEndingTeleportIDList())
+            emergency = set(sim.getEmergencyStoppingVehiclesIDList())
+            for ego_id in self.AGENTS:
+                if self.terminations[ego_id] and ego_id not in pre_terminated:
+                    continue
+                on_road = (ego_id in present
+                           and (ego_id not in started or ego_id in ended))
+                metric_steps[ego_id] = {
+                    "pre": metric_pre.get(ego_id),
+                    "post_acceleration": (float(conn.vehicle.getAcceleration(ego_id))
+                                          if on_road else None),
+                    "post_time": float(sim.getTime()),
+                    "on_road": on_road,
+                    "teleport_started": ego_id in started,
+                    "teleport_ended": ego_id in ended,
+                    "emergency_stopping": ego_id in emergency,
+                    "agent_step": ego_id in acting_ids,
+                }
 
         # 5. 更新每辆车的状态
         self._sync_agents()
@@ -482,6 +516,8 @@ class MultiEgoEnv:
         observations, infos = self._build_output()
 
         for ego_id in self.AGENTS:
+            if self.collect_metrics:
+                infos[ego_id]["evaluation_metrics"] = metric_steps.get(ego_id)
             infos[ego_id]["pre_step_terminal"] = (
                 ego_id in pre_terminated
             )
