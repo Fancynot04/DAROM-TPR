@@ -35,34 +35,45 @@ class MultiEgoActionHistory:
 
         history[1:] = history[:-1].copy()
         history[0] = action
-
+    
     def encode(self, ego_id, observation, delay=0):
-        """拼接基础观测、掩码动作历史和延迟。"""
-        obs = np.asarray(observation, dtype=np.float32)
+        """生成 DAROM 134 维延迟策略输入。"""
+
+        if ego_id not in self.histories:
+            raise KeyError(ego_id)
+
+        obs = np.asarray(
+            observation, dtype=np.float32
+        )
 
         if obs.shape != (31, 3):
             raise ValueError("Expected observation (31, 3)")
 
-        if not isinstance(delay, (int, np.integer)):
-            raise ValueError("Delay must be an integer")
-
-        if not 0 <= delay <= self.hist_len:
-            raise ValueError("Invalid delay")
-
         if not np.isfinite(obs).all():
             raise ValueError("Non-finite observation")
 
+        # 实际观测年龄允许超过动作历史长度
+        if (
+            isinstance(delay, (bool, np.bool_))
+            or not isinstance(delay, (int, np.integer))
+            or delay < 0
+        ):
+            raise ValueError("Invalid observation age")
+
+        age = int(delay)
+
+        # 新动作在前，保留最近 min(age, 20) 个动作
         history = self.histories[ego_id].copy()
 
-        # 与原 DAROM DelayWrapper 的掩码规则一致：
-        # 仅保留最近 delay 个动作
-        history[delay:] = 0.0
+        retained = min(age, self.hist_len)
+        history[retained:] = 0.0
 
-        result = np.concatenate([
+        encoded = np.concatenate([
             obs.reshape(-1),
             history.reshape(-1),
-            np.array([delay], dtype=np.float32),
+            np.array([age], dtype=np.float32),
         ])
 
-        assert result.shape == (134,)
-        return result
+        assert encoded.shape == (134,)
+
+        return encoded

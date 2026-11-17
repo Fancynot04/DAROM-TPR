@@ -74,3 +74,33 @@ def test_independent_action_histories():
         np.all(buffer == 0.0)
         for buffer in history.histories.values()
     )
+    
+
+def test_age_exceeds_action_history():
+    history = MultiEgoActionHistory(
+        ("ego_o3", "ego_e74"),
+        hist_len=20,
+    )
+
+    for i in range(20):
+        history.record(
+            "ego_o3",
+            [0.1 * (i + 1), 0.0],
+        )
+
+    obs = np.zeros((31, 3), dtype=np.float32)
+
+    encoded = history.encode(
+        "ego_o3",
+        obs,
+        delay=25,
+    )
+
+    assert encoded.shape == (134,)
+    assert encoded[-1] == 25
+
+    # 超过 20 步时，仍保留全部可用动作历史
+    np.testing.assert_array_equal(
+        encoded[93:133].reshape(20, 2),
+        history.histories["ego_o3"],
+    )

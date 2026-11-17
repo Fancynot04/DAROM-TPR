@@ -162,3 +162,30 @@ def test_two_ego_independent():
         all(packet is None for packet in queue)
         for queue in buffer.queues.values()
     )
+
+
+def test_observation_age_can_exceed_max_delay():
+    buffer = MultiEgoDelayBuffer(
+        ("ego_o3",),
+        max_delay=20,
+        seed=42,
+    )
+
+    obs = make_obs(100.0, 10.0)
+    buffer.activate("ego_o3", obs)
+
+    # 模拟已经连续 20 步没有接受更新的数据包
+    buffer.ages["ego_o3"] = 20
+
+    result = buffer.update(
+        "ego_o3",
+        make_obs(101.0, 11.0),
+        delay=20,
+    )
+
+    assert result.age == 21
+    assert result.sampled_delay == 20
+    assert not result.received_packet
+
+    # Ego 自身状态仍然实时更新
+    assert result.observation[0, 0] == 101.0

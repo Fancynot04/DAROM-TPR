@@ -86,4 +86,5 @@ tripinfo.xml
 E1_DS*_L*.xml
 
 !problem_exists.md
-
+!evaluate_masac.py
+!train_masac.py

@@ -193,17 +193,7 @@ class MultiEgoEnv:
                         observations[ego_id],
                     )
 
-                # 当前动作历史最多覆盖 20 步
-                # 不允许把超过 20 的真实年龄静默截断
-                if (
-                    delayed.age
-                    > self.action_history.hist_len
-                ):
-                    raise RuntimeError(
-                        f"{ego_id}: observation age "
-                        f"{delayed.age} exceeds "
-                        "action history length"
-                    )
+                
 
                 # 93 维延迟观测
                 # + 40 维掩码动作历史
