@@ -281,15 +281,15 @@ def test_actor_gradient_isolation():
 
     result = trainer.update_actors(batch)
 
-    assert result["ego_o3_actor_updates"] == 1
-    assert result["ego_e74_actor_updates"] == 0
+    assert result["ego_1_actor_updates"] == 1
+    assert result["ego_2_actor_updates"] == 0
 
     # Ego M 的网络应该更新
     assert any(
         not torch.equal(p0, p1)
         for p0, p1 in zip(
-            actor_before["ego_o3"],
-            actors.actors["ego_o3"].parameters(),
+            actor_before["ego_1"],
+            actors.actors["ego_1"].parameters(),
         )
     )
 
@@ -297,8 +297,8 @@ def test_actor_gradient_isolation():
     assert all(
         torch.equal(p0, p1)
         for p0, p1 in zip(
-            actor_before["ego_e74"],
-            actors.actors["ego_e74"].parameters(),
+            actor_before["ego_2"],
+            actors.actors["ego_2"].parameters(),
         )
     )
 
@@ -357,8 +357,8 @@ def test_alpha_update_direction():
         after[1], before[1], rtol=0, atol=0
     )
 
-    assert result["ego_o3_alpha_updates"] == 1
-    assert result["ego_e74_alpha_updates"] == 0
+    assert result["ego_1_alpha_updates"] == 1
+    assert result["ego_2_alpha_updates"] == 0
 
     # 独立验证熵偏高时 alpha 减小
     trainer2 = MASACTrainer(
@@ -404,8 +404,8 @@ def test_alpha_update_no_actor_change():
 
     result = trainer.update_alpha(batch)
 
-    assert result["ego_o3_alpha_updates"] == 1
-    assert result["ego_e74_alpha_updates"] == 1
+    assert result["ego_1_alpha_updates"] == 1
+    assert result["ego_2_alpha_updates"] == 1
 
     assert all(
         torch.equal(a, b)

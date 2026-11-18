@@ -52,7 +52,7 @@ def test_real_sumo_to_joint_replay():
     )
 
     buffer = JointReplayBuffer(
-        capacity=100,
+        capacity=300,
         seed=42,
     )
 
@@ -63,7 +63,7 @@ def test_real_sumo_to_joint_replay():
 
         mask_history = []
 
-        for _ in range(30):
+        for _ in range(200):
             # 1. SUMO 推进前：保存当前状态
             policy_obs, critic_obs, active_mask = (
                 snapshot(env, observations)
@@ -157,7 +157,7 @@ def test_real_sumo_to_joint_replay():
             observations = next_observations
 
         # 30 次 SUMO 全局步 = 30 条联合经验
-        assert len(buffer) == 30
+        assert len(buffer) == 200
 
         # 应该覆盖单车活跃与双车活跃
         assert any(

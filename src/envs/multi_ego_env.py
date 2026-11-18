@@ -356,7 +356,7 @@ class MultiEgoEnv:
                         "road": conn.vehicle.getRoadID(ego_id),
                         "lane": int(conn.vehicle.getLaneIndex(ego_id)),
                         "speed_mode": int(conn.vehicle.getSpeedMode(ego_id)),
-                        "request_direction": parse_action(actions[ego_id])[1],
+                        "request_direction": 0,
                     }
 
         # 1. 每辆车独立进行 Missed Exit 预判
@@ -383,9 +383,17 @@ class MultiEgoEnv:
 
         for ego_id in self.AGENTS:
             if ego_id in acting_ids:
-                self.controllers[ego_id].apply_action(
+                control = self.controllers[ego_id].apply_action(
                     actions[ego_id]
                 )
+
+                # 仅统计真正向 SUMO 提交的换道指令
+                if self.collect_metrics and ego_id in metric_pre:
+                    metric_pre[ego_id]["request_direction"] = (
+                        control.lane_direction
+                        if control.target_lane is not None
+                        else 0
+                    )
 
                 self.action_history.record(
                     ego_id,

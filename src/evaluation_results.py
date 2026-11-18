@@ -66,7 +66,7 @@ def validate_results(path):
     for key in ('global_steps', 'agent_steps_sum'):
         if key in summary and sum(r[key] for r in records) != summary[key]:
             raise ValueError('Global/agent step aggregate mismatch')
-    for ego in ('ego_o3', 'ego_e74'):
+    for ego in JointReplayBuffer.AGENT_IDS:
         if aggregate([r['per_agent'][ego] for r in records]) != summary['per_agent'][ego]:
             raise ValueError('Per-agent aggregate mismatch')
     if aggregate([r['joint'] for r in records]) != summary['joint']:

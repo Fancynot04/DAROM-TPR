@@ -16,7 +16,7 @@ def test_multi_ego_shared_clock():
         observations, infos = env.reset(seed=42)
 
         assert set(observations) == {
-            "ego_o3", "ego_e74"
+            "ego_1", "ego_2"
         }
 
         print("\n===== After reset =====")
@@ -33,7 +33,7 @@ def test_multi_ego_shared_clock():
         )
 
         # 测试前 30 个共享仿真步
-        for _ in range(30):
+        for _ in range(200):
             active_ids = [
                 ego_id
                 for ego_id in env.AGENTS
@@ -86,7 +86,7 @@ def test_multi_ego_shared_clock():
             for ego in env.egos.values()
         )
 
-        assert env.step_count == 30
+        assert env.step_count == 200
 
         print("\n===== After 30 steps =====")
         print("Simulation time:", previous_time)
@@ -116,11 +116,11 @@ def test_one_ego_timeout_other_continues():
     try:
         env.reset(seed=42)
 
-        assert env.egos["ego_o3"].state.status == "active"
-        assert env.egos["ego_e74"].state.status == "waiting"
+        assert env.egos["ego_1"].state.status == "active"
+        assert env.egos["ego_2"].state.status == "waiting"
 
         # 人为设置到最后一个控制步
-        env.active_steps["ego_o3"] = 3999
+        env.active_steps["ego_1"] = 3999
 
         (
             obs,
@@ -129,25 +129,25 @@ def test_one_ego_timeout_other_continues():
             truncated,
             infos,
         ) = env.step({
-            "ego_o3": [0.0, 0.0],
+            "ego_1": [0.0, 0.0],
         })
 
         # Ego A 独立超时
-        assert terminated["ego_o3"]
-        assert not terminated["ego_e74"]
+        assert terminated["ego_1"]
+        assert not terminated["ego_2"]
 
-        assert rewards["ego_o3"] == -100.0
-        assert rewards["ego_e74"] == 0.0
+        assert rewards["ego_1"] == -100.0
+        assert rewards["ego_2"] == 0.0
 
-        assert infos["ego_o3"]["terminal_reason"] == "Timeout"
-        assert infos["ego_o3"]["active_steps"] == 4000
+        assert infos["ego_1"]["terminal_reason"] == "Timeout"
+        assert infos["ego_1"]["active_steps"] == 4000
 
-        assert "ego_o3" not in (
+        assert "ego_1" not in (
             env.world.conn.vehicle.getIDList()
         )
 
         # Ego B 仍然处于 Waiting，可以继续推进世界
-        for _ in range(30):
+        for _ in range(200):
             active_ids = [
                 ego_id for ego_id in env.AGENTS
                 if env.egos[ego_id].state.status == "active"
@@ -164,28 +164,28 @@ def test_one_ego_timeout_other_continues():
             )
 
             # Ego A 的终止奖励只结算一次
-            assert terminated["ego_o3"]
-            assert rewards["ego_o3"] == 0.0
+            assert terminated["ego_1"]
+            assert rewards["ego_1"] == 0.0
 
-            if env.egos["ego_e74"].state.status == "active":
+            if env.egos["ego_2"].state.status == "active":
                 break
 
-        assert env.egos["ego_e74"].state.status == "active"
+        assert env.egos["ego_2"].state.status == "active"
 
         # Ego B 可以独立执行动作
         obs, rewards, terminated, _, infos = env.step({
-            "ego_e74": [0.0, 0.0],
+            "ego_2": [0.0, 0.0],
         })
 
-        assert terminated["ego_o3"]
-        assert not terminated["ego_e74"]
+        assert terminated["ego_1"]
+        assert not terminated["ego_2"]
 
-        assert rewards["ego_o3"] == 0.0
-        assert rewards["ego_e74"] == 0.0
+        assert rewards["ego_1"] == 0.0
+        assert rewards["ego_2"] == 0.0
 
         print("\nIndependent Ego termination PASS")
-        print("Ego A:", infos["ego_o3"]["terminal_reason"])
-        print("Ego B:", infos["ego_e74"]["status"])
+        print("Ego A:", infos["ego_1"]["terminal_reason"])
+        print("Ego B:", infos["ego_2"]["status"])
 
     finally:
         env.close()
@@ -204,47 +204,47 @@ def test_action_history_integration():
         env.reset(seed=42)
 
         # 初始仅 O3 Ego 出发
-        assert env.egos["ego_o3"].state.status == "active"
-        assert env.egos["ego_e74"].state.status == "waiting"
+        assert env.egos["ego_1"].state.status == "active"
+        assert env.egos["ego_2"].state.status == "waiting"
 
         env.step({
-            "ego_o3": [1.0, 0.0],
+            "ego_1": [1.0, 0.0],
         })
 
         np.testing.assert_array_equal(
-            env.action_history.histories["ego_o3"][0],
+            env.action_history.histories["ego_1"][0],
             [1.0, 0.0],
         )
 
         # 等待中的 Ego 不应收到动作
         assert np.all(
-            env.action_history.histories["ego_e74"] == 0.0
+            env.action_history.histories["ego_2"] == 0.0
         )
 
         # 等待第二辆 Ego 实际出发
-        while env.egos["ego_e74"].state.status == "waiting":
+        while env.egos["ego_2"].state.status == "waiting":
             env.step({
-                "ego_o3": [0.0, 0.0],
+                "ego_1": [0.0, 0.0],
             })
 
         # 两辆车提交不同动作
         env.step({
-            "ego_o3": [2.0, 0.0],
-            "ego_e74": [-1.0, 0.0],
+            "ego_1": [2.0, 0.0],
+            "ego_2": [-1.0, 0.0],
         })
 
         np.testing.assert_array_equal(
-            env.action_history.histories["ego_o3"][0],
+            env.action_history.histories["ego_1"][0],
             [2.0, 0.0],
         )
 
         np.testing.assert_array_equal(
-            env.action_history.histories["ego_e74"][0],
+            env.action_history.histories["ego_2"][0],
             [-1.0, 0.0],
         )
 
-        assert env.action_history.histories["ego_o3"].shape == (20, 2)
-        assert env.action_history.histories["ego_e74"].shape == (20, 2)
+        assert env.action_history.histories["ego_1"].shape == (20, 2)
+        assert env.action_history.histories["ego_2"].shape == (20, 2)
 
         # 重新开始回合，历史必须清零
         env.reset(seed=42)
@@ -270,17 +270,17 @@ def test_delayed_policy_observation_integration():
         observations, infos = env.reset(seed=42)
 
         # 第一辆车已出发，第二辆仍在等待
-        assert infos["ego_o3"]["observation_ready"]
-        assert not infos["ego_e74"]["observation_ready"]
+        assert infos["ego_1"]["observation_ready"]
+        assert not infos["ego_2"]["observation_ready"]
 
-        assert env.policy_observations["ego_o3"].shape == (134,)
-        assert env.policy_observations["ego_e74"].shape == (134,)
+        assert env.policy_observations["ego_1"].shape == (134,)
+        assert env.policy_observations["ego_2"].shape == (134,)
 
         assert np.all(
-            env.policy_observations["ego_e74"] == 0
+            env.policy_observations["ego_2"] == 0
         )
 
-        for _ in range(30):
+        for _ in range(200):
             active_ids = [
                 ego_id
                 for ego_id in env.AGENTS
@@ -340,26 +340,26 @@ def test_delayed_policy_observation_integration():
 
         # 两辆车都已经初始化自己的延迟缓存
         assert env.delay_buffer.active == {
-            "ego_o3",
-            "ego_e74",
+            "ego_1",
+            "ego_2",
         }
 
         # 它们的队列和随机数生成器互相独立
         assert (
-            env.delay_buffer.queues["ego_o3"]
-            is not env.delay_buffer.queues["ego_e74"]
+            env.delay_buffer.queues["ego_1"]
+            is not env.delay_buffer.queues["ego_2"]
         )
 
         assert (
-            env.delay_buffer.rng["ego_o3"]
-            is not env.delay_buffer.rng["ego_e74"]
+            env.delay_buffer.rng["ego_1"]
+            is not env.delay_buffer.rng["ego_2"]
         )
 
         # 重新 reset 后，等待中的 Ego 策略输入为零
         env.reset(seed=42)
 
         assert np.all(
-            env.policy_observations["ego_e74"] == 0
+            env.policy_observations["ego_2"] == 0
         )
 
         print("\nDelayed policy observation integration PASS")

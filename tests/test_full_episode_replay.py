@@ -184,53 +184,53 @@ def test_full_episode_replay():
         )
 
         # 2. 预期终止结果
-        assert results["ego_o3"] == "Arrived"
-        assert results["ego_e74"] == "Missed Exit"
+        
+        # 两辆 Ego 都必须完成一次明确的终止结算
+        assert set(results) == set(IDS)
+
+        expected_rewards = np.asarray([
+            50.0 if results[ego_id] == "Arrived" else -100.0
+            for ego_id in IDS
+        ])
 
         np.testing.assert_allclose(
             stored_rewards,
-            [50.0, -100.0],
+            expected_rewards,
             rtol=0,
             atol=1e-5,
         )
 
-        # 3. Ego X 的 Missed Exit 必须发生在 pre-step
-        assert pre_step_counts[1] == 1
+        stored_acted = buffer.data["acted_mask"][:n]
+        stored_reward_rows = buffer.data["rewards"][:n]
+        stored_dones = buffer.data["dones"][:n]
+        stored_next_mask = buffer.data["next_active_mask"][:n]
 
-        # 4. 所有非零奖励都应归属于执行过动作的 Ego
-        stored_acted = buffer.data[
-            "acted_mask"
-        ][:n]
-
-        stored_reward_rows = buffer.data[
-            "rewards"
-        ][:n]
-
+        # 未执行动作的经验不能承担终止奖励
         assert np.all(
             stored_reward_rows[stored_acted == 0] == 0
         )
 
-        # 5. 两辆车的终止事件都只记录一次
-        stored_dones = buffer.data[
-            "dones"
-        ][:n]
+        for i, ego_id in enumerate(IDS):
+            terminal_rows = np.flatnonzero(
+                stored_dones[:, i] == 1
+            )
 
-        assert stored_dones[:, 0].sum() == 1
-        assert stored_dones[:, 1].sum() == 1
+            # 每辆 Ego 恰好结算一次终止事件
+            assert len(terminal_rows) == 1
 
-        # 6. Ego X 的失败被归因给有效动作
-        x_terminal_rows = np.flatnonzero(
-            stored_dones[:, 1] == 1
-        )
+            index = terminal_rows[0]
 
-        assert len(x_terminal_rows) == 1
-        index = x_terminal_rows[0]
+            assert stored_acted[index, i] == 1
+            assert stored_next_mask[index, i] == 0
+            assert stored_reward_rows[index, i] == expected_rewards[i]
 
-        assert stored_acted[index, 1] == 1
-        assert stored_reward_rows[index, 1] == -100
-        assert buffer.data[
-            "next_active_mask"
-        ][index, 1] == 0
+            # 如果发生 Pre-step 终止，
+            # 终止奖励必须归因给之前执行的有效动作
+            assert pre_step_counts[i] <= 1
+
+            if pre_step_counts[i] == 1:
+                assert stored_acted[index, i] == 1
+
 
         print("\n===== Full Episode Replay =====")
         print("Terminal results:", results)

@@ -22,7 +22,7 @@ def test_multi_ego_gru_forward():
         env.reset(seed=42)
 
         # 推进 30 步，确保两个 Ego 都已出发
-        for _ in range(30):
+        for _ in range(200):
             actions = {
                 ego_id: [0.0, 0.0]
                 for ego_id in env.AGENTS

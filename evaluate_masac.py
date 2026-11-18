@@ -151,9 +151,25 @@ def evaluate(args):
                     break
 
             else:
+                details = {}
+
+                for ego_id in AGENT_IDS:
+                    state = env.egos[ego_id].state
+
+                    details[ego_id] = {
+                        "status": state.status,
+                        "depart_time": state.depart_time,
+                        "active_steps": env.active_steps[ego_id],
+                        "road_id": state.road_id,
+                        "terminated": env.terminations[ego_id],
+                        "terminal_reason": env.terminal_reasons[ego_id],
+                    }
+
                 raise RuntimeError(
-                    f"Evaluation seed {seed}: "
-                    "incomplete episode"
+                    f"Evaluation seed {seed}: incomplete episode\n"
+                    f"SUMO time: {env.world.conn.simulation.getTime():.1f}\n"
+                    f"Recorded outcomes: {outcomes}\n"
+                    f"Agent states: {details}"
                 )
 
             both_success = all(

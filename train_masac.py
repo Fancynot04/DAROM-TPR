@@ -147,7 +147,7 @@ def main(args):
         raise ValueError("Invalid interval")
 
     args.tau = getattr(args, "tau", 0.005)
-    args.checkpoint_every = getattr(args, "checkpoint_every", 500000)
+    args.checkpoint_every = getattr(args, "checkpoint_every", 100000)
     args.tensorboard = getattr(args, "tensorboard", True)
     if args.checkpoint_every <= 0:
         raise ValueError("checkpoint_every must be positive")
@@ -426,6 +426,10 @@ def main(args):
         assert update_count > 0, (
             "No gradient update was performed"
         )
+        
+        assert tuple(env.AGENTS) == tuple(AGENT_IDS)
+        assert tuple(actors.ego_ids) == tuple(AGENT_IDS)
+        assert critic.num_agents == len(AGENT_IDS)
 
     finally:
         env.close()
@@ -470,7 +474,7 @@ def build_parser():
         default="runs/masac",
     )
 
-    parser.add_argument("--checkpoint-every", type=int, default=200000)
+    parser.add_argument("--checkpoint-every", type=int, default=100000)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--tensorboard", action=argparse.BooleanOptionalAction, default=True)
     return parser

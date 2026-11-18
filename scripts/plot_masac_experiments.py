@@ -14,6 +14,10 @@ import pandas as pd
 from src.evaluation_results import validate_results
 from src.experiment_tracking import atomic_json
 
+from src.agents.replay_buffer import JointReplayBuffer
+
+AGENT_IDS = JointReplayBuffer.AGENT_IDS
+
 # Figures use long-form source data, with each sampled global_step preserved.
 PANELS = {
     '01_success': ['success_rate'],
@@ -61,11 +65,11 @@ def load(experiments):
                 if row['event'] == 'update':
                     for metric in ('critic_loss', 'mean_q', 'mean_target'):
                         add(algorithm, seed, step, 'training_update', 'joint', metric, row.get(metric))
-                    for entity in ('ego_o3', 'ego_e74'):
+                    for entity in AGENT_IDS:
                         for metric in ('actor_loss', 'alpha'):
                             add(algorithm, seed, step, 'training_update', entity, metric, row.get(entity + '_' + metric))
                 if row['event'] == 'episode':
-                    for entity in ('ego_o3', 'ego_e74', 'joint'):
+                    for entity in (*AGENT_IDS, 'joint'):
                         for metric in ('success_rate', 'collision_rate', 'missed_exit_rate'):
                             add(algorithm, seed, step, 'exploration_training_rolling100', entity, metric,
                                 row.get(entity + '_' + metric), row['rolling_episodes'])

@@ -10,6 +10,9 @@ from src.experiment_tracking import sha256, atomic_json, git_metadata, evaluatio
 from src.evaluation_results import validate_results, EVALUATION_PROTOCOL_VERSION
 from src.evaluation_metrics import REFERENCE_COMMIT
 
+from src.agents.replay_buffer import JointReplayBuffer
+
+AGENT_IDS = JointReplayBuffer.AGENT_IDS
 
 def discover(directory):
     import torch
@@ -39,10 +42,22 @@ def discover(directory):
 def expected_environment(max_steps):
     root = Path(__file__).resolve().parents[1]
     from sumolib import checkBinary
-    return dict(sumo_binary_sha256=sha256(checkBinary('sumo')), scenario='easy', agent_ids=['ego_o3', 'ego_e74'], requested_speed_mode=96,
-                step_length_s=0.1, max_steps=max_steps, stopped_speed_threshold_mps=0.5,
-                net_sha256=sha256(root / 'sumo_new/Antwerp.net.xml'),
-                route_sha256=sha256(root / 'sumo_new/Antwerp_easy_o3_d3_dual.rou.xml'))
+
+    return dict(
+        sumo_binary_sha256=sha256(checkBinary("sumo")),
+        scenario="easy",
+        agent_ids=list(AGENT_IDS),
+        requested_speed_mode=96,
+        step_length_s=0.1,
+        max_steps=max_steps,
+        stopped_speed_threshold_mps=0.5,
+        net_sha256=sha256(
+            root / "sumo_new/Antwerp.net.xml"
+        ),
+        route_sha256=sha256(
+            root / "sumo_new/Antwerp_easy_o3_d3_homogeneous_dual.rou.xml"
+        ),
+    )
 
 
 def compatible(report, checkpoint, max_steps):
@@ -52,13 +67,13 @@ def compatible(report, checkpoint, max_steps):
             and report['checkpoint_sha256'] == checkpoint['sha256']
             and report['training_step'] == checkpoint['global_step']
             and report['reference_commit'] == REFERENCE_COMMIT
-            and report['metric_version'] == 'dual-ego-v1'
+            and report['metric_version'] == 'homogeneous-dual-ego-v1'
             and report['evaluation_protocol_version'] == EVALUATION_PROTOCOL_VERSION
             and report['git']['commit'] == git_metadata()['commit']
             and report.get('evaluation_code_sha256') == evaluation_fingerprint()
             and report.get('runtime_versions') == runtime_versions()
             and all(report['environment'].get(k) == v for k, v in expected_environment(max_steps).items())
-            and all(report['environment']['actual_speed_modes'][ego] for ego in ('ego_o3', 'ego_e74')))
+            and all(report['environment']['actual_speed_modes'][ego] for ego in AGENT_IDS))
 
 
 def run(directory, rerun=False, max_steps=4500, evaluator=None):
