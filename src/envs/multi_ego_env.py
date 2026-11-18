@@ -29,6 +29,7 @@ class MultiEgoEnv:
         collect_metrics=False,
         usp_enabled=False,
         usp_penalty=0.02,
+        gui=False,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -39,6 +40,7 @@ class MultiEgoEnv:
         self.collect_metrics = collect_metrics
         self.scenario = scenario
         self.speed_mode = speed_mode
+        self.gui = bool(gui)
 
         self.world = None
         self.egos = {}
@@ -262,6 +264,7 @@ class MultiEgoEnv:
             scenario=self.scenario,
             seed=seed,
             route_file=route_file,
+            gui=self.gui,
         )
 
         self.egos = {

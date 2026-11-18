@@ -3,6 +3,7 @@
 
 import argparse
 import random
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -10,12 +11,17 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
+from src.visualization.gui_camera import (
+    update_gui_camera,
+)
 from src.agents.masac import MultiAgentGaussianActor
 from train_masac import snapshot, AGENT_IDS
 from src.evaluation_metrics import AgentMetrics, aggregate, joint_record, REFERENCE_COMMIT, wilson
 from src.experiment_tracking import sha256, git_metadata, evaluation_fingerprint, runtime_versions
 from src.evaluation_results import write_results, EVALUATION_PROTOCOL_VERSION
 from sumolib import checkBinary
+
+
 
 
 @torch.inference_mode()
@@ -42,8 +48,10 @@ def evaluate(args):
 
     reward_config = checkpoint.get("config", {})
 
+    gui_enabled = bool(getattr(args, "gui", False))
+
     env = MultiEgoEnv(
-        scenario="easy",
+        scenario=getattr(args, "scenario", "easy"),
         speed_mode=96,
         collect_metrics=True,
         usp_enabled=bool(
@@ -52,6 +60,7 @@ def evaluate(args):
         usp_penalty=float(
             reward_config.get("usp_penalty", 0.02)
         ),
+        gui=gui_enabled,
     )
 
     records = []
@@ -65,6 +74,14 @@ def evaluate(args):
             np.random.seed(seed)
             observations, _ = env.reset(seed=seed)
             sumo_version = list(env.world.conn.getVersion())
+            
+            # GUI：定位到已经出发的 Ego
+            if gui_enabled:
+                update_gui_camera(
+                    env.world.conn,
+                    focus=getattr(args, "gui_focus", "all"),
+                    margin=getattr(args, "gui_margin", 60.0),
+                )
 
             outcomes = {}
             metrics = {ego_id: AgentMetrics() for ego_id in AGENT_IDS}
@@ -140,6 +157,30 @@ def evaluate(args):
                     truncations,
                     infos,
                 ) = env.step(actions)
+                
+                
+                # GUI 镜头更新与播放速度控制
+                if gui_enabled:
+
+                    # 每 5 个 SUMO 步更新一次镜头
+                    if step % 5 == 0:
+                        update_gui_camera(
+                            env.world.conn,
+                            focus=getattr(
+                                args, "gui_focus", "all"
+                            ),
+                            margin=getattr(
+                                args, "gui_margin", 60.0
+                            ),
+                        )
+
+                    # 单位：毫秒
+                    delay_ms = getattr(
+                        args, "gui_delay", 50
+                    )
+
+                    if delay_ms > 0:
+                        time.sleep(delay_ms / 1000.0)
 
                 for ego_id in AGENT_IDS:
                     if ego_id not in outcomes:
@@ -345,6 +386,40 @@ if __name__ == "__main__":
         action="store_true",
         help="Sample stochastic Actor actions for diagnosis",
     )
+    
+    # 场景配置
+    parser.add_argument(
+        "--scenario",
+        choices=["easy"],
+        default="easy",
+    )
+
+    # 是否启用 GUI
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+    )
+
+    # 镜头模式
+    parser.add_argument(
+        "--gui-focus",
+        choices=["all", "ego_1", "ego_2"],
+        default="all",
+    )
+
+    # Ego 周围的显示范围，单位米
+    parser.add_argument(
+        "--gui-margin",
+        type=float,
+        default=60.0,
+    )
+
+    # 每个控制步的播放延迟，单位毫秒
+    parser.add_argument(
+        "--gui-delay",
+        type=int,
+        default=50,
+    )
 
     parser.add_argument("--trace", action="store_true", help="Print first episode trace")
     args = parser.parse_args()
@@ -353,5 +428,9 @@ if __name__ == "__main__":
         parser.error("--max-steps must be positive")
     if args.episodes <= 0:
         parser.error("--episodes must be positive")
+    if args.gui_margin <= 0:
+        parser.error("--gui-margin must be positive")
+    if args.gui_delay < 0:
+        parser.error("--gui-delay must be >= 0")
 
     evaluate(args)

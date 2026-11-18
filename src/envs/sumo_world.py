@@ -60,6 +60,10 @@ class SumoWorld:
             "-Q",
         ]
 
+        # GUI 启动后自动运行，无需手动点击播放按钮
+        if self.gui:
+            command.append("--start")
+
         traci.start(command, label=self.label)
         self.conn = traci.getConnection(self.label)
 
