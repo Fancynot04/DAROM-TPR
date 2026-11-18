@@ -229,6 +229,14 @@ def main(args):
         episode_start = 0
         episode_metrics = {key: AgentMetrics() for key in AGENT_IDS}
 
+        episode_usp_steps = {
+            ego_id: 0 for ego_id in AGENT_IDS
+        }
+
+        episode_usp_total = {
+            ego_id: 0.0 for ego_id in AGENT_IDS
+        }
+
         for global_step in range(1, args.total_steps + 1):
 
             # A. 推进前快照
@@ -255,6 +263,17 @@ def main(args):
                 truncations,
                 infos,
             ) = env.step(action_dict)
+            
+            # 统计本步每辆 Ego 实际支付的 USP 奖励
+            for ego_id in AGENT_IDS:
+                usp_value = float(
+                    infos[ego_id].get("usp_reward", 0.0)
+                )
+
+                episode_usp_total[ego_id] += usp_value
+
+                if usp_value < 0.0:
+                    episode_usp_steps[ego_id] += 1
 
             # D. 推进后快照
             (
@@ -384,11 +403,28 @@ def main(args):
 
                 completed_episodes += 1
                 agents = {key: episode_metrics[key].finish(outcomes[key], episode_rewards[i])
-                          for i, key in enumerate(AGENT_IDS)}
+                    for i, key in enumerate(AGENT_IDS)}   
+
                 episode_values = {}
                 for key, row in agents.items():
-                    for name in ("terminal_reason", "success", "agent_steps", "mean_policy_reward_return"):
+                    # 原有训练指标
+                    for name in (
+                        "terminal_reason",
+                        "success",
+                        "agent_steps",
+                        "mean_policy_reward_return",
+                    ):
                         episode_values[key + "_" + name] = row[name]
+
+                    # 新增 USP 统计
+                    episode_values[key + "_usp_steps"] = (
+                        episode_usp_steps[key]
+                    )
+
+                    episode_values[key + "_usp_reward_total"] = (
+                        episode_usp_total[key]
+                    )        
+                    
                 log.write("episode", global_step, episode_index=completed_episodes,
                     episode_global_steps=global_step - episode_start,
                     joint_success=all(r["success"] for r in agents.values()),
@@ -416,6 +452,15 @@ def main(args):
                     episode_rewards = np.zeros(
                         len(AGENT_IDS), dtype=np.float64
                     )
+                    
+                    # 新 Episode，重置 USP 统计
+                    episode_usp_steps = {
+                        ego_id: 0 for ego_id in AGENT_IDS
+                    }
+
+                    episode_usp_total = {
+                        ego_id: 0.0 for ego_id in AGENT_IDS
+                    }
 
             if checkpoint_due(global_step, args.total_steps, args.checkpoint_every):
                 checkpoint = checkpoint_at(global_step, completed_episodes)

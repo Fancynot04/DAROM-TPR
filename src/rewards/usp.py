@@ -6,7 +6,6 @@ import math
 class USPTracker:
     STOP_SPEED = 0.5
     GRACE_SECONDS = 5.0
-    LOOKAHEAD = 80.0
     JUNCTION_MARGIN = 15.0
 
     ROAD_EDGES = frozenset({
@@ -51,9 +50,7 @@ class USPTracker:
         if remaining < self.JUNCTION_MARGIN:
             return False
 
-        leader = vehicle.getLeader(
-            ego_id, self.LOOKAHEAD
-        )
+        leader = vehicle.getLeader(ego_id)
 
         # 当前车道前方查询范围内无前车
         if leader is None or not leader[0]:
