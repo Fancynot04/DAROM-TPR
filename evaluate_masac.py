@@ -40,10 +40,18 @@ def evaluate(args):
     )
     actors.eval()
 
+    reward_config = checkpoint.get("config", {})
+
     env = MultiEgoEnv(
         scenario="easy",
         speed_mode=96,
         collect_metrics=True,
+        usp_enabled=bool(
+            reward_config.get("usp", False)
+        ),
+        usp_penalty=float(
+            reward_config.get("usp_penalty", 0.02)
+        ),
     )
 
     records = []
@@ -62,6 +70,13 @@ def evaluate(args):
             metrics = {ego_id: AgentMetrics() for ego_id in AGENT_IDS}
             agent_records = {}
             rewards_total = {
+                ego_id: 0.0 for ego_id in AGENT_IDS
+            }
+            usp_steps = {
+                ego_id: 0 for ego_id in AGENT_IDS
+            }
+
+            usp_returns = {
                 ego_id: 0.0 for ego_id in AGENT_IDS
             }
 
@@ -132,9 +147,19 @@ def evaluate(args):
                             infos[ego_id]["evaluation_metrics"],
                             terminations[ego_id] or truncations[ego_id],
                         )
+                    
                     rewards_total[ego_id] += float(
                         rewards[ego_id]
                     )
+                    
+                    usp_value = float(
+                        infos[ego_id].get("usp_reward", 0.0)
+                    )
+
+                    usp_returns[ego_id] += usp_value
+
+                    if usp_value < 0:
+                        usp_steps[ego_id] += 1
 
                     if (
                         ego_id not in outcomes
@@ -145,7 +170,17 @@ def evaluate(args):
                     ):
                         reason = infos[ego_id].get("terminal_reason")
                         agent_records[ego_id] = metrics[ego_id].finish(reason, rewards_total[ego_id])
+                        
+                        agent_records[ego_id]["usp_steps"] = (
+                            usp_steps[ego_id]
+                        )
+
+                        agent_records[ego_id]["usp_reward_total"] = (
+                            usp_returns[ego_id]
+                        )
                         outcomes[ego_id] = reason
+                    
+                    
 
                 if len(outcomes) == len(AGENT_IDS):
                     break

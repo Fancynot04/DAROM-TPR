@@ -14,13 +14,22 @@ from .single_ego_env import b0_reward
 from .action_history import MultiEgoActionHistory
 from .delay_buffer import MultiEgoDelayBuffer
 
+from src.rewards.usp import USPTracker
+
 class MultiEgoEnv:
     """双 Ego 环境的第一版交互接口。"""
 
     AGENTS = ("ego_1", "ego_2")
     OBS_SHAPE = (31, 3)
 
-    def __init__(self, scenario="easy", speed_mode=96, collect_metrics=False):
+    def __init__(
+        self,
+        scenario="easy",
+        speed_mode=96,
+        collect_metrics=False,
+        usp_enabled=False,
+        usp_penalty=0.02,
+    ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
             raise ValueError(
@@ -55,6 +64,13 @@ class MultiEgoEnv:
         )
 
         self.policy_observations = {}
+        
+        self.usp_enabled = bool(usp_enabled)
+
+        self.usp = USPTracker(
+            self.AGENTS,
+            penalty=usp_penalty,
+        )
 
     def _sync_agents(self):
         """SUMO 推进后，更新所有 Ego 的状态。"""
@@ -260,6 +276,7 @@ class MultiEgoEnv:
         }
         self.action_history.reset()
         self.delay_buffer.reset(seed=seed)
+        self.usp.reset()
         self.policy_observations = {}
         
         self.step_count = 0
@@ -380,6 +397,16 @@ class MultiEgoEnv:
 
         # 2. 仅尚未终止的 Ego 提交动作
         acting_ids = active_ids - pre_terminated
+        
+        usp_candidates = {
+            ego_id: 0.0 for ego_id in self.AGENTS
+        }
+
+        if self.usp_enabled:
+            for ego_id in acting_ids:
+                usp_candidates[ego_id] = self.usp.step(
+                    conn, ego_id
+                )
 
         for ego_id in self.AGENTS:
             if ego_id in acting_ids:
@@ -526,6 +553,19 @@ class MultiEgoEnv:
                     ego_id,
                     event,
                 )
+        applied_usp = {
+            ego_id: 0.0 for ego_id in self.AGENTS
+        }
+
+        for ego_id in acting_ids:
+            # 终止步只支付原 B0 事件奖励
+            if self.terminations[ego_id]:
+                continue
+
+            value = usp_candidates[ego_id]
+
+            rewards[ego_id] += value
+            applied_usp[ego_id] = value
 
         # 7. 生成两辆 Ego 的观测
         observations, infos = self._build_output()
@@ -538,6 +578,12 @@ class MultiEgoEnv:
                 infos[ego_id]["evaluation_metrics"] = sample
             infos[ego_id]["pre_step_terminal"] = (
                 ego_id in pre_terminated
+            )
+        
+            infos[ego_id]["usp_reward"] = applied_usp[ego_id]
+
+            infos[ego_id]["usp_triggered"] = (
+                applied_usp[ego_id] < 0.0
             )
         
         self._update_policy_observations(

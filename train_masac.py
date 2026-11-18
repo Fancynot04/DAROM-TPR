@@ -159,6 +159,11 @@ def main(args):
     output_dir.mkdir(parents=True, exist_ok=True)
     if list((output_dir / "checkpoints").glob("*.pt")):
         raise FileExistsError("Experiment directory already contains checkpoints")
+    
+    args.usp = getattr(args, "usp", False)
+    args.usp_penalty = getattr(
+        args, "usp_penalty", 0.02
+    )
 
     # 1. 创建网络及优化器
     actors = MultiAgentGaussianActor(
@@ -189,6 +194,8 @@ def main(args):
         scenario="easy",
         speed_mode=96,
         collect_metrics=True,
+        usp_enabled=args.usp,
+        usp_penalty=args.usp_penalty,
     )
 
     log = TrainingLog(output_dir / "train", args.tensorboard)
@@ -472,6 +479,18 @@ def build_parser():
     parser.add_argument(
         "--output-dir",
         default="runs/masac",
+    )
+    
+    parser.add_argument(
+        "--usp",
+        action="store_true",
+        help="Enable USP-v1 reward",
+    )
+
+    parser.add_argument(
+        "--usp-penalty",
+        type=float,
+        default=0.02,
     )
 
     parser.add_argument("--checkpoint-every", type=int, default=100000)
