@@ -498,7 +498,7 @@ def build_parser():
         "--seed", type=int, default=42
     )
     parser.add_argument(
-        "--learning-starts", type=int, default=1000
+        "--learning-starts", type=int, default=100
     )
     parser.add_argument(
         "--batch-size", type=int, default=512
@@ -513,7 +513,7 @@ def build_parser():
         "--log-every", type=int, default=40
     )
     parser.add_argument(
-        "--gamma", type=float, default=0.999
+        "--gamma", type=float, default=0.99
     )
     parser.add_argument(
         "--learning-rate", type=float, default=3e-5
@@ -538,7 +538,7 @@ def build_parser():
         default=0.02,
     )
 
-    parser.add_argument("--checkpoint-every", type=int, default=100000)
+    parser.add_argument("--checkpoint-every", type=int, default=500000)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--tensorboard", action=argparse.BooleanOptionalAction, default=True)
     return parser
