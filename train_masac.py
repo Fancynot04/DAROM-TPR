@@ -507,7 +507,7 @@ def build_parser():
         "--buffer-capacity", type=int, default=1000000
     )
     parser.add_argument(
-        "--train-every", type=int, default=10
+        "--train-every", type=int, default=1
     )
     parser.add_argument(
         "--log-every", type=int, default=40
