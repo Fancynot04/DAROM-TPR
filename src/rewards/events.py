@@ -9,3 +9,21 @@ def event_reward(outcome, config):
         return None, 0.0
     value = values[key]['value'] if 'terms' in config else values[key]
     return key, float(value)
+
+
+# O3 -> D3 / MASAC B0 终止事件奖励
+B0_EVENTS = {
+    "success": 50.0,
+    "collision": -100.0,
+    "missed_exit": -100.0,
+    "teleport": -100.0,
+    "timeout": -100.0,
+}
+
+def b0_reward(event):
+    name, value = event_reward(
+        event, {"events": B0_EVENTS}
+    )
+    if event is not None and name is None:
+        raise ValueError(f"Unknown B0 event: {event}")
+    return value

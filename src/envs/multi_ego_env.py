@@ -9,7 +9,7 @@ from .control import EgoController, parse_action
 from .observation import build_observation
 
 from .exit_rules import missed_exit_before_step
-from .single_ego_env import b0_reward
+from src.rewards.events import b0_reward
 
 from .action_history import MultiEgoActionHistory
 from .delay_buffer import MultiEgoDelayBuffer
