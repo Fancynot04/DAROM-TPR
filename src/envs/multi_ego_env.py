@@ -12,9 +12,9 @@ from .observation import RouteGoal, build_observation, leader_observation, remai
 from .stalled import StalledDetector
 
 from .exit_rules import missed_exit_before_step, route_missed_before_step
-from .route_lane_plan import RouteLaneNetwork, UNREACHABLE_LANE_CHANGES
+from .route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES, RouteLaneNetwork, UNREACHABLE_LANE_CHANGES
 from src.rewards.events import STALLED_EVENT, b0_reward
-from src.rewards.masac import MASACRewards, TARGET_EXIT_DIM
+from src.rewards.masac import MASACRewardProtocol, MASACRewards, TARGET_EXIT_DIM
 
 from .action_history import MultiEgoActionHistory
 from .delay_buffer import MultiEgoDelayBuffer
@@ -44,6 +44,8 @@ class MultiEgoEnv:
         route_file=None,
         legacy_route_semantics=False,
         actor_leader_features=False,
+        reward_protocol=MASACRewardProtocol(),
+        route_guidance_rules=DEFAULT_ROUTE_GUIDANCE_RULES,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -67,7 +69,14 @@ class MultiEgoEnv:
         self.scenario = scenario
         self.speed_mode = speed_mode
         self.gui = bool(gui)
-        self.reward_tracker = MASACRewards(reward_config) if reward_config is not None else None
+        self.reward_tracker = MASACRewards(reward_config, reward_protocol) if reward_config is not None else None
+        self.route_guidance_rules = {}
+        if reward_config is not None and reward_config.route_guidance:
+            for rule in route_guidance_rules:
+                self.route_guidance_rules[tuple(rule["route"])] = (
+                    tuple(rule["critical_connection"]),
+                    frozenset(map(tuple, rule["accepted_connections"])),
+                )
         self.target_exit_dim = TARGET_EXIT_DIM if self.reward_tracker is not None else 0
         self.legacy_route_semantics = legacy_route_semantics
         self.actor_leader_features = actor_leader_features
@@ -128,14 +137,19 @@ class MultiEgoEnv:
 
                 controller.configure()
                 self.controllers[ego_id] = controller
-                if not self.legacy_route_semantics:
-                    vehicle = conn.vehicle
-                    route = tuple(vehicle.getRoute(ego_id))
-                    if not route or route[-1] != self.target_exits[ego_id]:
-                        raise RuntimeError(f"{ego_id}: route {route} does not end at {self.target_exits[ego_id]}")
-                    self.route_lane_plans[ego_id] = self.lane_network.plan(
-                        route, vehicle.getVehicleClass(ego_id)
-                    )
+                if self.legacy_route_semantics and not self.route_guidance_rules:
+                    continue
+                vehicle = conn.vehicle
+                route = tuple(vehicle.getRoute(ego_id))
+                if not self.legacy_route_semantics and (not route or route[-1] != self.target_exits[ego_id]):
+                    raise RuntimeError(f"{ego_id}: route {route} does not end at {self.target_exits[ego_id]}")
+                guidance = self.route_guidance_rules.get(route)
+                if not self.legacy_route_semantics or guidance is not None:
+                    plan = self.lane_network.plan(route, vehicle.getVehicleClass(ego_id))
+                    if not self.legacy_route_semantics:
+                        self.route_lane_plans[ego_id] = plan
+                    if guidance is not None:
+                        self.ego_guidance[ego_id] = plan, *guidance
 
     def _route_lane_position(self, ego_id):
         vehicle = self.world.conn.vehicle
@@ -364,10 +378,11 @@ class MultiEgoEnv:
             route_file=self.route_file,
             gui=self.gui,
         )
-        if not self.legacy_route_semantics and self.lane_network is None:
+        if (not self.legacy_route_semantics or self.route_guidance_rules) and self.lane_network is None:
             self.lane_network = RouteLaneNetwork(self.world.net_file)
         self.route_lane_plans = {}
         self.route_lane_positions = {}
+        self.ego_guidance = {}
 
         self.egos = {
             ego_id: Ego(ego_id)
@@ -515,10 +530,16 @@ class MultiEgoEnv:
                 )
                 if tracker is not None:
                     components[ego_id]["task"] = rewards[ego_id]
+                    components[ego_id]["merge"] += tracker.settle_merge(ego_id, "Missed Exit")
                 pre_terminated.add(ego_id)
 
         # 2. 仅尚未终止的 Ego 提交动作
         acting_ids = active_ids - pre_terminated
+        guidance_before = {
+            ego_id: (conn.vehicle.getRouteIndex(ego_id), conn.vehicle.getLaneID(ego_id))
+            for ego_id in acting_ids & self.ego_guidance.keys()
+            if ego_id not in tracker.guidance_paid
+        }
         stall_results = {}
         if self.stall_detectors:
             now = sim.getTime()
@@ -723,6 +744,16 @@ class MultiEgoEnv:
                 if ego_id not in acting_ids or (self.legacy_route_semantics and tracker is None):
                     raise RuntimeError(f"{ego_id} arrived without reaching {target}")
 
+            if ego_id in guidance_before and (ego_id in present or event == "Arrived"):
+                plan, critical, accepted = self.ego_guidance[ego_id]
+                connection = plan.completed_connection(
+                    guidance_before[ego_id], conn.vehicle if ego_id in present else None,
+                    ego_id, critical,
+                )
+                components[ego_id]["route_guidance"] = tracker.score_route_guidance(
+                    ego_id, connection, accepted,
+                )
+
             if event is not None:
                 rewards[ego_id] = self._finish_agent(
                     ego_id,
@@ -730,6 +761,7 @@ class MultiEgoEnv:
                 )
                 if tracker is not None:
                     components[ego_id]["task"] = rewards[ego_id]
+                    components[ego_id]["merge"] += tracker.settle_merge(ego_id, event)
 
         if tracker is not None:
             for ego_id, values in components.items():

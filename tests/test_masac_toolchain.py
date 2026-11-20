@@ -464,6 +464,11 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     assert final["config"]["device"] == "cpu"
     assert final["config"]["effective_torch_threads"] == 1
     assert final["config"]["team_q_weight"] == 1.0
+    assert final["config"]["reward_components"]["route_guidance"] is False
+    assert final["config"]["reward_protocol"] == {
+        "merge_on_success": True, "efficiency_weight": 0.01, "route_guidance_weight": 5.0,
+    }
+    assert final["config"]["route_guidance_rules"][0]["accepted_connections"] == [["E76_0", "E77_0"]]
     assert final["team_critic"] and final["target_team_critic"]
     assert final["team_critic_optimizer"]["state"]
     assert final["config"]["actor_leader_features"] is actor_leader_features
@@ -483,6 +488,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     assert shadows[0]["egos"]["ego_2"]["reason"] == "inactive"
     controls = [r for r in records if r["event"] == "control_trace"]
     first = controls[0]["egos"]["ego_1"]
+    assert first["reward_components"]["route_guidance"] == 0
     assert first["road"] == "O3"
     assert first["speed_mps"] == pytest.approx(10.0)
     assert first["requested_acceleration_mps2"] == first["commanded_acceleration_mps2"] == 0.0
@@ -548,6 +554,46 @@ def test_training_cli_defaults():
     assert args.torch_threads is None
     assert args.update_log_every == 40
     assert args.max_active_steps == 2500
+    assert not args.reward_route_guidance
+    assert parser.parse_args(["--reward-route-guidance"]).reward_route_guidance
+    assert args.reward_route_guidance_weight == 5.0
+
+
+@pytest.mark.parametrize("env_version,legacy", [(2, True), (3, True), (3, False)])
+def test_checkpoint_evaluation_uses_saved_reward_protocol(work, env_version, legacy):
+    from evaluate_masac import evaluate
+    from src.agents.masac import MultiAgentGaussianActor
+
+    actors = MultiAgentGaussianActor(ego_ids=AGENT_IDS, nav_dim=2)
+    config = {
+        "masac_env_version": env_version,
+        "max_active_steps": 1,
+        "reward_components": {},
+    }
+    if not legacy:
+        config["reward_components"]["route_guidance"] = True
+        config["reward_protocol"] = {
+            "merge_on_success": True, "efficiency_weight": 0.01, "route_guidance_weight": 7.0,
+        }
+        config["route_guidance_rules"] = [{
+            "route": ["O3", "E75", "E76", "E77", "D3"],
+            "critical_connection": ["E76", "E77"],
+            "accepted_connections": [["E76_0", "E77_1"]],
+        }]
+    checkpoint = work / "untrained.pt"
+    torch.save({"agent_ids": AGENT_IDS, "actors": actors.state_dict(), "config": config,
+                "global_step": 0}, checkpoint)
+    report = evaluate(SimpleNamespace(
+        checkpoint=str(checkpoint), episodes=1, seed_start=200001, stochastic=False,
+        max_steps=150, output=str(work / "summary.json"),
+    ))
+    protocol = report["reward_protocol"]
+    assert protocol["merge_on_success"] is not legacy
+    assert protocol["route_guidance_weight"] == (0.0 if legacy else 7.0)
+    assert report["route_guidance_rules"] == config.get("route_guidance_rules", [])
+    for values in report["records"][0]["reward_components"].values():
+        assert values["efficiency"] == pytest.approx(0.025 if legacy else 0.005)
+        assert values["route_guidance"] == 0
 
 
 @pytest.mark.parametrize(

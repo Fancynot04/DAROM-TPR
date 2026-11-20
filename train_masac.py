@@ -7,7 +7,7 @@
 
 import argparse
 import math
-from dataclasses import fields
+from dataclasses import asdict, fields
 import random
 from pathlib import Path
 import time
@@ -16,7 +16,11 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
-from src.rewards.masac import LEGACY_MASAC_ENV_VERSION, MASACRewardConfig, MASAC_ENV_VERSION, TARGET_EXIT_DIM
+from src.envs.route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES
+from src.rewards.masac import (
+    LEGACY_MASAC_ENV_VERSION, MASACRewardConfig, MASACRewardProtocol, MASAC_ENV_VERSION,
+    TARGET_EXIT_DIM,
+)
 from src.agents.masac import MultiAgentGaussianActor
 from src.agents.centralized_critic import CentralizedTwinQ
 from src.agents.replay_buffer import JointReplayBuffer
@@ -246,6 +250,13 @@ def train(args, device):
         if not isinstance(field.default, bool)
     }
     reward_config = MASACRewardConfig(**args.reward_components, **args.safety_reward)
+    reward_protocol = MASACRewardProtocol(
+        route_guidance_weight=getattr(
+            args, "reward_route_guidance_weight", MASACRewardProtocol.route_guidance_weight,
+        ),
+    )
+    args.reward_protocol = asdict(reward_protocol)
+    args.route_guidance_rules = getattr(args, "route_guidance_rules", DEFAULT_ROUTE_GUIDANCE_RULES)
     args.team_q_weight = getattr(args, "team_q_weight", 1.0)
     if reward_config.team and (not math.isfinite(args.team_q_weight) or args.team_q_weight <= 0):
         raise ValueError("team_q_weight must be finite and positive when team reward is enabled")
@@ -291,6 +302,8 @@ def train(args, device):
         usp_enabled=args.usp,
         usp_penalty=args.usp_penalty,
         reward_config=reward_config,
+        reward_protocol=reward_protocol,
+        route_guidance_rules=args.route_guidance_rules,
         max_active_steps=args.max_active_steps,
         collect_control_trace=args.trace_controls,
         stalled_shadow=args.stalled_shadow,
@@ -370,8 +383,11 @@ def train(args, device):
                           egos={key: infos[key]["stalled_shadow"] for key in AGENT_IDS})
             if args.trace_controls:
                 traces = {
-                    ego_id: {**info["control_trace"], "terminal_reason": info["terminal_reason"]}
-                    for ego_id, info in infos.items() if info["control_trace"] is not None
+                    ego_id: {**(info["control_trace"] or {}),
+                             "terminal_reason": info["terminal_reason"],
+                             "reward_components": info["reward_components"]}
+                    for ego_id, info in infos.items()
+                    if info["control_trace"] is not None or info["pre_step_terminal"]
                 }
                 if traces:
                     log.write("control_trace", global_step, episode_index=completed_episodes + 1, egos=traces)
@@ -670,6 +686,8 @@ def build_parser():
             **({"action": argparse.BooleanOptionalAction} if isinstance(field.default, bool)
                else {"type": float}),
         )
+    parser.add_argument("--reward-route-guidance-weight", type=float,
+                        default=MASACRewardProtocol().route_guidance_weight)
 
     parser.add_argument("--device", default="auto", help="Training device: auto (CUDA first), cpu, cuda, or cuda:N")
     parser.add_argument("--torch-threads", type=int, default=None, help="PyTorch intra-op threads (default: 2 on CUDA, up to 8 on CPU)")

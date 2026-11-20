@@ -5,13 +5,17 @@ import argparse
 import random
 import time
 from collections import Counter
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
-from src.rewards.masac import LEGACY_MASAC_ENV_VERSION, MASACRewardConfig, MASAC_ENV_VERSION, TARGET_EXIT_DIM
+from src.rewards.masac import (
+    LEGACY_MASAC_ENV_VERSION, LEGACY_MASAC_REWARD_PROTOCOL, MASACRewardConfig,
+    MASACRewardProtocol, MASAC_ENV_VERSION, TARGET_EXIT_DIM,
+)
 from src.visualization.gui_camera import (
     update_gui_camera,
 )
@@ -46,6 +50,15 @@ def evaluate(args):
             "Checkpoint has a different MASAC environment version. "
             "Evaluate it with its original training code and observation semantics."
         )
+    protocol_settings = reward_config.get("reward_protocol")
+    if protocol_settings is None:
+        reward_protocol = LEGACY_MASAC_REWARD_PROTOCOL
+        route_guidance_rules = []
+        if components is not None:
+            components = {**components, "route_guidance": False}
+    else:
+        reward_protocol = MASACRewardProtocol(**protocol_settings)
+        route_guidance_rules = reward_config["route_guidance_rules"]
     actor_leader_features = reward_config.get("actor_leader_features", False)
     actors = MultiAgentGaussianActor(
         ego_ids=AGENT_IDS,
@@ -78,6 +91,8 @@ def evaluate(args):
             MASACRewardConfig(**components, **reward_config.get("safety_reward", {}))
             if components is not None else None
         ),
+        reward_protocol=reward_protocol,
+        route_guidance_rules=route_guidance_rules,
         # Checkpoints written before the timeout became configurable used 4,000 steps.
         max_active_steps=reward_config.get("max_active_steps", 4000),
         stalled_terminate=stalled_terminate,
@@ -180,6 +195,13 @@ def evaluate(args):
                     truncations,
                     infos,
                 ) = env.step(actions)
+                if getattr(args, "trace", False) and episode == 0:
+                    for ego_id, info in infos.items():
+                        values = info.get("reward_components")
+                        if values is not None and (
+                            step % 100 == 0 or values["task"] or values["merge"] or values["route_guidance"]
+                        ):
+                            print(f"TRACE step={step} ego={ego_id} reward_components={values}", flush=True)
                 
                 
                 # GUI 镜头更新与播放速度控制
@@ -314,6 +336,8 @@ def evaluate(args):
         "git": git_metadata(),
         "training_seed": checkpoint.get("config", {}).get("seed"),
         "training_config": checkpoint.get("config", {}),
+        "reward_protocol": asdict(reward_protocol) if components is not None else None,
+        "route_guidance_rules": route_guidance_rules,
         "checkpoint_git": checkpoint.get("git"),
         "checkpoint_source_sha256": checkpoint.get("source_sha256"),
         "trainer_config": checkpoint.get("trainer_config"),

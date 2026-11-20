@@ -12,6 +12,15 @@ from .control import LANE_CHANGE_EDGES
 # for unreachable states, and validate the range when a route is built.
 UNREACHABLE_LANE_CHANGES = 6
 
+# Match the full SUMO route, including the approach to the destination.
+DEFAULT_ROUTE_GUIDANCE_RULES = [
+    {
+        "route": ["O3", "E75", "E76", "E77", "D3"],
+        "critical_connection": ["E76", "E77"],
+        "accepted_connections": [["E76_0", "E77_0"]],
+    },
+]
+
 
 class RouteLaneNetwork:
     def __init__(self, net_file):
@@ -58,6 +67,8 @@ class RouteLanePlan:
         forward = defaultdict(list)
         reverse = defaultdict(list)
         self.internal = {}
+        self.internal_connections = {}
+        self.lane_connections = set()
         for index, (edge, lanes) in enumerate(zip(route, permitted)):
             if edge in LANE_CHANGE_EDGES:
                 for lane_index, lane in lanes.items():
@@ -83,8 +94,11 @@ class RouteLanePlan:
                 destination = index + 1, target
                 forward[index, source].append(destination)
                 reverse[destination].append(((index, source), 0))
+                pair = lanes[source]["id"], permitted[index + 1][target]["id"]
+                self.lane_connections.add((index, pair))
                 for lane in internal_lanes:
                     self.internal[index, lane] = destination
+                    self.internal_connections[index, lane] = pair
 
         distance = {(len(route) - 1, lane): 0 for lane in permitted[-1]}
         queue = deque(distance)
@@ -133,3 +147,23 @@ class RouteLanePlan:
         if 0 <= index < len(self.route) and road == self.route[index]:
             return index, vehicle.getLaneIndex(ego_id)
         return None
+
+    def completed_connection(self, previous, vehicle, ego_id, critical_connection):
+        """Resolve the traversed link. A missing vehicle indicates a confirmed arrival."""
+        index, lane = previous
+        if self.route[index:index + 2] != critical_connection:
+            return None
+        internal_pair = self.internal_connections.get(previous)
+        if vehicle is None:
+            # SUMO can remove an Ego on the same step it enters the final edge.
+            return internal_pair if index + 2 == len(self.route) else None
+        if (
+            vehicle.getRouteIndex(ego_id) != index + 1
+            or vehicle.getRoadID(ego_id) != critical_connection[1]
+            or tuple(vehicle.getRoute(ego_id)) != self.route
+        ):
+            return None
+        # The internal lane identifies the chosen link even if the downstream
+        # lane has changed by the time it is sampled.
+        pair = internal_pair or (lane, vehicle.getLaneID(ego_id))
+        return pair if (index, pair) in self.lane_connections else None

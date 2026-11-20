@@ -32,19 +32,22 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 
 ### 模块化奖励
 
-新训练默认开启下列七个模块。参数采用 `--reward-<模块>` 和 `--no-reward-<模块>`，可独立组合。直接构造环境时传入 `MultiEgoEnv(reward_config=MASACRewardConfig(...))`。
+新训练默认开启下表前七个模块，路线引导需显式开启。参数采用 `--reward-<模块>` 和 `--no-reward-<模块>`，可独立组合。直接构造环境时传入 `MultiEgoEnv(reward_config=MASACRewardConfig(...))`。
 
 | 模块 | 结算规则 |
 | --- | --- |
 | `task` | 到达指定出口 +50、碰撞 −500、错过出口 −400、停滞 −400、超时 −400。每车只结算一次终止事件。 |
-| `merge` | O3 车辆完全进入 E75 的主路车道，或经 E75_0 进入 E76 时，首次 +25。后续任务失败保留该奖励。 |
+| `merge` | 需要汇入的任务沿用原判定。O3 Ego 完全进入 E75 主路车道或进入 E76 时只标记完成。该车成功到达自己的出口时另付 +25 一次，碰撞、错过出口、停滞和超时均为 0。 |
 | `following` | 每个活跃控制步用步前真实状态计算净间距风险和 TTC 风险，结算 −0.1 × max(C_gap, C_TTC)。安全时距 1.5 s，TTC 阈值 3 s，前车查询前瞻 120 m。 |
 | `lane-change` | 实际横移开始后，每步按固定目标车道的前后净间距更新风险峰值，只对峰值的新增部分乘 −1.0 扣分。反应时间 1.5 s，最小缓冲 2 m，参考减速度 4.5 m/s²。车身完成横移前，同向重复动作不会提前发往再下一条车道。 |
-| `efficiency` | 每个活跃控制步按步前速度结算 +0.05 × min(1, v/20)，速度单位 m/s。 |
+| `efficiency` | 每个活跃控制步按步前速度结算 +0.01 × min(1, v/20)，速度单位 m/s。 |
 | `comfort` | 有实测步前和步后加速度时，结算 −0.01 × clip(加速度差的绝对值, 0, 1)。0.01 为待测权重。 |
 | `team` | 双车均到达指定出口时，回合一次性记录 +100。环境通过 `env.team_reward` 提供本步值，日志和评估 JSON 用 `team_reward` 记录回合值。独立团队 Twin-Q 学习该回报，每辆 Actor 最大化个人 Q 加团队 Q。Actor 团队权重用 `--team-q-weight` 设置，默认 1.0。 |
+| `route-guidance` | 默认 0。加 `--reward-route-guidance` 后，每车首次实际通过任务允许的关键连接时 +5。可用 `--reward-route-guidance-weight` 设置权重。无匹配规则的任务为 0。 |
 
-路线引导奖励为 0。Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 为 [1,0]，D3 为 [0,1]）。SUMO 启动时关闭等待、高速路错车道、断路、双向车道及等候接载的 teleport，车辆碰撞使用 `remove` 策略。Ego 无故移除时报错。个人回报包括已启用的个人模块及显式开启的旧 USP，可从 `reward_components` 和 USP 统计追溯；团队回报单独记账。
+Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 为 [1,0]，D3 为 [0,1]）。SUMO 启动时关闭等待、高速路错车道、断路、双向车道及等候接载的 teleport，车辆碰撞使用 `remove` 策略。Ego 无故移除时报错。个人回报包括已启用的个人模块及显式开启的旧 USP，可从 `reward_components` 和 USP 统计追溯。逐步信息、`--trace-controls` 训练明细和回合汇总分别记录 `task`、`merge`、`route_guidance`，团队回报单独记账。
+
+路线规则位于 [`DEFAULT_ROUTE_GUIDANCE_RULES`](src/envs/route_lane_plan.py)。以该 Ego 实际 SUMO 路线的完整外部 edge 序列匹配 `route`，因此同一出口的不同进场路线可各自配置。新增规则填写 `route`、关键分流的相邻上游和下游 edge `critical_connection`，以及一个或多个实际可接受的 `[上游车道 ID, 下游车道 ID]` 组成的 `accepted_connections`。现有示例匹配 `O3 → E75 → E76 → E77 → D3`，仅接受 `E76_0 → E77_0`，经 `E76_0 → E77_1` 为 0。由实际经过的 SUMO 内部车道识别连接，保持车道自然通过也计分，每辆车每回合最多一次。直接构造环境时可通过 `route_guidance_rules` 传入规则。
 
 团队 Q 按共享 SUMO 步折扣。一辆 Ego 先到达时，团队价值继续沿后续状态传递，直至全员到达或任意 Ego 失败。Replay 区分已到达与尚未出发；个人奖励和团队奖励分别写入日志。
 
@@ -56,7 +59,7 @@ Actor 的第二维是沿该车指定路线到目标出口最少还需主动换�
 
 Missed Exit 使用同一张路线车道图。车辆进入无法通往目标的连接或偏离指定路线时，按错过出口结算。距必须通过的路段末端 10 m 内，若当前车道无法继续沿路线前进、车辆无法在末端前停下，且没有正在横移到可通行的相邻车道，也会触发终止。这条预判沿用制动距离近似。Ego 首次控制时在步后判定，以便 Replay 将终止归给本步动作。后续的制动预判在步前执行。
 
-新训练 checkpoint 标记 `masac_env_version=3`。评估器对 v2 模块化 checkpoint 恢复旧车道编号和 D3 终止规则，对 134 维 B0 checkpoint 沿用原评估路径。更早的模块化 checkpoint 使用对应训练版本评估。
+新训练 checkpoint 标记 `masac_env_version=3`。训练配置日志和 checkpoint 保存 `reward_components`、`reward_protocol` 和 `route_guidance_rules`，评估读取保存的奖励开关、系数、兑现时机和规则。旧 v2/v3 模块化 checkpoint 缺少 `reward_protocol` 时，评估使用汇入当步 +25、效率系数 0.05、路线引导 0，并在结果中记录实际使用的协议。评估器对 v2 模块化 checkpoint 恢复旧车道编号和 D3 终止规则，对 134 维 B0 checkpoint 沿用原评估路径。更早的模块化 checkpoint 使用对应训练版本评估。
 
 ## 3. 目录结构
 

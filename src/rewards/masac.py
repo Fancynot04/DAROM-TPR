@@ -1,4 +1,4 @@
-"""Modular reward accounting for the O3 -> D3 MASAC environment."""
+"""Modular reward accounting for the MASAC environment."""
 
 from dataclasses import dataclass
 from math import inf, isfinite
@@ -29,6 +29,7 @@ class MASACRewardConfig:
     efficiency: bool = True
     comfort: bool = True
     team: bool = True
+    route_guidance: bool = False
     ttc_threshold: float = 3.0
     following_lookahead: float = 120.0
     lane_change_weight: float = 1.0
@@ -38,6 +39,24 @@ class MASACRewardConfig:
             value = getattr(self, name)
             if not isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
+
+
+@dataclass(frozen=True)
+class MASACRewardProtocol:
+    merge_on_success: bool = True
+    efficiency_weight: float = 0.01
+    route_guidance_weight: float = 5.0
+
+    def __post_init__(self):
+        for name in ("efficiency_weight", "route_guidance_weight"):
+            value = getattr(self, name)
+            if not isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
+
+
+LEGACY_MASAC_REWARD_PROTOCOL = MASACRewardProtocol(
+    merge_on_success=False, efficiency_weight=0.05, route_guidance_weight=0.0,
+)
 
 
 @dataclass
@@ -65,13 +84,17 @@ def required_gap(behind_speed, ahead_speed):
 
 
 class MASACRewards:
-    def __init__(self, config):
+    def __init__(self, config, protocol=MASACRewardProtocol()):
         self.config = config
-        self.components = ("task", "merge", "following", "lane_change", "efficiency", "comfort")
+        self.protocol = protocol
+        self.components = (
+            "task", "merge", "following", "lane_change", "efficiency", "comfort", "route_guidance",
+        )
         self.reset(())
 
     def reset(self, ego_ids):
         self.merged = set()
+        self.guidance_paid = set()
         self.pending_changes = {}
         self.lane_change_events = []
         self.following_risks = {}
@@ -87,6 +110,19 @@ class MASACRewards:
             return event_reward(event, {"events": TASK_EVENTS})[1]
         return 0.0
 
+    def settle_merge(self, ego_id, event):
+        if self.protocol.merge_on_success and ego_id in self.merged:
+            self.merged.remove(ego_id)
+            if event == "Arrived":
+                return 25.0
+        return 0.0
+
+    def score_route_guidance(self, ego_id, connection, accepted):
+        if self.config.route_guidance and connection in accepted and ego_id not in self.guidance_paid:
+            self.guidance_paid.add(ego_id)
+            return self.protocol.route_guidance_weight
+        return 0.0
+
     def before_step(self, conn, ego_id, control):
         vehicle = conn.vehicle
         speed = (vehicle.getSpeed(ego_id) if any((
@@ -94,7 +130,7 @@ class MASACRewards:
         )) else 0.0)
         values = self.empty()
         if self.config.efficiency:
-            values["efficiency"] = 0.05 * min(1.0, speed / 20.0)
+            values["efficiency"] = self.protocol.efficiency_weight * min(1.0, speed / 20.0)
         gap_risk = ttc_risk = 0.0
         if self.config.following:
             leader = vehicle.getLeader(ego_id, self.config.following_lookahead)
@@ -266,8 +302,9 @@ class MASACRewards:
                 clearance = (conn.lane.getWidth(lane_id) - vehicle.getWidth(ego_id)) / 2
                 merged = abs(vehicle.getLateralLanePosition(ego_id)) <= clearance + 1e-3
             if merged:
-                values["merge"] = 25.0
                 self.merged.add(ego_id)
+                if not self.protocol.merge_on_success:
+                    values["merge"] = 25.0
         return values
 
     def settle_team(self, reasons):
