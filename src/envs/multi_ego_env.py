@@ -11,7 +11,8 @@ from .control import EgoController
 from .observation import RouteGoal, build_observation, remaining_goal_distance
 from .stalled import StalledDetector
 
-from .exit_rules import missed_exit_before_step
+from .exit_rules import missed_exit_before_step, route_missed_before_step
+from .route_lane_plan import RouteLaneNetwork, UNREACHABLE_LANE_CHANGES
 from src.rewards.events import STALLED_EVENT, b0_reward
 from src.rewards.masac import MASACRewards, TARGET_EXIT_DIM
 
@@ -41,6 +42,7 @@ class MultiEgoEnv:
         stalled_shadow=False,
         stalled_terminate=False,
         route_file=None,
+        legacy_route_semantics=False,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -66,6 +68,8 @@ class MultiEgoEnv:
         self.gui = bool(gui)
         self.reward_tracker = MASACRewards(reward_config) if reward_config is not None else None
         self.target_exit_dim = TARGET_EXIT_DIM if self.reward_tracker is not None else 0
+        self.legacy_route_semantics = legacy_route_semantics
+        self.lane_network = None
 
         self.world = None
         self.egos = {}
@@ -121,7 +125,21 @@ class MultiEgoEnv:
 
                 controller.configure()
                 self.controllers[ego_id] = controller
+                if not self.legacy_route_semantics:
+                    vehicle = conn.vehicle
+                    route = tuple(vehicle.getRoute(ego_id))
+                    if not route or route[-1] != self.target_exits[ego_id]:
+                        raise RuntimeError(f"{ego_id}: route {route} does not end at {self.target_exits[ego_id]}")
+                    self.route_lane_plans[ego_id] = self.lane_network.plan(
+                        route, vehicle.getVehicleClass(ego_id)
+                    )
 
+    def _route_lane_position(self, ego_id):
+        vehicle = self.world.conn.vehicle
+        plan = self.route_lane_plans[ego_id]
+        if tuple(vehicle.getRoute(ego_id)) != plan.route:
+            return None
+        return plan.position(vehicle, ego_id)
 
     def _finish_agent(self, ego_id, event):
         """结算一辆 Ego，不影响其他 Ego 的状态。"""
@@ -246,6 +264,13 @@ class MultiEgoEnv:
                     actor_observation = actor_observation.copy()
                     actor_observation[0, 0] = distance
                     infos[ego_id]["remaining_goal_distance_m"] = distance
+                    if not self.legacy_route_semantics:
+                        plan = self.route_lane_plans[ego_id]
+                        changes = plan.signed_changes.get(self.route_lane_positions[ego_id])
+                        actor_observation[0, 1] = (
+                            UNREACHABLE_LANE_CHANGES if changes is None else changes
+                        )
+                        infos[ego_id]["signed_min_lane_changes"] = changes
 
                 # 刚出发的 Ego：独立初始化延迟队列
                 if ego_id not in self.delay_buffer.active:
@@ -324,6 +349,10 @@ class MultiEgoEnv:
             route_file=self.route_file,
             gui=self.gui,
         )
+        if not self.legacy_route_semantics and self.lane_network is None:
+            self.lane_network = RouteLaneNetwork(self.world.net_file)
+        self.route_lane_plans = {}
+        self.route_lane_positions = {}
 
         self.egos = {
             ego_id: Ego(ego_id)
@@ -376,6 +405,11 @@ class MultiEgoEnv:
                     ego.state.status == "active"
                     for ego in self.egos.values()
                 ):
+                    if not self.legacy_route_semantics:
+                        self.route_lane_positions = {
+                            ego_id: self._route_lane_position(ego_id)
+                            for ego_id in self.route_lane_plans
+                        }
                     observations, infos = self._build_output()
 
                     self._update_policy_observations(
@@ -444,17 +478,20 @@ class MultiEgoEnv:
                         "request_direction": 0,
                     }
 
+        route_positions_before = {}
         # 1. 每辆车独立进行 Missed Exit 预判
         for ego_id in active_ids:
-            controller = self.controllers[ego_id]
-
-            missed = self.target_exits[ego_id] == "D3" and missed_exit_before_step(
-                conn,
-                ego_id,
-                active_change_to_zero=(
-                    controller.active_change_to_zero
-                ),
-            )
+            if self.legacy_route_semantics:
+                missed = self.target_exits[ego_id] == "D3" and missed_exit_before_step(
+                    conn, ego_id, active_change_to_zero=self.controllers[ego_id].active_change_to_zero,
+                )
+            else:
+                position = self._route_lane_position(ego_id)
+                route_positions_before[ego_id] = position
+                # Replay attributes a pre-step failure to the previous action.
+                missed = self.active_steps[ego_id] > 0 and route_missed_before_step(
+                    conn, ego_id, self.route_lane_plans[ego_id], position,
+                )
 
             if missed:
                 rewards[ego_id] = self._finish_agent(
@@ -610,26 +647,34 @@ class MultiEgoEnv:
 
             road = state.road_id
 
-            if road == "E77":
-                self.seen_e77[ego_id] = True
-
             target = self.target_exits[ego_id]
             if road == target:
                 self.reached_target[ego_id] = True
 
-            internal_road = (
-                isinstance(road, str)
-                and road.startswith(":")
-            )
-
-            wrong_exit = (
-                target == "D3"
-                and self.seen_e77[ego_id]
-                and not self.reached_target[ego_id]
-                and road is not None
-                and not internal_road
-                and road not in ("E77", "D3")
-            )
+            if self.legacy_route_semantics:
+                if road == "E77":
+                    self.seen_e77[ego_id] = True
+                wrong_exit = (
+                    target == "D3"
+                    and self.seen_e77[ego_id]
+                    and not self.reached_target[ego_id]
+                    and road is not None
+                    and not road.startswith(":")
+                    and road not in ("E77", "D3")
+                )
+            else:
+                wrong_exit = False
+                if state.status == "active":
+                    position = self._route_lane_position(ego_id)
+                    self.route_lane_positions[ego_id] = position
+                    if ego_id in acting_ids:
+                        plan = self.route_lane_plans[ego_id]
+                        wrong_exit = position not in plan.signed_changes
+                        if not wrong_exit and self.active_steps[ego_id] == 1:
+                            wrong_exit = route_missed_before_step(conn, ego_id, plan, position)
+                elif ego_id in arrivals and ego_id in acting_ids:
+                    wrong_exit = (route_positions_before[ego_id]
+                                  not in self.route_lane_plans[ego_id].signed_changes)
 
             # Settle physical SUMO and route events before the shadow trigger.
             if ego_id in collisions:
@@ -659,8 +704,8 @@ class MultiEgoEnv:
 
             if event == "Arrived" and not self.reached_target[ego_id]:
                 # A short arrivalPos can be reached in the same step as edge entry.
-                # An acting MASAC Ego's last observation verified the route destination.
-                if tracker is None or ego_id not in acting_ids:
+                # The acting Ego's route was verified before the step.
+                if ego_id not in acting_ids or (self.legacy_route_semantics and tracker is None):
                     raise RuntimeError(f"{ego_id} arrived without reaching {target}")
 
             if event is not None:

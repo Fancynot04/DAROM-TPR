@@ -422,7 +422,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         )
         assert report["metric_version"] == METRIC_VERSION
         assert report["trainer_config"]["gamma"] == 0.99
-        assert report["training_config"]["masac_env_version"] == 2
+        assert report["training_config"]["masac_env_version"] == 3
         assert report["training_config"]["safety_reward"] == {
             "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 1.0,
         }

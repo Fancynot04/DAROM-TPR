@@ -14,7 +14,7 @@ TASK_EVENTS = {
     "stalled": STALLED_PENALTY,
 }
 TARGET_EXIT_DIM = 2
-MASAC_ENV_VERSION = 2
+MASAC_ENV_VERSION = 3
 # Shared reference for gap scoring, independent of SUMO vehicle braking limits.
 LANE_CHANGE_REFERENCE_DECEL = 4.5
 

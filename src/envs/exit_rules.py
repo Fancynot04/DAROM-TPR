@@ -1,7 +1,41 @@
 
-"""O3 -> D3 驶离任务的终止判定规则。"""
+"""Route-aware exit rules and the legacy D3 checkpoint rule."""
 
 import math
+
+from .control import MIN_ACCEL
+
+
+def route_missed_before_step(conn, ego_id, plan, position, *, check_distance=10.0):
+    """Check a required route transition that the current lane cannot make."""
+    if position not in plan.signed_changes:
+        return True
+    if position in plan.forward_lanes or position[0] == len(plan.route) - 1:
+        return False
+
+    vehicle = conn.vehicle
+    if vehicle.getRoadID(ego_id).startswith(":"):
+        return False
+    remaining = max(0.0, conn.lane.getLength(vehicle.getLaneID(ego_id))
+                    - vehicle.getLanePosition(ego_id))
+    if remaining > check_distance:
+        return False
+
+    lateral_speed = vehicle.getLateralSpeed(ego_id)
+    if abs(lateral_speed) > 0.05:
+        step = 1 if lateral_speed > 0 else -1
+        neighbor = position[0], position[1] + step
+        if neighbor in plan.lateral_neighbors[position] and neighbor in plan.forward_lanes:
+            return False
+    return _stopping_distance(vehicle, ego_id, -MIN_ACCEL) > remaining
+
+
+def _stopping_distance(vehicle, ego_id, max_action_decel):
+    speed = max(0.0, vehicle.getSpeed(ego_id))
+    effective_decel = min(vehicle.getEmergencyDecel(ego_id), max_action_decel)
+    if not math.isfinite(effective_decel) or effective_decel <= 0:
+        raise ValueError("Invalid effective deceleration")
+    return speed ** 2 / (2.0 * effective_decel)
 
 
 def missed_exit_before_step(
@@ -50,24 +84,4 @@ def missed_exit_before_step(
     if active_change_to_zero:
         return False
 
-    # 5. 判断车辆能否在道路末端前停止
-    speed = max(0.0, vehicle.getSpeed(ego_id))
-
-    emergency_decel = vehicle.getEmergencyDecel(ego_id)
-
-    effective_decel = min(
-        emergency_decel,
-        max_action_decel,
-    )
-
-    if (
-        not math.isfinite(effective_decel)
-        or effective_decel <= 0
-    ):
-        raise ValueError("Invalid effective deceleration")
-
-    stopping_distance = (
-        speed ** 2 / (2.0 * effective_decel)
-    )
-
-    return stopping_distance > remaining
+    return _stopping_distance(vehicle, ego_id, max_action_decel) > remaining

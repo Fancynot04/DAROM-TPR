@@ -8,8 +8,101 @@ import pytest
 
 from src.envs.multi_ego_env import MultiEgoEnv
 from src.envs.observation import RouteGoal, remaining_goal_distance
+from src.envs.route_lane_plan import RouteLaneNetwork
+from src.envs.sumo_world import SUMO_DIR
 from src.rewards.masac import MASACRewardConfig, MASACRewards, required_gap
 from train_masac import snapshot
+
+
+def test_lane_change_plan_uses_all_natural_successors():
+    network = RouteLaneNetwork(SUMO_DIR / "Antwerp.net.xml")
+    corridor = ("O3", "E75", "E76", "E77")
+    d1 = network.plan(corridor + ("E78", "E82", "D1"), "passenger")
+    d2 = network.plan(corridor + ("E78", "E82", "D2"), "passenger")
+    d3 = network.plan(corridor + ("D3",), "passenger")
+    assert [plan.signed_changes[3, 0] for plan in (d1, d2, d3)] == [3, 1, 0]
+    assert [plan.signed_changes[3, 3] for plan in (d1, d2, d3)] == [0, 0, -3]
+    assert d3.signed_changes[1, 1] == 0
+    assert d3.signed_changes[2, 2] == -2
+    vehicle = Mock()
+    vehicle.getRoadID.return_value = ":J106_0"
+    vehicle.getLaneID.return_value = ":J106_0_0"
+    vehicle.getRouteIndex.return_value = 3
+    assert d1.position(vehicle, "ego") is None
+    assert d3.position(vehicle, "ego") == (4, 0)
+
+
+@pytest.mark.parametrize(
+    "edge,goal,wrong_lane,right_lane,changes",
+    [("E82", "D1", 2, 4, 1), ("E82", "D2", 3, 1, -1), ("E77", "D3", 4, 0, -4)],
+)
+def test_lane_change_actor_and_missed_exit_with_sumo(tmp_path, edge, goal, wrong_lane, right_lane, changes):
+    route = tmp_path / "exits.rou.xml"
+    route.write_text(f"""<routes>
+        <vType id="ego" maxSpeed="33.3333333333" speedFactor="1"/>
+        <trip id="ego_1" type="ego" depart="0" from="{edge}" to="{goal}"
+              departLane="{wrong_lane}" departSpeed="25"/>
+        <trip id="ego_2" type="ego" depart="3" from="{edge}" to="{goal}"
+              departLane="{right_lane}" departPos="-10" departSpeed="20" arrivalPos="20"/>
+    </routes>""")
+    env = MultiEgoEnv(reward_config=MASACRewardConfig(), route_file=route)
+    try:
+        obs, infos = env.reset()
+        actor, critic, _ = snapshot(env, obs)
+        assert infos["ego_1"]["signed_min_lane_changes"] == changes
+        assert actor[0, 1] == changes
+        assert critic[0, 1] == wrong_lane
+
+        env.step({"ego_1": [0, 0]})
+        conn = env.world.conn
+        lane_id = f"{edge}_{wrong_lane}"
+        conn.vehicle.moveTo("ego_1", lane_id, conn.lane.getLength(lane_id) - 5)
+        _, rewards, terminated, _, infos = env.step({"ego_1": [0, 0]})
+        assert terminated == {"ego_1": True, "ego_2": False}
+        assert infos["ego_1"]["terminal_reason"] == "Missed Exit"
+        assert infos["ego_1"]["pre_step_terminal"]
+        assert rewards["ego_1"] == -400
+
+        for _ in range(100):
+            actions = {"ego_2": [0, 0]} if infos["ego_2"]["status"] == "active" else {}
+            _, _, terminated, _, infos = env.step(actions)
+            if terminated["ego_2"]:
+                break
+            if infos["ego_2"]["status"] == "active":
+                assert infos["ego_2"]["signed_min_lane_changes"] == 0
+        assert infos["ego_2"]["terminal_reason"] == "Arrived"
+    finally:
+        env.close()
+
+
+def test_route_deviation_settles_before_next_actor_observation(tmp_path, monkeypatch):
+    route = tmp_path / "deviation.rou.xml"
+    route.write_text("""<routes>
+        <vType id="ego" maxSpeed="33.3333333333" speedFactor="1"/>
+        <trip id="ego_1" type="ego" depart="0" from="E77" to="D2"
+              departLane="0" departSpeed="20"/>
+        <trip id="ego_2" type="ego" depart="3" from="E77" to="D3"/>
+    </routes>""")
+    env = MultiEgoEnv(reward_config=MASACRewardConfig(), route_file=route)
+    try:
+        env.reset()
+        step = env.world.step
+
+        def step_with_deviation():
+            time = step()
+            env.world.conn.vehicle.setRoute("ego_1", ["E77", "D3"])
+            return time
+
+        monkeypatch.setattr(env.world, "step", step_with_deviation)
+        _, _, terminated, _, infos = env.step({"ego_1": [0, 0]})
+        ego = infos["ego_1"]
+        assert terminated == {"ego_1": True, "ego_2": False}
+        assert ego["terminal_reason"] == "Missed Exit"
+        assert ego["active_steps"] == 1
+        assert not ego["pre_step_terminal"]
+        assert ego["reward_components"]["task"] == -400
+    finally:
+        env.close()
 
 
 @pytest.mark.parametrize(

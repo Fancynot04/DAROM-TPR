@@ -40,7 +40,8 @@ def evaluate(args):
 
     reward_config = checkpoint.get("config", {})
     components = reward_config.get("reward_components")
-    if components is not None and reward_config.get("masac_env_version") != MASAC_ENV_VERSION:
+    env_version = reward_config.get("masac_env_version")
+    if components is not None and env_version not in (2, MASAC_ENV_VERSION):
         raise ValueError(
             "Checkpoint has a different MASAC environment version. "
             "Evaluate it with its original training code and observation semantics."
@@ -78,6 +79,7 @@ def evaluate(args):
         # Checkpoints written before the timeout became configurable used 4,000 steps.
         max_active_steps=reward_config.get("max_active_steps", 4000),
         stalled_terminate=stalled_terminate,
+        legacy_route_semantics=components is None or env_version == 2,
     )
 
     records = []
