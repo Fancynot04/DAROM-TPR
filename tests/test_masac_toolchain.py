@@ -349,7 +349,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
                         self.egos[key].state.status == "active"
                         and not self.terminations[key]
                     ):
-                        self.active_steps[key] = 3999
+                        self.active_steps[key] = self.max_active_steps - 1
             return super().step(actions)
 
     def safe_fixed_actions(
@@ -378,6 +378,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         train_every=20,
         log_every=20,
         update_log_every=40,
+        trace_controls=True,
         torch_threads=1,
         device="cpu",
         gamma=0.999,
@@ -413,6 +414,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
             assert modes and all(isinstance(mode, int) for mode in modes)
             assert modes == report["records"][0]["per_agent"][key]["speed_modes"]
         assert report["sumo_version"]
+        assert report["environment"]["max_active_steps"] == 2500
         record = report["records"][0]
         assert record["team_reward"] == 0.0
         assert record["teleport_events"] == []
@@ -446,6 +448,14 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         json.loads(line)
         for line in (work / "train/metrics.jsonl").read_text().splitlines()
     ]
+    controls = [r for r in records if r["event"] == "control_trace"]
+    first = controls[0]["egos"]["ego_1"]
+    assert first["road"] == "O3"
+    assert first["speed_mps"] == pytest.approx(10.0)
+    assert first["requested_acceleration_mps2"] == first["commanded_acceleration_mps2"] == 0.0
+    assert first["actual_acceleration_mps2"] is not None
+    assert "leader_gap_m" in first and first["lane_remaining_m"] > 0
+    assert not first["sumo_arrived"]
     updates = [r for r in records if r["event"] == "update"]
     assert len(updates) == 2
     assert updates[0]["update_index"] == 1
@@ -497,6 +507,7 @@ def test_training_cli_defaults():
     assert args.device == "auto"
     assert args.torch_threads is None
     assert args.update_log_every == 40
+    assert args.max_active_steps == 2500
 
 
 @pytest.mark.parametrize(

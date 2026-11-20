@@ -24,6 +24,7 @@ class MultiEgoEnv:
 
     AGENTS = ("ego_1", "ego_2")
     OBS_SHAPE = (31, 3)
+    DEFAULT_MAX_ACTIVE_STEPS = 2500
 
     def __init__(
         self,
@@ -34,6 +35,8 @@ class MultiEgoEnv:
         usp_penalty=0.02,
         gui=False,
         reward_config=None,
+        max_active_steps=DEFAULT_MAX_ACTIVE_STEPS,
+        collect_control_trace=False,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -41,7 +44,12 @@ class MultiEgoEnv:
                 "Only Easy dual-Ego route is available"
             )
 
-        self.collect_metrics = collect_metrics
+        if max_active_steps <= 0:
+            raise ValueError("max_active_steps must be positive")
+
+        self.max_active_steps = max_active_steps
+        self.collect_metrics = collect_metrics or collect_control_trace
+        self.collect_control_trace = collect_control_trace
         self.scenario = scenario
         self.speed_mode = speed_mode
         self.gui = bool(gui)
@@ -447,11 +455,30 @@ class MultiEgoEnv:
                     conn, ego_id
                 )
 
+        control_traces = {}
         for ego_id in self.AGENTS:
             if ego_id in acting_ids:
+                if self.collect_control_trace:
+                    vehicle = conn.vehicle
+                    leader = vehicle.getLeader(ego_id, 100.0)
+                    gap = leader[1] + vehicle.getMinGap(ego_id) if leader and leader[0] else None
+                    lane_id = vehicle.getLaneID(ego_id)
+                    lane_position = vehicle.getLanePosition(ego_id)
+                    control_traces[ego_id] = {
+                        "leader_id": leader[0] if gap is not None else None,
+                        "leader_gap_m": gap,
+                        "lane_position_m": lane_position,
+                        "lane_remaining_m": conn.lane.getLength(lane_id) - lane_position,
+                        "road": metric_pre[ego_id]["road"],
+                        "speed_mps": metric_pre[ego_id]["speed"],
+                        "requested_acceleration_mps2": float(actions[ego_id][0]),
+                    }
                 control = self.controllers[ego_id].apply_action(
                     actions[ego_id]
                 )
+
+                if self.collect_control_trace:
+                    control_traces[ego_id]["commanded_acceleration_mps2"] = control.executed_accel
 
                 if tracker is not None:
                     tracker.before_step(conn, ego_id, control)
@@ -535,6 +562,12 @@ class MultiEgoEnv:
                     "emergency_stopping": ego_id in emergency,
                     "agent_step": ego_id in acting_ids,
                 }
+                if ego_id in control_traces:
+                    control_traces[ego_id].update(
+                        actual_acceleration_mps2=metric_steps[ego_id]["post_acceleration"],
+                        post_speed_mps=float(conn.vehicle.getSpeed(ego_id)) if on_road else None,
+                        sumo_arrived=ego_id in arrivals,
+                    )
 
         # 5. 更新每辆车的状态
         self._sync_agents()
@@ -586,7 +619,7 @@ class MultiEgoEnv:
             elif ego_id in arrivals:
                 event = "Arrived"
 
-            elif self.active_steps[ego_id] >= 4000:
+            elif self.active_steps[ego_id] >= self.max_active_steps:
                 event = "Timeout"
 
             else:
@@ -647,6 +680,8 @@ class MultiEgoEnv:
                 ego_id in pre_terminated
             )
         
+            if self.collect_control_trace:
+                infos[ego_id]["control_trace"] = control_traces.get(ego_id)
             infos[ego_id]["teleport_event"] = teleport_details.get(ego_id)
             if tracker is not None:
                 infos[ego_id]["reward_components"] = components[ego_id]

@@ -69,7 +69,7 @@ class MASACRewards:
         )) else 0.0)
         values = self.empty()
         if self.config.efficiency:
-            values["efficiency"] = 0.01 * min(1.0, speed / 20.0)
+            values["efficiency"] = 0.05 * min(1.0, speed / 20.0)
         if self.config.following:
             leader = vehicle.getLeader(ego_id, 1.5 * speed)
             if leader and leader[0]:

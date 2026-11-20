@@ -146,7 +146,7 @@ def test_real_terminal_braking_before_removal():
         env.reset(seed=200001)
         active = [k for k in AGENT_IDS if env.egos[k].state.status == 'active']
         for key in active:
-            env.active_steps[key] = 3999
+            env.active_steps[key] = env.max_active_steps - 1
         _, rewards, done, _, infos = env.step({key: [-6., 0.] for key in active})
         for key in active:
             assert done[key]

@@ -119,8 +119,10 @@ def test_one_ego_timeout_other_continues():
         assert env.egos["ego_1"].state.status == "active"
         assert env.egos["ego_2"].state.status == "waiting"
 
-        # 人为设置到最后一个控制步
-        env.active_steps["ego_1"] = 3999
+        env.active_steps["ego_1"] = 2498
+        _, _, done, _, infos = env.step({"ego_1": [0.0, 0.0]})
+        assert not done["ego_1"]
+        assert infos["ego_1"]["active_steps"] == 2499
 
         (
             obs,
@@ -140,7 +142,7 @@ def test_one_ego_timeout_other_continues():
         assert rewards["ego_2"] == 0.0
 
         assert infos["ego_1"]["terminal_reason"] == "Timeout"
-        assert infos["ego_1"]["active_steps"] == 4000
+        assert infos["ego_1"]["active_steps"] == 2500
 
         assert "ego_1" not in (
             env.world.conn.vehicle.getIDList()

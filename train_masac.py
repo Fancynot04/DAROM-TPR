@@ -186,6 +186,10 @@ def train(args, device):
     if args.train_every <= 0 or args.log_every <= 0:
         raise ValueError("Invalid interval")
 
+    args.trace_controls = getattr(args, "trace_controls", False)
+    args.max_active_steps = getattr(args, "max_active_steps", MultiEgoEnv.DEFAULT_MAX_ACTIVE_STEPS)
+    if args.max_active_steps <= 0:
+        raise ValueError("max_active_steps must be positive")
     args.update_log_every = getattr(args, "update_log_every", 40)
     if args.update_log_every <= 0:
         raise ValueError("update_log_every must be positive")
@@ -248,6 +252,8 @@ def train(args, device):
         usp_enabled=args.usp,
         usp_penalty=args.usp_penalty,
         reward_config=reward_config,
+        max_active_steps=args.max_active_steps,
+        collect_control_trace=args.trace_controls,
     )
 
     log = TrainingLog(output_dir / "train", args.tensorboard)
@@ -316,6 +322,14 @@ def train(args, device):
                 infos,
             ) = env.step(action_dict)
             
+            if args.trace_controls:
+                traces = {
+                    ego_id: {**info["control_trace"], "terminal_reason": info["terminal_reason"]}
+                    for ego_id, info in infos.items() if info["control_trace"] is not None
+                }
+                if traces:
+                    log.write("control_trace", global_step, episode_index=completed_episodes + 1, egos=traces)
+
             for ego_id in AGENT_IDS:
                 teleport = infos[ego_id]["teleport_event"]
                 if teleport is not None:
@@ -607,6 +621,9 @@ def build_parser():
     parser.add_argument("--torch-threads", type=int, default=None, help="PyTorch intra-op threads (default: 2 on CUDA, up to 8 on CPU)")
     parser.add_argument("--update-log-every", type=int, default=40,
                         help="Write update metrics every N optimizer rounds (1 logs every round)")
+    parser.add_argument("--trace-controls", action="store_true", help="Log per-Ego TraCI gaps, motion, and control commands")
+    parser.add_argument("--max-active-steps", type=int, default=MultiEgoEnv.DEFAULT_MAX_ACTIVE_STEPS,
+                        help="Per-Ego timeout in active control steps")
     parser.add_argument("--checkpoint-every", type=int, default=500000)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--tensorboard", action=argparse.BooleanOptionalAction, default=True)

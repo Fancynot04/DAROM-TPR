@@ -64,6 +64,8 @@ def evaluate(args):
         ),
         gui=gui_enabled,
         reward_config=MASACRewardConfig(**components) if components is not None else None,
+        # Checkpoints written before the timeout became configurable used 4,000 steps.
+        max_active_steps=reward_config.get("max_active_steps", 4000),
     )
 
     records = []
@@ -304,6 +306,7 @@ def evaluate(args):
             "route_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp_easy_o3_d3_homogeneous_dual.rou.xml"),
             "stopped_speed_threshold_mps": 0.5,
             "disable_teleport": components is not None,
+            "max_active_steps": env.max_active_steps,
         },
         "reference_commit": REFERENCE_COMMIT,
         "rate_unit": "fraction for legacy success_rates/joint_success_rate; percent in per_agent/joint",

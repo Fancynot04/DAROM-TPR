@@ -13,7 +13,7 @@
 | `ego_2`   | O3 → D3；计划 123 s 出发；`O3_0` 起步                      |
 | 仿真      | 一个 SUMO 进程、一个 0.1 s 全局时钟；各车实际插入时刻可不同  |
 | 速度      | 道路及 Ego 限速 120 km/h（33.333 m/s）；Ego 出发速度 10 m/s  |
-| Episode   | 每辆 Ego 最多 **4,000 个活跃控制步**；分别终止，双方结束后重置 |
+| Episode   | 每辆 Ego 默认最多 **2,500 个活跃控制步（250 s 仿真时间）**；分别终止，双方结束后重置 |
 | Ego 控制  | 纵向加速度 + 横向换道请求；`laneChangeMode=0`、无自定义安全拦截 |
 | 奖励      | 模块化奖励，具体配置见下文 |
 
@@ -43,7 +43,7 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 | `comfort` | 有实测步前和步后加速度时，结算 −0.01 × clip(加速度差的绝对值, 0, 1)。0.01 为待测权重。 |
 | `team` | 双车均到达指定出口时，回合一次性记录 +100。环境通过 `env.team_reward` 提供本步值，日志和评估 JSON 用 `team_reward` 记录回合值。团队 Q 及其 Actor 权重待确定。 |
 
-路线引导奖励为 0。Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 为 [1,0]，D3 为 [0,1]）。Teleport 由 SUMO 启动参数禁用，碰撞使用移除策略。残余 Ego teleport 在 `teleport_events` 记录时间和起止标志。若同一步检测到碰撞则记录该证据，其余原因标记为 `unknown`。个人回报包括已启用的个人模块及显式开启的旧 USP，可从 `reward_components` 和 USP 统计追溯；团队回报单独记账。
+路线引导奖励为 0。Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 为 [1,0]，D3 为 [0,1]）。新奖励协议将 SUMO 的等待、错车道高速路特例、断路和双向车道 teleport 阈值设为 `-1`，车辆碰撞使用 `remove` 策略。残余 Ego teleport 在 `teleport_events` 记录时间和起止标志。若同一步检测到碰撞则记录该证据，其余原因标记为 `unknown`。个人回报包括已启用的个人模块及显式开启的旧 USP，可从 `reward_components` 和 USP 统计追溯；团队回报单独记账。
 
 例如，追加 `--no-reward-comfort --no-reward-team` 可关闭舒适度和团队奖励。开关保存在 checkpoint，评估自动复用。未含新奖励配置的旧 checkpoint 沿用 134 维 Actor 和 B0 终止奖励。
 
@@ -188,6 +188,7 @@ JSONL 以 `event` 区分：
 
 - `config`：完整 CLI、Git 提交及工作树是否有修改；`global_step=0`。
 - `episode`：仅两车均完整终止后写入，包含 `episode_index`、`episode_global_steps`、每车终止原因/奖励/严格成功/有效控制步数、联合成功；最近 100 回合的 ego_1 / ego_2 成功、碰撞、Missed Exit、Timeout 百分率和平均奖励，以及联合成功率和两车奖励和的均值。`rolling_episodes` 是实际分母，`policy=exploration_training`，不能冒充正式评估。
+- `control_trace`：使用 `--trace-controls` 时，每个实际控制步记录前车 ID 和实际净间隙、Ego 道路和车道位置、步前和步后速度、策略请求加速度、TraCI 提交加速度、SUMO 步后实测加速度和原始到达标志。前车由 TraCI 沿当前路线搜索，搜索最短前瞻 100 m。查无前车或车辆已在步后移除时，相应字段为 `null`。
 - `update`：第一轮、每隔 `--update-log-every` 轮（默认 40）以及最后一个可执行更新步记录一次。设置为 1 可记录每轮。每条记录保留该轮的原始 `critic_loss`、双 Q 均值 `mean_q`、`mean_target`、`valid_agents`、`update_index`；各车 `actor_loss`、`alpha`、`alpha_loss`、`mean_log_prob`、`valid_samples`。log-prob 是当前 actor 更新中已有采样的实际动作 log-prob，未再额外前向；无有效样本的损失为 null、样本数为 0。
 - `runtime`：窗口实际步数、速度（SUMO 全局训练步/墙钟秒）、Replay 大小、累计更新数、各车动作样本数/有效动作占比、加速度均值与总体标准差、横向动作均值、换道请求比例。只统计真正执行动作的样本；换道比例直接调用当前控制器 `parse_action()`，不另定义阈值。
 
@@ -203,7 +204,7 @@ checkpoint 保留原有模型/优化器字段，并增加 Git 和源码 SHA256�
 # 配置不一致或损坏时默认报错；明确重算时加 --rerun
 ```
 
-入口按 checkpoint 内部 `global_step` 排序；每个模型固定 Easy、两车、确定性 Actor、100 回合、种子 `200001–200100`，不提供修改这些设置的选项。`--max-steps` 默认 4500；只限制未完成回合的报错预算，不改变环境 4000 活跃步终止规则。批量评估不在训练过程中自动运行。
+入口按 checkpoint 内部 `global_step` 排序；每个模型固定 Easy、两车、确定性 Actor、100 回合、种子 `200001–200100`，不提供修改这些设置的选项。`--max-steps` 默认 4500；只限制评估器等待回合结束的共享步数。环境按 checkpoint 的 `max_active_steps` 分别判定每辆 Ego 超时。新训练可用 `--max-active-steps` 设置，默认 2,500。旧 checkpoint 缺少该项时按原 4,000 步评估。批量评估不在训练过程中自动运行。
 
 复用结果前核对 JSON/CSV 所有回合字段、分组汇总重算、checkpoint SHA256、种子序列、协议版本、Git 提交、源码哈希、路网/路线和 SUMO 二进制哈希、环境配置及实际 speed mode 读回记录。任何失败记录到 `eval/index.json` 后报错，后续项保留 pending，不能当作已评估；索引缺少模型文件也报错。
 

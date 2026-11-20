@@ -275,7 +275,7 @@ def test_homogeneous_active_masks():
 
         # 人为将 ego_1 设置到超时前一控制步
         # 仅用于验证终止状态，不代表实际驾驶表现
-        env.active_steps["ego_1"] = 3999
+        env.active_steps["ego_1"] = env.max_active_steps - 1
 
         before_mask = mask.copy()
 
