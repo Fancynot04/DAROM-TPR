@@ -16,7 +16,7 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
-from src.rewards.masac import MASACRewardConfig, TARGET_EXIT_DIM
+from src.rewards.masac import MASACRewardConfig, MASAC_ENV_VERSION, TARGET_EXIT_DIM
 from src.agents.masac import MultiAgentGaussianActor
 from src.agents.centralized_critic import CentralizedTwinQ
 from src.agents.replay_buffer import JointReplayBuffer
@@ -207,6 +207,10 @@ def train(args, device):
     if args.update_log_every <= 0:
         raise ValueError("update_log_every must be positive")
 
+    if getattr(args, "gamma", 0.99) != 0.99:
+        raise ValueError("O3-D3 MASAC requires gamma=0.99")
+    args.gamma = 0.99
+    args.masac_env_version = MASAC_ENV_VERSION
     args.tau = getattr(args, "tau", 0.005)
     args.checkpoint_every = getattr(args, "checkpoint_every", 100000)
     args.tensorboard = getattr(args, "tensorboard", True)
@@ -229,8 +233,14 @@ def train(args, device):
     args.reward_components = {
         field.name: getattr(args, "reward_" + field.name, field.default)
         for field in fields(MASACRewardConfig)
+        if isinstance(field.default, bool)
     }
-    reward_config = MASACRewardConfig(**args.reward_components)
+    args.safety_reward = {
+        field.name: getattr(args, "reward_" + field.name, field.default)
+        for field in fields(MASACRewardConfig)
+        if not isinstance(field.default, bool)
+    }
+    reward_config = MASACRewardConfig(**args.reward_components, **args.safety_reward)
     args.team_q_weight = getattr(args, "team_q_weight", 1.0)
     if reward_config.team and (not math.isfinite(args.team_q_weight) or args.team_q_weight <= 0):
         raise ValueError("team_q_weight must be finite and positive when team reward is enabled")
@@ -624,7 +634,7 @@ def build_parser():
         "--log-every", type=int, default=40
     )
     parser.add_argument(
-        "--gamma", type=float, default=0.99
+        "--gamma", type=float, choices=(0.99,), default=0.99
     )
     parser.add_argument(
         "--learning-rate", type=float, default=3e-5
@@ -652,8 +662,9 @@ def build_parser():
     for field in fields(MASACRewardConfig):
         parser.add_argument(
             "--reward-" + field.name.replace("_", "-"),
-            action=argparse.BooleanOptionalAction,
             default=field.default,
+            **({"action": argparse.BooleanOptionalAction} if isinstance(field.default, bool)
+               else {"type": float}),
         )
 
     parser.add_argument("--device", default="auto", help="Training device: auto (CUDA first), cpu, cuda, or cuda:N")

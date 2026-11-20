@@ -8,7 +8,7 @@ import numpy as np
 from .sumo_world import SumoWorld, SUMO_DIR
 from .ego import Ego
 from .control import EgoController
-from .observation import build_observation
+from .observation import RouteGoal, build_observation, remaining_goal_distance
 from .stalled import StalledDetector
 
 from .exit_rules import missed_exit_before_step
@@ -40,6 +40,7 @@ class MultiEgoEnv:
         collect_control_trace=False,
         stalled_shadow=False,
         stalled_terminate=False,
+        route_file=None,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -58,6 +59,8 @@ class MultiEgoEnv:
         self.collect_control_trace = collect_control_trace
         self.stalled_shadow = stalled_shadow
         self.stalled_terminate = stalled_terminate
+        self.route_file = (route_file if route_file is not None else
+                           SUMO_DIR / "Antwerp_easy_o3_d3_homogeneous_dual.rou.xml")
         self.scenario = scenario
         self.speed_mode = speed_mode
         self.gui = bool(gui)
@@ -75,7 +78,7 @@ class MultiEgoEnv:
         self.terminations = {}
         self.terminal_reasons = {}
         self.seen_e77 = {}
-        self.reached_d3 = {}
+        self.reached_target = {}
         
         self.action_history = MultiEgoActionHistory(
             self.AGENTS,
@@ -132,6 +135,8 @@ class MultiEgoEnv:
         self.terminal_reasons[ego_id] = event
 
         self.egos[ego_id].finish(event)
+        if self.reward_tracker is not None:
+            self.reward_tracker.end_change(ego_id, self.world.conn.simulation.getTime(), event)
 
         controller = self.controllers.get(ego_id)
         if controller is not None:
@@ -158,6 +163,7 @@ class MultiEgoEnv:
         if self.reward_tracker is not None:
             values["team_reward"] = self.reward_tracker.team_return
             values["reward_components"] = self.reward_tracker.totals
+            values["lane_change_events"] = self.reward_tracker.lane_change_events.copy()
         return values
 
     def _build_output(self):
@@ -234,18 +240,25 @@ class MultiEgoEnv:
 
             if status == "active":
 
+                actor_observation = observations[ego_id]
+                if self.reward_tracker is not None:
+                    distance = remaining_goal_distance(self.world.conn, ego_id, self.route_goals[ego_id])
+                    actor_observation = actor_observation.copy()
+                    actor_observation[0, 0] = distance
+                    infos[ego_id]["remaining_goal_distance_m"] = distance
+
                 # 刚出发的 Ego：独立初始化延迟队列
                 if ego_id not in self.delay_buffer.active:
                     delayed = self.delay_buffer.activate(
                         ego_id,
-                        observations[ego_id],
+                        actor_observation,
                     )
 
                 else:
                     # 已经在运行：模拟本步数据包传输
                     delayed = self.delay_buffer.update(
                         ego_id,
-                        observations[ego_id],
+                        actor_observation,
                     )
 
                 
@@ -295,11 +308,7 @@ class MultiEgoEnv:
 
         self.close()
 
-        route_file = (
-            SUMO_DIR / "Antwerp_easy_o3_d3_homogeneous_dual.rou.xml"
-        )
-
-        trips = {trip.attrib["id"]: trip.attrib for trip in ElementTree.parse(route_file).iter("trip")}
+        trips = {trip.attrib["id"]: trip.attrib for trip in ElementTree.parse(self.route_file).iter("trip")}
         self.target_exits = {ego_id: trips[ego_id]["to"] for ego_id in self.AGENTS}
         self.needs_merge = {ego_id: trips[ego_id]["from"] == "O3" for ego_id in self.AGENTS}
         self.stall_detectors = {
@@ -313,7 +322,7 @@ class MultiEgoEnv:
         self.world = SumoWorld(
             scenario=self.scenario,
             seed=seed,
-            route_file=route_file,
+            route_file=self.route_file,
             gui=self.gui,
         )
 
@@ -346,7 +355,7 @@ class MultiEgoEnv:
             ego_id: False for ego_id in self.AGENTS
         }
 
-        self.reached_d3 = {
+        self.reached_target = {
             ego_id: False for ego_id in self.AGENTS
         }
 
@@ -354,6 +363,10 @@ class MultiEgoEnv:
         
         try:
             conn = self.world.start()
+            if self.reward_tracker is not None:
+                self.route_goals = {
+                    ego_id: RouteGoal.from_trip(conn, trips[ego_id]) for ego_id in self.AGENTS
+                }
 
             # 只推进到第一辆 Ego 插入的时间
             while conn.simulation.getTime() < 1200.0:
@@ -416,6 +429,7 @@ class MultiEgoEnv:
         tracker = self.reward_tracker
         components = {ego_id: tracker.empty() for ego_id in self.AGENTS} if tracker is not None else {}
         pre_terminated = set()
+        change_event_start = len(tracker.lane_change_events) if tracker is not None else 0
 
         metric_pre = {}
         if self.collect_metrics:
@@ -435,7 +449,7 @@ class MultiEgoEnv:
         for ego_id in active_ids:
             controller = self.controllers[ego_id]
 
-            missed = missed_exit_before_step(
+            missed = self.target_exits[ego_id] == "D3" and missed_exit_before_step(
                 conn,
                 ego_id,
                 active_change_to_zero=(
@@ -492,8 +506,13 @@ class MultiEgoEnv:
                         "speed_mps": metric_pre[ego_id]["speed"],
                         "requested_acceleration_mps2": float(actions[ego_id][0]),
                     }
+                active_change = None
+                if tracker is not None:
+                    change = tracker.pending_changes.get(ego_id)
+                    if change is not None and change.last_motion is not None:
+                        active_change = (change.target_lane, change.direction)
                 control = self.controllers[ego_id].apply_action(
-                    actions[ego_id]
+                    actions[ego_id], active_lane_change=active_change,
                 )
 
                 if self.collect_control_trace:
@@ -531,6 +550,9 @@ class MultiEgoEnv:
         collisions = set(
             sim.getCollidingVehiclesIDList()
         )
+        arrivals = set(
+            sim.getArrivedIDList()
+        )
 
         started = set(sim.getStartingTeleportIDList())
         ended = set(sim.getEndingTeleportIDList())
@@ -550,14 +572,17 @@ class MultiEgoEnv:
         present = set(conn.vehicle.getIDList()) if self.collect_metrics or tracker is not None else set()
         if tracker is not None:
             for ego_id in acting_ids:
+                terminal_event = None
+                if ego_id in collisions:
+                    terminal_event = "Collision"
+                elif ego_id in teleports:
+                    terminal_event = "Ego Teleported"
+                elif ego_id in arrivals:
+                    terminal_event = "Arrived"
                 components[ego_id] = tracker.after_step(
                     conn, ego_id, ego_id in present and ego_id not in teleports,
-                    self.needs_merge[ego_id],
+                    self.needs_merge[ego_id], terminal_event=terminal_event,
                 )
-
-        arrivals = set(
-            sim.getArrivedIDList()
-        )
 
         metric_steps = {}
         if self.collect_metrics:
@@ -609,8 +634,9 @@ class MultiEgoEnv:
             if road == "E77":
                 self.seen_e77[ego_id] = True
 
-            if road == "D3":
-                self.reached_d3[ego_id] = True
+            target = self.target_exits[ego_id]
+            if road == target:
+                self.reached_target[ego_id] = True
 
             internal_road = (
                 isinstance(road, str)
@@ -618,8 +644,9 @@ class MultiEgoEnv:
             )
 
             wrong_exit = (
-                self.seen_e77[ego_id]
-                and not self.reached_d3[ego_id]
+                target == "D3"
+                and self.seen_e77[ego_id]
+                and not self.reached_target[ego_id]
                 and road is not None
                 and not internal_road
                 and road not in ("E77", "D3")
@@ -658,11 +685,11 @@ class MultiEgoEnv:
                     f"reason={state.terminal_reason}"
                 )
 
-            if event == "Arrived":
-                if not self.reached_d3[ego_id]:
-                    raise RuntimeError(
-                        f"{ego_id} arrived without D3"
-                    )
+            if event == "Arrived" and not self.reached_target[ego_id]:
+                # A short arrivalPos can be reached in the same step as edge entry.
+                # An acting MASAC Ego's last observation verified the route destination.
+                if tracker is None or ego_id not in acting_ids:
+                    raise RuntimeError(f"{ego_id} arrived without reaching {target}")
 
             if event is not None:
                 rewards[ego_id] = self._finish_agent(
@@ -713,6 +740,15 @@ class MultiEgoEnv:
             infos[ego_id]["teleport_event"] = teleport_details.get(ego_id)
             if tracker is not None:
                 infos[ego_id]["reward_components"] = components[ego_id]
+                infos[ego_id]["following_risks"] = (
+                    tracker.following_risks[ego_id] if ego_id in acting_ids else None
+                )
+                infos[ego_id]["lane_change_events"] = [
+                    event for event in tracker.lane_change_events[change_event_start:]
+                    if event["ego_id"] == ego_id
+                ]
+                if ego_id in control_traces:
+                    control_traces[ego_id].update(tracker.following_risks[ego_id])
             infos[ego_id]["usp_reward"] = applied_usp[ego_id]
 
             infos[ego_id]["usp_triggered"] = (

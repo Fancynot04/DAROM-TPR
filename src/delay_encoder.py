@@ -89,6 +89,7 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
         num_entities = self.obs_dim // 3
         self.register_buffer(
             'observation_scale',
+            # Fixed meter scale for Ego longitudinal distance, including MASAC route distance.
             th.tensor([1000., 5., 30.] + [50., 20., 30.] * (num_entities - 1)),
         )
 

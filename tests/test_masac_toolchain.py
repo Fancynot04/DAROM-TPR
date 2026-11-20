@@ -394,7 +394,8 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         stalled_shadow=True,
         torch_threads=1,
         device="cpu",
-        gamma=0.999,
+        gamma=0.99,
+        reward_ttc_threshold=2.75,
         learning_rate=3e-5,
         initial_alpha=0.01,
         output_dir=str(work),
@@ -421,6 +422,11 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
             )
         )
         assert report["metric_version"] == METRIC_VERSION
+        assert report["trainer_config"]["gamma"] == 0.99
+        assert report["training_config"]["masac_env_version"] == 2
+        assert report["training_config"]["safety_reward"] == {
+            "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 2.0,
+        }
         assert report["environment"]["requested_speed_mode"] == 96
         for key in AGENT_IDS:
             modes = report["environment"]["actual_speed_modes"][key]
@@ -524,7 +530,7 @@ def test_training_cli_defaults():
     assert args.gamma == 0.99
     assert args.tau == 0.005
     assert args.train_every == 1
-    assert args.checkpoint_every == 500_000
+    assert args.checkpoint_every == 200_000
     assert args.device == "auto"
     assert args.torch_threads is None
     assert args.update_log_every == 40

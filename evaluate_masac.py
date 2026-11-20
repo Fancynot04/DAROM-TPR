@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
-from src.rewards.masac import MASACRewardConfig, TARGET_EXIT_DIM
+from src.rewards.masac import MASACRewardConfig, MASAC_ENV_VERSION, TARGET_EXIT_DIM
 from src.visualization.gui_camera import (
     update_gui_camera,
 )
@@ -40,6 +40,11 @@ def evaluate(args):
 
     reward_config = checkpoint.get("config", {})
     components = reward_config.get("reward_components")
+    if components is not None and reward_config.get("masac_env_version") != MASAC_ENV_VERSION:
+        raise ValueError(
+            "Checkpoint has a different MASAC environment version. "
+            "Evaluate it with its original training code and observation semantics."
+        )
     actors = MultiAgentGaussianActor(
         ego_ids=AGENT_IDS,
         nav_dim=TARGET_EXIT_DIM if components is not None else 0,
@@ -66,7 +71,10 @@ def evaluate(args):
             reward_config.get("usp_penalty", 0.02)
         ),
         gui=gui_enabled,
-        reward_config=MASACRewardConfig(**components) if components is not None else None,
+        reward_config=(
+            MASACRewardConfig(**components, **reward_config.get("safety_reward", {}))
+            if components is not None else None
+        ),
         # Checkpoints written before the timeout became configurable used 4,000 steps.
         max_active_steps=reward_config.get("max_active_steps", 4000),
         stalled_terminate=stalled_terminate,

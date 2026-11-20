@@ -86,7 +86,7 @@ class EgoController:
         vehicle.setLaneChangeMode(self.ego_id, 0)
         vehicle.setSpeedMode(self.ego_id, self.speed_mode)
 
-    def apply_action(self, action) -> ControlResult:
+    def apply_action(self, action, *, active_lane_change=None) -> ControlResult:
         """向 SUMO 提交动作，但不推进 simulationStep。"""
 
         vehicle = self.conn.vehicle
@@ -113,7 +113,10 @@ class EgoController:
         target_lane = None
         duration = 0.0
 
-        if direction != 0 and road in LANE_CHANGE_EDGES:
+        # The lane index can flip while the body is still crossing the lane line.
+        # A repeated same-direction action must not request another lane at that point.
+        extending_change = active_lane_change == (lane, direction)
+        if direction != 0 and road in LANE_CHANGE_EDGES and not extending_change:
             candidate = lane + direction
             lane_count = self.conn.edge.getLaneNumber(road)
 

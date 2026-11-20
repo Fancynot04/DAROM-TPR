@@ -2,6 +2,9 @@
 """DAROM 单辆 Ego 的局部交通观测。"""
 
 from dataclasses import dataclass
+from math import isfinite
+
+from traci.exceptions import TraCIException
 
 import numpy as np
 
@@ -10,6 +13,55 @@ from src.geometry import (
     driving_axes,
     world_velocity,
 )
+
+@dataclass(frozen=True)
+class RouteGoal:
+    edge: str
+    position: float
+
+    @classmethod
+    def from_trip(cls, conn, trip):
+        edge = trip["to"]
+        if "arrivalEdge" in trip:
+            raise ValueError(f"{trip['id']}: arrivalEdge conflicts with the trip destination {edge}")
+        try:
+            length = conn.lane.getLength(f"{edge}_0")
+            arrival = trip.get("arrivalPos", "max")
+            if arrival == "max":
+                position = length
+            elif arrival == "center":
+                position = length / 2
+            else:
+                position = float(arrival)
+                if not isfinite(position) or abs(position) > length:
+                    raise ValueError(f"arrivalPos outside [0, {length}]")
+                if position < 0:
+                    position += length
+        except (TraCIException, ValueError) as exc:
+            raise ValueError(f"{trip['id']}: invalid route goal on {edge}: {exc}") from exc
+        return cls(edge, position)
+
+
+def remaining_goal_distance(conn, ego_id, goal):
+    """Query the active vehicle's planned route, including internal lanes."""
+    vehicle = conn.vehicle
+    try:
+        road = vehicle.getRoadID(ego_id)
+        route = vehicle.getRoute(ego_id)
+        index = vehicle.getRouteIndex(ego_id)
+        if 0 <= index < len(route) and route[-1] == goal.edge:
+            distance = vehicle.getDrivingDistance(ego_id, goal.edge, goal.position, 0)
+            if isfinite(distance) and distance >= 0:
+                return distance
+        else:
+            distance = None
+    except TraCIException as exc:
+        raise RuntimeError(f"{ego_id}: unable to query route goal {goal}") from exc
+    raise RuntimeError(
+        f"{ego_id}: invalid remaining distance {distance} on {road} "
+        f"to {goal.edge}@{goal.position} m, route={route}, route_index={index}"
+    )
+
 
 @dataclass
 class ObservationResult:

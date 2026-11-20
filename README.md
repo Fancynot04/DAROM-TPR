@@ -37,8 +37,8 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 | --- | --- |
 | `task` | 到达指定出口 +50、碰撞 −500、错过出口 −400、超时 −400。每车只结算一次终止事件。 |
 | `merge` | O3 车辆完全进入 E75 的主路车道，或经 E75_0 进入 E76 时，首次 +25。后续任务失败保留该奖励。 |
-| `following` | 每个活跃控制步按步前实际前车净间隙结算 −0.1 × C_f，安全时距 1.5 s。 |
-| `lane-change` | SUMO 出现实际换道运动时，按起点步的目标车道前后净间隙结算一次 −0.1 × C_lc。反应时暂用 1.5 s，最小缓冲 2 m，前后车共用参考减速度 4.5 m/s²。该参数仅用于计算风险间隙。 |
+| `following` | 每个活跃控制步用步前真实状态计算净间距风险和 TTC 风险，结算 −0.1 × max(C_gap, C_TTC)。安全时距 1.5 s，TTC 阈值 3 s，前车查询前瞻 120 m。 |
+| `lane-change` | 实际横移开始后，每步按固定目标车道的前后净间距更新风险峰值，只对峰值的新增部分乘 −2 扣分。反应时间 1.5 s，最小缓冲 2 m，参考减速度 4.5 m/s²。车身完成横移前，同向重复动作不会提前发往再下一条车道。 |
 | `efficiency` | 每个活跃控制步按步前速度结算 +0.05 × min(1, v/20)，速度单位 m/s。 |
 | `comfort` | 有实测步前和步后加速度时，结算 −0.01 × clip(加速度差的绝对值, 0, 1)。0.01 为待测权重。 |
 | `team` | 双车均到达指定出口时，回合一次性记录 +100。环境通过 `env.team_reward` 提供本步值，日志和评估 JSON 用 `team_reward` 记录回合值。独立团队 Twin-Q 学习该回报，每辆 Actor 最大化个人 Q 加团队 Q。Actor 团队权重用 `--team-q-weight` 设置，默认 1.0。 |
@@ -47,7 +47,11 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 
 团队 Q 按共享 SUMO 步折扣。一辆 Ego 先到达时，团队价值继续沿后续状态传递，直至全员到达或任意 Ego 失败。Replay 区分已到达与尚未出发；个人奖励和团队奖励分别写入日志。
 
-例如，追加 `--no-reward-comfort --no-reward-team` 可关闭舒适度和团队奖励。开关保存在 checkpoint，评估自动复用。未含新奖励配置的旧 checkpoint 沿用 134 维 Actor 和 B0 终止奖励。
+例如，追加 `--no-reward-comfort --no-reward-team` 可关闭舒适度和团队奖励。TTC 阈值、查询前瞻和换道权重可用 `--reward-ttc-threshold`、`--reward-following-lookahead` 和 `--reward-lane-change-weight` 设置。开关与参数保存在 checkpoint，评估自动复用。单步信息提供 `gap_risk`、`ttc_risk`、`following_reward`，训练可用 `--trace-controls` 记录。换道事件写入回合训练日志和评估 JSON，包含开始、完成或中断时刻、目标车道、风险峰值与累计扣分。
+
+每辆 Actor 的首维是到该车任务终点的沿路线剩余米数，沿用编码器固定的 1000 m 缩放。环境从双 Ego 路线文件中各自的 `<trip>` 读取目标 Edge 和 `arrivalPos`，默认取末端，支持 `max`、`center` 和数值位置。可用 `MultiEgoEnv(route_file=...)` 指定同一路网的其他双 Ego 路线。活动 Ego 的无效距离会报告车辆、道路、路线和目标。Critic 仍使用实时累计行驶距离。
+
+新训练 checkpoint 标记 `masac_env_version=2`。旧版模块化 MASAC checkpoint 请使用原训练版本评估，以保留其距离语义和奖励口径。旧 134 维 B0 checkpoint 沿用原评估路径。
 
 ## 3. 目录结构
 
@@ -111,14 +115,14 @@ python3 train_masac.py \
   --buffer-capacity 5000 \
   --train-every 10 \
   --log-every 500 \
-  --gamma 0.999 \
+  --gamma 0.99 \
   --learning-rate 3e-5 \
   --initial-alpha 0.01 \
   --seed 42 \
   --output-dir runs/masac_smoke_2500
 ```
 
-正式训练默认参数为 1,000,000 个共享 SUMO 全局步、Replay 容量 1,000,000、batch 512、Learning Starts 100、学习率 3e-5、γ=0.99、`--tau=0.005`、seed 42，每 500,000 步保存 checkpoint，默认输出 `runs/masac`。两辆 Ego 的 α 独立学习。上述 2,500 步命令显式使用小参数，仅为历史冒烟配置。训练开始的前 `learning-starts` 个全局步使用均匀随机动作，后续使用随机 Actor 策略。
+正式训练默认参数为 1,000,000 个共享 SUMO 全局步、Replay 容量 1,000,000、batch 512、Learning Starts 100、学习率 3e-5、γ=0.99、`--tau=0.005`、seed 42，每 200,000 步保存 checkpoint，默认输出 `runs/masac`。两辆 Ego 的 α 独立学习。上述 2,500 步命令显式使用小参数，用于冒烟验证。训练开始的前 `learning-starts` 个全局步使用均匀随机动作，后续使用随机 Actor 策略。
 
 训练结束保存 `runs/masac_smoke_2500/checkpoints/masac_seed42_step_2500.pt`，其中包含 Actor、Critic、Target Critic、α 和优化器状态；**不包含 Replay Buffer、SUMO 物理状态或随机数全状态，不能精确续训**。`runs/` 由 `.gitignore` 排除，模型文件需另行归档。
 
@@ -172,7 +176,7 @@ python3 evaluate_masac.py \
 
 默认 `--device auto`，CUDA 可用时选择 `cuda:0` 并用 2 个 PyTorch CPU 算子线程，否则在 CPU 训练，线程数为 PyTorch 当前默认值与 8 的较小者。可用 `--device cpu`、`--device cuda:N` 或 `--torch-threads N` 显式覆盖。SUMO 与 Replay 存储在 CPU。请求设备、实际设备和线程数写入配置。评估器可在 CPU 读取 CUDA 训练生成的 checkpoint。
 
-训练参数 `--checkpoint-every 500000`；默认每 500,000 个共享 SUMO 控制步保存一次，结束时保存最终状态，恰逢节点只保存一次。`--tensorboard` 默认开启，可用 `--no-tensorboard` 关闭；JSONL 始终开启。动作窗口复用 `--log-every`（默认 40 步），最后不足窗口仍写实际长度。实验目录不可重复写入已有 `train/metrics.jsonl`，避免混合两次训练。
+训练参数 `--checkpoint-every 200000`；默认每 200,000 个共享 SUMO 控制步保存一次，结束时保存最终状态，恰逢节点只保存一次。`--tensorboard` 默认开启，可用 `--no-tensorboard` 关闭；JSONL 始终开启。动作窗口复用 `--log-every`（默认 40 步），最后不足窗口仍写实际长度。实验目录不可重复写入已有 `train/metrics.jsonl`，避免混合两次训练。
 
 ```text
 runs/<experiment_id>/
