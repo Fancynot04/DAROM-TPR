@@ -39,6 +39,7 @@ class JointReplayBuffer:
         agent_ids=AGENT_IDS,
         nav_dim=0,
         team=False,
+        policy_obs_dim=None,
     ):
         if capacity <= 0:
             raise ValueError("Invalid capacity")
@@ -46,10 +47,12 @@ class JointReplayBuffer:
         if tuple(agent_ids) != self.AGENT_IDS:
             raise ValueError("Agent order mismatch")
 
+        if policy_obs_dim is None:
+            policy_obs_dim = 134 + nav_dim
         self.shapes = {
             **self.SHAPES,
-            "policy_obs": (2, 134 + nav_dim),
-            "next_policy_obs": (2, 134 + nav_dim),
+            "policy_obs": (2, policy_obs_dim),
+            "next_policy_obs": (2, policy_obs_dim),
             "critic_obs": (2, 93 + nav_dim),
             "next_critic_obs": (2, 93 + nav_dim),
         }

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import torch
 
-from src.evaluation_metrics import AgentMetrics, aggregate, joint_record, measured_jerk
+from src.evaluation_metrics import AgentMetrics, BrakingResponse, aggregate, joint_record, measured_jerk
 from src.envs.multi_ego_env import MultiEgoEnv
 from src.agents.masac import MultiAgentGaussianActor
 from train_masac import snapshot, AGENT_IDS
@@ -180,3 +180,28 @@ def test_frozen_reference_speed_success_and_recorder_dt():
         assert AgentMetrics().finish(outcome, 0)['success'] == old
     recorder = subprocess.check_output(['git', 'show', '913a73f:src/trajectory_recorder.py'], text=True)
     assert "(after - before) / self.dt" in recorder
+
+
+
+def test_braking_response_times_follow_first_ttc_encounter():
+    response = BrakingResponse()
+
+    def step(time, requested, measured, risk):
+        response.observe(
+            {"agent_step": True, "pre": {"time": 120 + time},
+             "depart_time": 120, "post_time": 120 + time + 0.1, "post_acceleration": measured},
+            [requested, 0], {"ttc_risk": risk},
+        )
+
+    step(1.0, 0, -0.3, 0)
+    step(1.1, 0, 0.0, 0.5)
+    step(1.2, -1.0, -0.7, 0.6)
+    step(1.3, 0, 0.0, 0.0)
+    step(1.4, -2.0, -2.0, 0.8)
+
+    assert response.result() == {
+        "first_requested_brake_since_departure_s": 1.2,
+        "first_ttc_risk_since_departure_s": 1.1,
+        "first_ttc_risk_to_requested_brake_s": 0.1,
+        "first_ttc_risk_to_measured_brake_s": 0.2,
+    }

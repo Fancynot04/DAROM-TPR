@@ -14,6 +14,22 @@ from src.geometry import (
     world_velocity,
 )
 
+# Raw units: bumper gap (m), signed closing speed (m/s), capped TTC (s).
+LEADER_FEATURE_SCALE = (120.0, 120.0 / 3.6, 10.0)
+
+
+def leader_observation(vehicle, ego_id, ego_speed):
+    lookahead, _, ttc_cap = LEADER_FEATURE_SCALE
+    leader = vehicle.getLeader(ego_id, lookahead)
+    if leader and leader[0]:
+        gap = leader[1] + vehicle.getMinGap(ego_id)
+        if gap <= lookahead:
+            closing_speed = ego_speed - vehicle.getSpeed(leader[0])
+            ttc = min(ttc_cap, max(0.0, gap) / closing_speed) if closing_speed > 0 else ttc_cap
+            return np.array([gap, closing_speed, ttc], dtype=np.float32)
+    return np.array([lookahead, 0.0, ttc_cap], dtype=np.float32)
+
+
 @dataclass(frozen=True)
 class RouteGoal:
     edge: str

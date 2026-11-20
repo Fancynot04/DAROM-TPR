@@ -11,6 +11,7 @@ from torch.nn import functional as F
 from gymnasium import spaces
 
 from src.delay_encoder import DelayAwareGRUEncoder
+from src.envs.observation import LEADER_FEATURE_SCALE
 
 
 class GaussianActor(nn.Module):
@@ -23,6 +24,7 @@ class GaussianActor(nn.Module):
         action_scale=5.0,
         hidden_dim=256,
         nav_dim=0,
+        actor_leader_features=False,
     ):
         super().__init__()
 
@@ -50,6 +52,7 @@ class GaussianActor(nn.Module):
             gru_hidden=64,
             input_mode="antwerp_scaled_reversed",
             nav_dim=nav_dim,
+            actor_leader_features=actor_leader_features,
         )
 
         self.policy = nn.Sequential(
@@ -116,11 +119,12 @@ class MultiAgentGaussianActor(nn.Module):
         self,
         ego_ids=("ego_1", "ego_2"),
         nav_dim=0,
+        actor_leader_features=False,
     ):
         super().__init__()
 
         self.ego_ids = tuple(ego_ids)
-        self.obs_dim = 134 + nav_dim
+        self.obs_dim = 134 + nav_dim + len(LEADER_FEATURE_SCALE) * int(actor_leader_features)
 
         if len(set(self.ego_ids)) != len(self.ego_ids):
             raise ValueError("Duplicate Ego IDs")
@@ -129,7 +133,8 @@ class MultiAgentGaussianActor(nn.Module):
             raise ValueError("No Ego IDs")
 
         self.actors = nn.ModuleDict({
-            ego_id: GaussianActor(obs_dim=self.obs_dim, nav_dim=nav_dim)
+            ego_id: GaussianActor(obs_dim=self.obs_dim, nav_dim=nav_dim,
+                                  actor_leader_features=actor_leader_features)
             for ego_id in self.ego_ids
         })
 

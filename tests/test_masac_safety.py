@@ -311,7 +311,8 @@ def test_route_goal_observations_with_sumo(tmp_path, origin, goal, arrival):
         env.close()
 
 
-def test_real_leader_gap_and_ttc_beyond_old_lookahead(tmp_path):
+@pytest.mark.parametrize("actor_leader_features", [False, True])
+def test_real_leader_gap_and_ttc_beyond_old_lookahead(tmp_path, actor_leader_features):
     route = tmp_path / "following.rou.xml"
     route.write_text("""<routes>
         <vType id="ego" maxSpeed="33.3333333333" speedFactor="1" length="5" minGap="2.5"/>
@@ -320,9 +321,15 @@ def test_real_leader_gap_and_ttc_beyond_old_lookahead(tmp_path):
         <trip id="ego_1" type="ego" depart="0.1" from="E76" to="D3"
               departLane="0" departPos="10" departSpeed="30"/>
     </routes>""")
-    env = MultiEgoEnv(reward_config=MASACRewardConfig(), route_file=route)
+    env = MultiEgoEnv(reward_config=MASACRewardConfig(), route_file=route,
+                      actor_leader_features=actor_leader_features)
     try:
-        _, infos = env.reset()
+        observations, infos = env.reset()
+        actor_obs, critic_obs, _ = snapshot(env, observations)
+        assert actor_obs.shape == (2, 139 if actor_leader_features else 136)
+        assert critic_obs.shape == (2, 95)
+        if actor_leader_features:
+            np.testing.assert_array_equal(actor_obs[1, 93:96], [120, 0, 10])
         vehicle = env.world.conn.vehicle
         vehicle.setSpeed("ego_2", 0)
         _, _, _, _, infos = env.step({"ego_2": [0, 0]})
@@ -331,6 +338,16 @@ def test_real_leader_gap_and_ttc_beyond_old_lookahead(tmp_path):
         leader, reported_gap = vehicle.getLeader("ego_1", 120)
         assert leader == "ego_2"
         assert reported_gap == pytest.approx(57.5)
+        observations, _ = env._build_output()
+        update = env.delay_buffer.update
+        env.delay_buffer.update = lambda ego, observation: update(ego, observation, delay=0)
+        env._update_policy_observations(observations, {
+            ego: {} for ego in env.AGENTS
+        })
+        if actor_leader_features:
+            actor_obs, critic_obs, _ = snapshot(env, observations)
+            assert actor_obs[0, 93:96] == pytest.approx([60, 30, 2])
+            np.testing.assert_array_equal(critic_obs[0, :93], observations["ego_1"].ravel())
         _, _, _, _, infos = env.step(dict.fromkeys(env.AGENTS, [0, 0]))
         assert infos["ego_1"]["following_risks"] == pytest.approx({
             "gap_risk": 0, "ttc_risk": 1 / 3, "following_reward": -1 / 30,

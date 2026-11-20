@@ -20,10 +20,11 @@ class DelayedObservation:
 class MultiEgoDelayBuffer:
     """每辆 Ego 独立维护观测队列和通信延迟。"""
 
-    def __init__(self, ego_ids, max_delay=20, seed=42):
+    def __init__(self, ego_ids, max_delay=20, seed=42, observation_shape=(31, 3)):
         self.ego_ids = tuple(ego_ids)
         self.max_delay = int(max_delay)
         self.seed = int(seed)
+        self.observation_shape = observation_shape
 
         if not self.ego_ids:
             raise ValueError("No Ego IDs")
@@ -36,12 +37,11 @@ class MultiEgoDelayBuffer:
 
         self.reset()
 
-    @staticmethod
-    def _check_observation(observation):
+    def _check_observation(self, observation):
         obs = np.asarray(observation, dtype=np.float32)
 
-        if obs.shape != (31, 3):
-            raise ValueError("Expected observation (31, 3)")
+        if obs.shape != self.observation_shape:
+            raise ValueError(f"Expected observation {self.observation_shape}")
 
         if not np.isfinite(obs).all():
             raise ValueError("Non-finite observation")

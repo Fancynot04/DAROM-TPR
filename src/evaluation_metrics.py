@@ -43,6 +43,50 @@ def wilson(successes, total, scale=100):
                 ci95=[scale*max(0, center-half), scale*min(1, center+half)], method='Wilson')
 
 
+class BrakingResponse:
+    """Evaluation-only timing on true state, per Ego relative to departure."""
+
+    BRAKE_THRESHOLD_MPS2 = -0.1
+
+    def __init__(self):
+        self.first_brake_s = None
+        self.first_risk_s = None
+        self.request_delay_s = None
+        self.measured_delay_s = None
+        self.encounter_ended = False
+
+    def observe(self, sample, action, following):
+        if sample is None or not sample["agent_step"]:
+            return
+        time = sample["pre"]["time"] - sample["depart_time"]
+        braking = action[0] <= self.BRAKE_THRESHOLD_MPS2
+        if braking and self.first_brake_s is None:
+            self.first_brake_s = round(time, 6)
+        risk = following is not None and following["ttc_risk"] > 0
+        if not risk:
+            if self.first_risk_s is not None:
+                self.encounter_ended = True
+            return
+        if self.encounter_ended:
+            return
+        if self.first_risk_s is None:
+            self.first_risk_s = round(time, 6)
+        if braking and self.request_delay_s is None:
+            self.request_delay_s = round(time - self.first_risk_s, 6)
+        measured = sample["post_acceleration"]
+        if measured is not None and measured <= self.BRAKE_THRESHOLD_MPS2 and self.measured_delay_s is None:
+            after = sample["post_time"] - sample["depart_time"]
+            self.measured_delay_s = round(after - self.first_risk_s, 6)
+
+    def result(self):
+        return {
+            "first_requested_brake_since_departure_s": self.first_brake_s,
+            "first_ttc_risk_since_departure_s": self.first_risk_s,
+            "first_ttc_risk_to_requested_brake_s": self.request_delay_s,
+            "first_ttc_risk_to_measured_brake_s": self.measured_delay_s,
+        }
+
+
 class AgentMetrics:
     def __init__(self):
         self.speeds = []

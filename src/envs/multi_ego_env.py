@@ -8,7 +8,7 @@ import numpy as np
 from .sumo_world import SumoWorld, SUMO_DIR
 from .ego import Ego
 from .control import EgoController
-from .observation import RouteGoal, build_observation, remaining_goal_distance
+from .observation import RouteGoal, build_observation, leader_observation, remaining_goal_distance
 from .stalled import StalledDetector
 
 from .exit_rules import missed_exit_before_step, route_missed_before_step
@@ -43,6 +43,7 @@ class MultiEgoEnv:
         stalled_terminate=False,
         route_file=None,
         legacy_route_semantics=False,
+        actor_leader_features=False,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -69,6 +70,7 @@ class MultiEgoEnv:
         self.reward_tracker = MASACRewards(reward_config) if reward_config is not None else None
         self.target_exit_dim = TARGET_EXIT_DIM if self.reward_tracker is not None else 0
         self.legacy_route_semantics = legacy_route_semantics
+        self.actor_leader_features = actor_leader_features
         self.lane_network = None
 
         self.world = None
@@ -92,6 +94,7 @@ class MultiEgoEnv:
             self.AGENTS,
             max_delay=20,
             seed=42,
+            observation_shape=(self.OBS_SHAPE[0] + int(actor_leader_features), self.OBS_SHAPE[1]),
         )
 
         self.policy_observations = {}
@@ -253,6 +256,9 @@ class MultiEgoEnv:
         Waiting / Finished Ego 不更新延迟队列。
         """
 
+        entity_count, entity_dim = self.OBS_SHAPE
+        base_dim = entity_count * entity_dim
+        actor_obs_dim = base_dim + entity_dim * int(self.actor_leader_features)
         for ego_id in self.AGENTS:
             status = self.egos[ego_id].state.status
 
@@ -271,6 +277,12 @@ class MultiEgoEnv:
                             UNREACHABLE_LANE_CHANGES if changes is None else changes
                         )
                         infos[ego_id]["signed_min_lane_changes"] = changes
+
+                if self.actor_leader_features:
+                    front = leader_observation(self.world.conn.vehicle, ego_id, actor_observation[0, 2])
+                    # Only row 0 is refreshed live by the delay buffer; the front
+                    # vehicle row travels with the rest of the traffic packet.
+                    actor_observation = np.vstack((actor_observation, front))
 
                 # 刚出发的 Ego：独立初始化延迟队列
                 if ego_id not in self.delay_buffer.active:
@@ -293,14 +305,16 @@ class MultiEgoEnv:
                 # + 1 维观测年龄
                 policy_obs = self.action_history.encode(
                     ego_id,
-                    delayed.observation,
+                    delayed.observation[:entity_count],
                     delay=delayed.age,
                 )
 
-                if self.target_exit_dim:
+                if self.actor_leader_features or self.target_exit_dim:
+                    nav = self.target_exit_features(ego_id) if self.target_exit_dim else ()
                     policy_obs = np.concatenate([
-                        policy_obs[:93], self.target_exit_features(ego_id), policy_obs[93:],
-                    ])
+                        policy_obs[:base_dim], delayed.observation[entity_count:].reshape(-1),
+                        nav, policy_obs[base_dim:],
+                    ], dtype=np.float32)
                 self.policy_observations[ego_id] = policy_obs
 
                 infos[ego_id].update({
@@ -315,9 +329,10 @@ class MultiEgoEnv:
                 # Waiting：零向量
                 # Finished：保留此前最后的策略观测
                 if ego_id not in self.policy_observations:
-                    policy_obs = np.zeros(134 + self.target_exit_dim, dtype=np.float32)
+                    policy_dim = actor_obs_dim + self.target_exit_dim + self.action_history.hist_len * 2 + 1
+                    policy_obs = np.zeros(policy_dim, dtype=np.float32)
                     if self.target_exit_dim:
-                        policy_obs[93:93 + self.target_exit_dim] = self.target_exit_features(ego_id)
+                        policy_obs[actor_obs_dim:actor_obs_dim + self.target_exit_dim] = self.target_exit_features(ego_id)
                     self.policy_observations[ego_id] = policy_obs
 
                 infos[ego_id].update({

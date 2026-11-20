@@ -16,7 +16,7 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
-from src.rewards.masac import MASACRewardConfig, MASAC_ENV_VERSION, TARGET_EXIT_DIM
+from src.rewards.masac import LEGACY_MASAC_ENV_VERSION, MASACRewardConfig, MASAC_ENV_VERSION, TARGET_EXIT_DIM
 from src.agents.masac import MultiAgentGaussianActor
 from src.agents.centralized_critic import CentralizedTwinQ
 from src.agents.replay_buffer import JointReplayBuffer
@@ -213,7 +213,10 @@ def train(args, device):
     if getattr(args, "gamma", 0.99) != 0.99:
         raise ValueError("O3-D3 MASAC requires gamma=0.99")
     args.gamma = 0.99
-    args.masac_env_version = MASAC_ENV_VERSION
+    args.masac_env_version = getattr(args, "masac_env_version", MASAC_ENV_VERSION)
+    if args.masac_env_version not in (LEGACY_MASAC_ENV_VERSION, MASAC_ENV_VERSION):
+        raise ValueError(f"Unsupported MASAC environment version: {args.masac_env_version}")
+    args.actor_leader_features = getattr(args, "actor_leader_features", False)
     args.tau = getattr(args, "tau", 0.005)
     args.checkpoint_every = getattr(args, "checkpoint_every", 100000)
     args.tensorboard = getattr(args, "tensorboard", True)
@@ -251,6 +254,7 @@ def train(args, device):
     # 1. 创建网络及优化器
     actors = MultiAgentGaussianActor(
         ego_ids=AGENT_IDS, nav_dim=TARGET_EXIT_DIM,
+        actor_leader_features=args.actor_leader_features,
     ).to(device)
     critic = CentralizedTwinQ(
         num_agents=len(AGENT_IDS), nav_dim=TARGET_EXIT_DIM,
@@ -276,6 +280,7 @@ def train(args, device):
         agent_ids=AGENT_IDS,
         nav_dim=TARGET_EXIT_DIM,
         team=reward_config.team,
+        policy_obs_dim=actors.obs_dim,
     )
 
     # 3. 创建双 Ego 环境
@@ -290,6 +295,8 @@ def train(args, device):
         collect_control_trace=args.trace_controls,
         stalled_shadow=args.stalled_shadow,
         stalled_terminate=args.stalled_terminate,
+        legacy_route_semantics=args.masac_env_version == LEGACY_MASAC_ENV_VERSION,
+        actor_leader_features=args.actor_leader_features,
     )
 
     log = TrainingLog(output_dir / "train", args.tensorboard)
@@ -673,6 +680,11 @@ def build_parser():
     parser.add_argument("--stalled-terminate", action=argparse.BooleanOptionalAction, default=None,
                         help="End a stalled Ego episode with a -400 penalty (default: enabled unless using USP)")
     parser.add_argument("--stalled-shadow", action="store_true", help="Log Stalled-v1 diagnostics without changing the task")
+    parser.add_argument("--masac-env-version", type=int,
+                        choices=(LEGACY_MASAC_ENV_VERSION, MASAC_ENV_VERSION), default=MASAC_ENV_VERSION,
+                        help="Use version 2 to match legacy checkpoints' lane observation and exit rules")
+    parser.add_argument("--actor-leader-features", action="store_true",
+                        help="Add delayed leader bumper gap, closing speed and TTC to each Actor")
     parser.add_argument("--trace-controls", action="store_true", help="Log per-Ego TraCI gaps, motion, and control commands")
     parser.add_argument("--max-active-steps", type=int, default=MultiEgoEnv.DEFAULT_MAX_ACTIVE_STEPS,
                         help="Per-Ego timeout in active control steps")

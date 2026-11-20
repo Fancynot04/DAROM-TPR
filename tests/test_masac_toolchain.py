@@ -341,7 +341,8 @@ def test_plot_single_multi_seed_and_algorithm(work, monkeypatch):
     assert (work / "single/plot_source.csv").exists()
 
 
-def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
+@pytest.mark.parametrize("actor_leader_features,env_version", [(False, 3), (True, 2)])
+def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_leader_features, env_version):
     """Exercise real SUMO->replay->SAC updates->checkpoint->evaluation."""
     import train_masac
     import evaluate_masac
@@ -395,6 +396,8 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         device="cpu",
         gamma=0.99,
         reward_ttc_threshold=2.75,
+        actor_leader_features=actor_leader_features,
+        masac_env_version=env_version,
         learning_rate=3e-5,
         initial_alpha=0.01,
         output_dir=str(work),
@@ -422,7 +425,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         )
         assert report["metric_version"] == METRIC_VERSION
         assert report["trainer_config"]["gamma"] == 0.99
-        assert report["training_config"]["masac_env_version"] == 3
+        assert report["training_config"]["masac_env_version"] == env_version
         assert report["training_config"]["safety_reward"] == {
             "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 1.0,
         }
@@ -441,6 +444,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
             components = record["reward_components"][key]
             assert components["task"] == -400.0
             assert sum(components.values()) == pytest.approx(record["rewards"][key])
+            assert "first_ttc_risk_to_requested_brake_s" in record["per_agent"][key]
         validate_results(work / "short_evaluation/summary.json")
         assert "TRACE step=" not in capsys.readouterr().out
     finally:
@@ -462,7 +466,10 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
     assert final["config"]["team_q_weight"] == 1.0
     assert final["team_critic"] and final["target_team_critic"]
     assert final["team_critic_optimizer"]["state"]
-    actor = MultiAgentGaussianActor(ego_ids=AGENT_IDS, nav_dim=2)
+    assert final["config"]["actor_leader_features"] is actor_leader_features
+    actor = MultiAgentGaussianActor(ego_ids=AGENT_IDS, nav_dim=2,
+                                    actor_leader_features=actor_leader_features)
+    assert actor.obs_dim == (139 if actor_leader_features else 136)
     actor.load_state_dict(final["actors"], strict=True)
     assert all(sha256(r["path"]) == r["sha256"] for r in index)
 
@@ -522,6 +529,10 @@ def test_training_cli_defaults():
     parser = build_parser()
     args = parser.parse_args([])
     assert parser.parse_args(["--no-stalled-terminate"]).stalled_terminate is False
+    assert args.masac_env_version == 3
+    assert parser.parse_args(["--masac-env-version", "2"]).masac_env_version == 2
+    assert not args.actor_leader_features
+    assert parser.parse_args(["--actor-leader-features"]).actor_leader_features
     assert (
         args.total_steps,
         args.buffer_capacity,

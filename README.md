@@ -21,8 +21,9 @@
 
 ## 2. CTDE-MASAC 结构
 
-- **分散 Actor**：每辆 Ego 使用独立的 `GaussianActor`（DAROM `DelayAwareGRUEncoder` + tanh-Gaussian 策略）；仅使用自己的 136 维延迟策略输入。
+- **分散 Actor**：每辆 Ego 使用独立的 `GaussianActor`（DAROM `DelayAwareGRUEncoder` + tanh-Gaussian 策略）；仅使用本车观测，默认 136 维。
 - **Actor 输入（136）**：当前 Ego 状态及最多 30 辆邻车的 31×3 基础观测（93）＋目标出口编码（2）＋20×2 自身动作历史（40）＋观测年龄（1）。邻车状态带通信延迟；Ego 自身状态实时更新。新动作位于历史开头，按实际观测年龄决定保留数量。
+- **前车特征消融（139 维）**：训练时加 `--actor-leader-features`。从 TraCI 采集 120 m 范围内的前车净间距、带符号的闭合速度（Ego 速度减前车速度）和 TTC。TTC 封顶 10 s，无前车时使用 `[120 m, 0 m/s, 10 s]`，有前车但未逼近时 TTC 同样取 10 s。三个量与邻车共用同一数据包、延迟和观测年龄。Critic 和奖励输入沿用原定义。checkpoint 保存该开关，评估自动继承，旧 checkpoint 缺少该字段时为关闭。
 - **集中 Critic**：`CentralizedTwinQ` 接收两辆 Ego 的当前真实交通观测与目标出口（每车 95 维）、联合请求动作及 active mask，拼接为 196 维输入；两套 Q 网络分别对两辆车输出 Q 值。**Critic 不使用 Actor 的 256 维 GRU 特征。**
 - **联合 Replay**：每个 SUMO 全局步对应一条双 Ego 联合经验，分别保存奖励、done、active/acted/next-active mask。`JointTransitionCollector` 延迟一个全局步提交，以正确归因 pre-step Missed Exit。
 - **优化**：SAC Twin-Q 目标、Polyak 目标网络、分 Ego Actor 优化器和独立自动熵系数 α；Critic 使用真实联合状态，执行时只需各自 Actor。
@@ -223,6 +224,8 @@ checkpoint 保留原有模型/优化器字段，并增加 Git 和源码 SHA256�
 单模型入口新增 `--trace`，默认关闭首回合 TRACE。请求 `speed_mode=96` 保持不变，实际 `getSpeedMode()` 的所有读回值按车保留在每回合和环境元数据中。本机 SUMO 1.20.0 的短程测试读回为 32（请求为 96）；工具原样记录，不将请求值冒充实际值，也不修改控制模式。JSON 同时记录 checkpoint SHA256、训练配置、Git/源码哈希、SUMO 版本、NumPy/PyTorch 版本、路网/路线哈希及关键评估配置。
 
 核心统计仍为 `dual-ego-v1`，扩展输出协议版本为 2；旧 JSON 字段和单位保留。新增联合无碰撞率为没有任一 Ego 碰撞的完整回合比例（不代表成功）。所有回合率提供 `*_stats`，包含分子、分母和 Wilson 95% CI（单位与对应比例一致）；100 个评估回合不是 100 个独立训练重复。
+
+制动对照通过 `--actor-leader-features` 分组。两组保持相同的环境版本、训练配置和评估种子。与 v2 历史模型做同口径对照时，用 `--masac-env-version 2` 训练新组，沿用 v2 的 Actor 车道索引和出口终止规则。评估 JSON/CSV 逐车记录首次请求制动时间、真实步前 TTC 风险首次出现时间，以及首次连续 TTC 风险窗口内从风险起点到 Actor 请求制动和 SUMO 实测制动的时间。制动阈值为加速度 ≤ −0.1 m/s²。未观察到对应事件时输出 `null`，比较时分别报告风险回合数和无制动响应的回合数。
 
 新增只读行为指标：成功驶离时间为 SUMO 终止时刻减实测 depart_time，仅严格成功回合有效；停车定义为有效步前速度 `<0.5 m/s`，报告停车步数/速度有效样本数及 Wilson CI，汇总按有效步池化。换道请求按实际执行动作经控制器解析的非零方向统计，朝向目标车道为负方向且当前 lane>0，远离为正方向；请求可能被道路/边界条件限制，不等于实际 SUMO 换道。物理换道为同 Edge 连续有效实测 lane index 的变化，另报有效观测对数；跨 Edge 全部排除，计数仅代表可观测变化，不能宣称完整运动总数。首次进入 E77 的车道读取有效实测 road/lane；未观测到记 null，分布只使用有观测的回合。无法采集或不适用的时间、行为统计为 null，并保留诊断说明及有效分母。
 

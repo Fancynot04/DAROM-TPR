@@ -189,3 +189,22 @@ def test_observation_age_can_exceed_max_delay():
 
     # Ego 自身状态仍然实时更新
     assert result.observation[0, 0] == 101.0
+
+
+def test_leader_features_share_traffic_delay_and_old_packets():
+    buffer = MultiEgoDelayBuffer(("ego",), observation_shape=(32, 3))
+
+    def packet(position, neighbor, leader):
+        return np.vstack([make_obs(position, neighbor), leader]).astype(np.float32)
+
+    buffer.activate("ego", packet(100, 10, [120, 0, 10]))
+    first = buffer.update("ego", packet(101, 11, [12, 6, 2]), delay=2)
+    assert first.observation[0, 0] == 101
+    np.testing.assert_array_equal(first.observation[-1], [120, 0, 10])
+    buffer.update("ego", packet(102, 22, [18, 6, 3]), delay=2)
+    received = buffer.update("ego", packet(103, 33, [7, 7, 1]), delay=2)
+    assert received.age == 2 and received.observation[0, 0] == 103
+    assert received.observation[1, 0] == 11
+    np.testing.assert_array_equal(received.observation[-1], [12, 6, 2])
+    newest = buffer.update("ego", packet(104, 44, [2, 8, 0.25]), delay=0)
+    np.testing.assert_array_equal(newest.observation[-1], [2, 8, 0.25])

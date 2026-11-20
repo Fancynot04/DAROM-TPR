@@ -11,13 +11,13 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
-from src.rewards.masac import MASACRewardConfig, MASAC_ENV_VERSION, TARGET_EXIT_DIM
+from src.rewards.masac import LEGACY_MASAC_ENV_VERSION, MASACRewardConfig, MASAC_ENV_VERSION, TARGET_EXIT_DIM
 from src.visualization.gui_camera import (
     update_gui_camera,
 )
 from src.agents.masac import MultiAgentGaussianActor
 from train_masac import snapshot, AGENT_IDS
-from src.evaluation_metrics import AgentMetrics, aggregate, joint_record, REFERENCE_COMMIT, wilson
+from src.evaluation_metrics import AgentMetrics, BrakingResponse, aggregate, joint_record, REFERENCE_COMMIT, wilson
 from src.experiment_tracking import sha256, git_metadata, evaluation_fingerprint, runtime_versions
 from src.evaluation_results import write_results, EVALUATION_PROTOCOL_VERSION
 from sumolib import checkBinary
@@ -41,14 +41,16 @@ def evaluate(args):
     reward_config = checkpoint.get("config", {})
     components = reward_config.get("reward_components")
     env_version = reward_config.get("masac_env_version")
-    if components is not None and env_version not in (2, MASAC_ENV_VERSION):
+    if components is not None and env_version not in (LEGACY_MASAC_ENV_VERSION, MASAC_ENV_VERSION):
         raise ValueError(
             "Checkpoint has a different MASAC environment version. "
             "Evaluate it with its original training code and observation semantics."
         )
+    actor_leader_features = reward_config.get("actor_leader_features", False)
     actors = MultiAgentGaussianActor(
         ego_ids=AGENT_IDS,
         nav_dim=TARGET_EXIT_DIM if components is not None else 0,
+        actor_leader_features=actor_leader_features,
     )
     actors.load_state_dict(
         checkpoint["actors"],
@@ -79,7 +81,8 @@ def evaluate(args):
         # Checkpoints written before the timeout became configurable used 4,000 steps.
         max_active_steps=reward_config.get("max_active_steps", 4000),
         stalled_terminate=stalled_terminate,
-        legacy_route_semantics=components is None or env_version == 2,
+        legacy_route_semantics=components is None or env_version == LEGACY_MASAC_ENV_VERSION,
+        actor_leader_features=actor_leader_features,
     )
 
     records = []
@@ -104,6 +107,7 @@ def evaluate(args):
 
             outcomes = {}
             metrics = {ego_id: AgentMetrics() for ego_id in AGENT_IDS}
+            braking = {ego_id: BrakingResponse() for ego_id in AGENT_IDS}
             agent_records = {}
             rewards_total = {
                 ego_id: 0.0 for ego_id in AGENT_IDS
@@ -203,8 +207,10 @@ def evaluate(args):
 
                 for ego_id in AGENT_IDS:
                     if ego_id not in outcomes:
+                        sample = infos[ego_id]["evaluation_metrics"]
+                        braking[ego_id].observe(sample, actions.get(ego_id), infos[ego_id].get("following_risks"))
                         metrics[ego_id].observe(
-                            infos[ego_id]["evaluation_metrics"],
+                            sample,
                             terminations[ego_id] or truncations[ego_id],
                         )
                     
@@ -230,6 +236,7 @@ def evaluate(args):
                     ):
                         reason = infos[ego_id].get("terminal_reason")
                         agent_records[ego_id] = metrics[ego_id].finish(reason, rewards_total[ego_id])
+                        agent_records[ego_id].update(braking[ego_id].result())
                         
                         agent_records[ego_id]["usp_steps"] = (
                             usp_steps[ego_id]
@@ -328,6 +335,12 @@ def evaluate(args):
         "stochastic": args.stochastic,
         "protocol": {
             "speed": "valid pre-step TraCI speed; episode means equally weighted",
+            "first_brake": {
+                "acceleration_threshold_mps2": BrakingResponse.BRAKE_THRESHOLD_MPS2,
+                "risk": "positive TTC risk on true pre-step state while the following module is enabled",
+                "window": "first contiguous TTC-risk encounter",
+                "time": "request at pre-step, measurement at post-step; null when unobserved",
+            },
             "jerk": "absolute measured acceleration difference / simulation dt; exclude first and terminal transitions",
             "hard_braking": "valid post-step acceleration <= -4.5 m/s^2, including terminal",
             "success": "Arrived",

@@ -4,6 +4,8 @@ import torch.nn as nn
 import math
 import torch
 
+from src.envs.observation import LEADER_FEATURE_SCALE
+
 
 class DelayAwareEncoder(BaseFeaturesExtractor):
     def __init__(self, observation_space, act_hist_dim, delay_dim, features_dim=256):
@@ -67,7 +69,7 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
 
     def __init__(self, observation_space, act_dim, hist_len, delay_dim,
                  features_dim=256, gru_hidden=64,
-                 input_mode='antwerp_scaled_reversed', nav_dim=0):
+                 input_mode='antwerp_scaled_reversed', nav_dim=0, actor_leader_features=False):
         super().__init__(observation_space, features_dim)
 
         if input_mode not in self.INPUT_MODES:
@@ -86,11 +88,12 @@ class DelayAwareGRUEncoder(BaseFeaturesExtractor):
         self.delay_dim = delay_dim
         if self.obs_dim % 3 != 0 or delay_dim != 1 or nav_dim not in (0, 2):
             raise ValueError('DAROM-GRU expects 3 features per vehicle and one delay value')
-        num_entities = self.obs_dim // 3
+        leader_scale = list(LEADER_FEATURE_SCALE) if actor_leader_features else []
+        num_entities = (self.obs_dim - len(leader_scale)) // 3
         self.register_buffer(
             'observation_scale',
             # Fixed meter scale for Ego longitudinal distance, including MASAC route distance.
-            th.tensor([1000., 5., 30.] + [50., 20., 30.] * (num_entities - 1)),
+            th.tensor([1000., 5., 30.] + [50., 20., 30.] * (num_entities - 1) + leader_scale),
         )
 
         # -------------------------------
