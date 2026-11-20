@@ -15,7 +15,7 @@ class JointTransitionCollector:
     def _copy_transition(self, transition):
         """检查并复制经验，避免引用被外部修改。"""
 
-        shapes = self.buffer.SHAPES
+        shapes = self.buffer.shapes
 
         if set(transition) != set(shapes):
             raise ValueError("Transition fields mismatch")
@@ -98,7 +98,6 @@ class JointTransitionCollector:
                 and current["acted_mask"][i] == 0
                 and current["dones"][i] == 1
                 and current["next_active_mask"][i] == 0
-                and current["rewards"][i] != 0
             ):
                 raise ValueError(
                     "Invalid pre-step terminal transition"

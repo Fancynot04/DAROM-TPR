@@ -133,7 +133,7 @@ class MASACTrainer:
             target.mul_(1.0 - self.tau)
             target.add_(online, alpha=self.tau)
 
-    def update_critic(self, batch):
+    def update_critic(self, batch, *, collect_stats=True):
         """使用一批联合经验更新一次 Twin-Q。"""
 
         policy_next = batch["next_policy_obs"]
@@ -148,7 +148,8 @@ class MASACTrainer:
 
         valid_count = acted_mask.sum()
 
-        if valid_count.item() == 0:
+        count = int(valid_count.item())
+        if count == 0:
             raise ValueError(
                 "Batch contains no executed actions"
             )
@@ -232,19 +233,21 @@ class MASACTrainer:
         # 5. 更新目标 Critic
         self.soft_update_target()
 
+        if not collect_stats:
+            return {}
         return {
             "critic_loss": float(loss.item()),
-            "valid_agents": int(valid_count.item()),
-            "mean_q": float((((q1.detach() + q2.detach()) / 2) * acted_mask).sum().item() / valid_count.item()),
+            "valid_agents": count,
+            "mean_q": float((((q1.detach() + q2.detach()) / 2) * acted_mask).sum().item() / count),
             "mean_target": float(
                 (
                     targets * acted_mask
-                ).sum().item() / valid_count.item()
+                ).sum().item() / count
             ),
         }
 
     
-    def update_actors(self, batch):
+    def update_actors(self, batch, *, collect_stats=True):
         """逐个更新 Actor，阻止跨 Agent 梯度传播。"""
 
         policy_obs = batch["policy_obs"]
@@ -277,10 +280,11 @@ class MASACTrainer:
 
             for i, ego_id in enumerate(self.actors.ego_ids):
                 valid = valid_mask[:, i]
-                count = valid.sum()
+                count = int(valid.sum().item())
 
-                if count.item() == 0:
-                    results[f"{ego_id}_actor_updates"] = 0
+                if count == 0:
+                    if collect_stats:
+                        results[f"{ego_id}_actor_updates"] = 0
                     continue
 
                 actor = self.actors.actors[ego_id]
@@ -345,14 +349,13 @@ class MASACTrainer:
 
                 optimizer.step()
 
-                results[f"{ego_id}_mean_log_prob"] = float((log_prob_i.detach() * valid).sum().item() / count.item())
-                results[f"{ego_id}_actor_loss"] = (
-                    float(actor_loss.item())
-                )
-                results[f"{ego_id}_actor_updates"] = 1
-                results[f"{ego_id}_valid_samples"] = (
-                    int(count.item())
-                )
+                if collect_stats:
+                    results[f"{ego_id}_mean_log_prob"] = float(
+                        (log_prob_i.detach() * valid).sum().item() / count
+                    )
+                    results[f"{ego_id}_actor_loss"] = float(actor_loss.item())
+                    results[f"{ego_id}_actor_updates"] = 1
+                    results[f"{ego_id}_valid_samples"] = count
 
         finally:
             # 恢复 Critic 原本的梯度开关
@@ -375,6 +378,8 @@ class MASACTrainer:
         self,
         log_probs,
         valid_mask,
+        *,
+        collect_stats=True,
     ):
         """使用归一化动作概率密度更新各自的 alpha。"""
 
@@ -405,7 +410,8 @@ class MASACTrainer:
             count = valid.sum()
 
             if count.item() == 0:
-                results[f"{ego_id}_alpha_updates"] = 0
+                if collect_stats:
+                    results[f"{ego_id}_alpha_updates"] = 0
                 continue
 
             # SAC 自动熵系数损失
@@ -428,19 +434,14 @@ class MASACTrainer:
             loss.backward()
             optimizer.step()
 
-            results[f"{ego_id}_alpha_loss"] = (
-                float(loss.item())
-            )
-
-            results[f"{ego_id}_alpha"] = float(
-                self.log_alpha[ego_id].detach().exp().item()
-            )
-
-            results[f"{ego_id}_alpha_updates"] = 1
+            if collect_stats:
+                results[f"{ego_id}_alpha_loss"] = float(loss.item())
+                results[f"{ego_id}_alpha"] = float(self.log_alpha[ego_id].detach().exp().item())
+                results[f"{ego_id}_alpha_updates"] = 1
 
         return results
 
-    def update_alpha(self, batch):
+    def update_alpha(self, batch, *, collect_stats=True):
         """从 Replay Batch 中采样策略，自动更新 alpha。"""
 
         policy_obs = batch["policy_obs"]
@@ -464,4 +465,5 @@ class MASACTrainer:
         return self.update_alpha_from_log_probs(
             log_probs_norm,
             active_mask * acted_mask,
+            collect_stats=collect_stats,
         )

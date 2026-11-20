@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
+from src.rewards.masac import MASACRewardConfig, TARGET_EXIT_DIM
 from src.visualization.gui_camera import (
     update_gui_camera,
 )
@@ -37,16 +38,17 @@ def evaluate(args):
     if tuple(checkpoint["agent_ids"]) != AGENT_IDS:
         raise ValueError("Checkpoint agent IDs mismatch")
 
+    reward_config = checkpoint.get("config", {})
+    components = reward_config.get("reward_components")
     actors = MultiAgentGaussianActor(
-        ego_ids=AGENT_IDS
+        ego_ids=AGENT_IDS,
+        nav_dim=TARGET_EXIT_DIM if components is not None else 0,
     )
     actors.load_state_dict(
         checkpoint["actors"],
         strict=True,
     )
     actors.eval()
-
-    reward_config = checkpoint.get("config", {})
 
     gui_enabled = bool(getattr(args, "gui", False))
 
@@ -61,6 +63,7 @@ def evaluate(args):
             reward_config.get("usp_penalty", 0.02)
         ),
         gui=gui_enabled,
+        reward_config=MASACRewardConfig(**components) if components is not None else None,
     )
 
     records = []
@@ -263,6 +266,7 @@ def evaluate(args):
                 "outcomes": outcomes,
                 "rewards": rewards_total,
                 "both_success": both_success,
+                **env.reward_summary(),
             }
             records.append(record)
 
@@ -299,6 +303,7 @@ def evaluate(args):
             "net_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp.net.xml"),
             "route_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp_easy_o3_d3_homogeneous_dual.rou.xml"),
             "stopped_speed_threshold_mps": 0.5,
+            "disable_teleport": components is not None,
         },
         "reference_commit": REFERENCE_COMMIT,
         "rate_unit": "fraction for legacy success_rates/joint_success_rate; percent in per_agent/joint",

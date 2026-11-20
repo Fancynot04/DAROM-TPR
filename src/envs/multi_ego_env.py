@@ -1,15 +1,18 @@
 
 """多 Ego 环境：统一 SUMO 时钟，独立 Ego 状态。"""
 
+from xml.etree import ElementTree
+
 import numpy as np
 
 from .sumo_world import SumoWorld, SUMO_DIR
 from .ego import Ego
-from .control import EgoController, parse_action
+from .control import EgoController
 from .observation import build_observation
 
 from .exit_rules import missed_exit_before_step
 from src.rewards.events import b0_reward
+from src.rewards.masac import MASACRewards, TARGET_EXIT_DIM
 
 from .action_history import MultiEgoActionHistory
 from .delay_buffer import MultiEgoDelayBuffer
@@ -30,6 +33,7 @@ class MultiEgoEnv:
         usp_enabled=False,
         usp_penalty=0.02,
         gui=False,
+        reward_config=None,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -41,6 +45,8 @@ class MultiEgoEnv:
         self.scenario = scenario
         self.speed_mode = speed_mode
         self.gui = bool(gui)
+        self.reward_tracker = MASACRewards(reward_config) if reward_config is not None else None
+        self.target_exit_dim = TARGET_EXIT_DIM if self.reward_tracker is not None else 0
 
         self.world = None
         self.egos = {}
@@ -122,9 +128,22 @@ class MultiEgoEnv:
         if ego_id in conn.vehicle.getIDList():
             conn.vehicle.remove(ego_id)
 
-        return b0_reward(event)
+        return (b0_reward(event) if self.reward_tracker is None
+                else self.reward_tracker.terminal(event))
 
     
+    def target_exit_features(self, ego_id):
+        # D1 uses [0, 0], D2 uses [1, 0], D3 uses [0, 1].
+        target = self.target_exits[ego_id]
+        return np.array([target == "D2", target == "D3"], dtype=np.float32)
+
+    def reward_summary(self):
+        values = {"teleport_events": self.teleport_events.copy()}
+        if self.reward_tracker is not None:
+            values["team_reward"] = self.reward_tracker.team_return
+            values["reward_components"] = self.reward_tracker.totals
+        return values
+
     def _build_output(self):
         """分别生成每辆 Ego 的观测和信息。"""
 
@@ -163,6 +182,7 @@ class MultiEgoEnv:
 
             infos[ego_id] = {
                 "status": state.status,
+                "target_exit": self.target_exits[ego_id],
                 "depart_time": state.depart_time,
                 "road_id": state.road_id,
                 "lane_id": state.lane_id,
@@ -187,7 +207,7 @@ class MultiEgoEnv:
         observations,
         infos,
     ):
-        """更新每辆 Ego 的 134 维延迟策略观测。
+        """更新每辆 Ego 的延迟策略观测。
 
         每个 SUMO 控制步调用一次。
         Waiting / Finished Ego 不更新延迟队列。
@@ -223,9 +243,11 @@ class MultiEgoEnv:
                     delay=delayed.age,
                 )
 
-                self.policy_observations[ego_id] = (
-                    policy_obs.copy()
-                )
+                if self.target_exit_dim:
+                    policy_obs = np.concatenate([
+                        policy_obs[:93], self.target_exit_features(ego_id), policy_obs[93:],
+                    ])
+                self.policy_observations[ego_id] = policy_obs
 
                 infos[ego_id].update({
                     "observation_ready": True,
@@ -239,9 +261,10 @@ class MultiEgoEnv:
                 # Waiting：零向量
                 # Finished：保留此前最后的策略观测
                 if ego_id not in self.policy_observations:
-                    self.policy_observations[ego_id] = (
-                        np.zeros(134, dtype=np.float32)
-                    )
+                    policy_obs = np.zeros(134 + self.target_exit_dim, dtype=np.float32)
+                    if self.target_exit_dim:
+                        policy_obs[93:93 + self.target_exit_dim] = self.target_exit_features(ego_id)
+                    self.policy_observations[ego_id] = policy_obs
 
                 infos[ego_id].update({
                     "observation_ready": False,
@@ -260,11 +283,20 @@ class MultiEgoEnv:
             SUMO_DIR / "Antwerp_easy_o3_d3_homogeneous_dual.rou.xml"
         )
 
+        trips = {trip.attrib["id"]: trip.attrib for trip in ElementTree.parse(route_file).iter("trip")}
+        self.target_exits = {ego_id: trips[ego_id]["to"] for ego_id in self.AGENTS}
+        self.needs_merge = {ego_id: trips[ego_id]["from"] == "O3" for ego_id in self.AGENTS}
+        self.teleport_events = []
+        self.team_reward = 0.0
+        if self.reward_tracker is not None:
+            self.reward_tracker.reset(self.AGENTS)
+
         self.world = SumoWorld(
             scenario=self.scenario,
             seed=seed,
             route_file=route_file,
             gui=self.gui,
+            disable_teleport=self.reward_tracker is not None,
         )
 
         self.egos = {
@@ -363,6 +395,8 @@ class MultiEgoEnv:
             ego_id: 0.0 for ego_id in self.AGENTS
         }
 
+        tracker = self.reward_tracker
+        components = {ego_id: tracker.empty() for ego_id in self.AGENTS} if tracker is not None else {}
         pre_terminated = set()
 
         metric_pre = {}
@@ -396,6 +430,8 @@ class MultiEgoEnv:
                     ego_id,
                     "Missed Exit",
                 )
+                if tracker is not None:
+                    components[ego_id]["task"] = rewards[ego_id]
                 pre_terminated.add(ego_id)
 
         # 2. 仅尚未终止的 Ego 提交动作
@@ -416,6 +452,9 @@ class MultiEgoEnv:
                 control = self.controllers[ego_id].apply_action(
                     actions[ego_id]
                 )
+
+                if tracker is not None:
+                    tracker.before_step(conn, ego_id, control)
 
                 # 仅统计真正向 SUMO 提交的换道指令
                 if self.collect_metrics and ego_id in metric_pre:
@@ -447,10 +486,28 @@ class MultiEgoEnv:
             sim.getCollidingVehiclesIDList()
         )
 
-        teleports = (
-            set(sim.getStartingTeleportIDList())
-            | set(sim.getEndingTeleportIDList())
-        )
+        started = set(sim.getStartingTeleportIDList())
+        ended = set(sim.getEndingTeleportIDList())
+        teleports = started | ended
+        teleport_details = {}
+        for ego_id in sorted(teleports.intersection(self.AGENTS)):
+            detail = {
+                "ego_id": ego_id,
+                "simulation_time": sim.getTime(),
+                "started": ego_id in started,
+                "ended": ego_id in ended,
+                "cause": "collision_detected" if ego_id in collisions else "unknown",
+            }
+            teleport_details[ego_id] = detail
+            self.teleport_events.append(detail)
+
+        present = set(conn.vehicle.getIDList()) if self.collect_metrics or tracker is not None else set()
+        if tracker is not None:
+            for ego_id in acting_ids:
+                components[ego_id] = tracker.after_step(
+                    conn, ego_id, ego_id in present and ego_id not in teleports,
+                    self.needs_merge[ego_id],
+                )
 
         arrivals = set(
             sim.getArrivedIDList()
@@ -458,9 +515,6 @@ class MultiEgoEnv:
 
         metric_steps = {}
         if self.collect_metrics:
-            present = set(conn.vehicle.getIDList())
-            started = set(sim.getStartingTeleportIDList())
-            ended = set(sim.getEndingTeleportIDList())
             emergency = set(sim.getEmergencyStoppingVehiclesIDList())
             for ego_id in self.AGENTS:
                 if self.terminations[ego_id] and ego_id not in pre_terminated:
@@ -556,6 +610,16 @@ class MultiEgoEnv:
                     ego_id,
                     event,
                 )
+                if tracker is not None:
+                    components[ego_id]["task"] = rewards[ego_id]
+
+        if tracker is not None:
+            for ego_id, values in components.items():
+                rewards[ego_id] = sum(values.values())
+                for key, value in values.items():
+                    tracker.totals[ego_id][key] += value
+            self.team_reward = tracker.settle_team(self.terminal_reasons)
+
         applied_usp = {
             ego_id: 0.0 for ego_id in self.AGENTS
         }
@@ -583,6 +647,9 @@ class MultiEgoEnv:
                 ego_id in pre_terminated
             )
         
+            infos[ego_id]["teleport_event"] = teleport_details.get(ego_id)
+            if tracker is not None:
+                infos[ego_id]["reward_components"] = components[ego_id]
             infos[ego_id]["usp_reward"] = applied_usp[ego_id]
 
             infos[ego_id]["usp_triggered"] = (

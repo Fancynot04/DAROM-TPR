@@ -16,6 +16,7 @@ class CentralizedTwinQ(nn.Module):
         action_dim=2,
         hidden_dim=256,
         action_scale=5.0,
+        nav_dim=0,
     ):
         super().__init__()
 
@@ -32,7 +33,7 @@ class CentralizedTwinQ(nn.Module):
             raise ValueError("Invalid action_scale")
 
         self.num_agents = num_agents
-        self.obs_dim = obs_dim
+        self.obs_dim = obs_dim + nav_dim
         self.action_dim = action_dim
         self.action_scale = float(action_scale)
 
@@ -44,13 +45,13 @@ class CentralizedTwinQ(nn.Module):
 
         self.register_buffer(
             "observation_scale",
-            torch.tensor(scale, dtype=torch.float32),
+            torch.tensor(scale + [1.0] * nav_dim, dtype=torch.float32),
         )
 
         # 每辆 Ego：
-        # 93 维观测 + 2 维动作 + 1 维 Mask
+        # 交通观测及可选目标出口 + 2 维动作 + 1 维 Mask
         input_dim = num_agents * (
-            obs_dim + action_dim + 1
+            self.obs_dim + action_dim + 1
         )
 
         def make_network():
@@ -72,7 +73,7 @@ class CentralizedTwinQ(nn.Module):
         active_mask,
     ):
         """
-        observations: (B, 2, 93)
+        observations: (B, 2, obs_dim)
         actions:      (B, 2, 2)
         active_mask:  (B, 2)
 

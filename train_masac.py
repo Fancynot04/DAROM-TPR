@@ -6,6 +6,7 @@
 """
 
 import argparse
+from dataclasses import fields
 import random
 from pathlib import Path
 import time
@@ -14,6 +15,7 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
+from src.rewards.masac import MASACRewardConfig, TARGET_EXIT_DIM
 from src.agents.masac import MultiAgentGaussianActor
 from src.agents.centralized_critic import CentralizedTwinQ
 from src.agents.replay_buffer import JointReplayBuffer
@@ -41,6 +43,10 @@ def snapshot(env, observations):
         for ego_id in AGENT_IDS
     ]).astype(np.float32)
 
+    if env.target_exit_dim:
+        targets = np.stack([env.target_exit_features(ego_id) for ego_id in AGENT_IDS])
+        critic_obs = np.concatenate([critic_obs, targets], axis=1)
+
     active_mask = np.asarray([
         float(
             env.egos[ego_id].state.status == "active"
@@ -67,14 +73,11 @@ def choose_actions(
         ).astype(np.float32)
 
     else:
-        with torch.no_grad():
+        device = next(actors.parameters()).device
+        with torch.inference_mode():
             action_tensor, _ = actors(
-                torch.from_numpy(
-                    policy_obs[None]
-                ),
-                torch.from_numpy(
-                    active_mask[None]
-                ),
+                torch.as_tensor(policy_obs[None], device=device),
+                torch.as_tensor(active_mask[None], device=device),
                 deterministic=False,
             )
 
@@ -130,7 +133,44 @@ def save_checkpoint(
     }, stream))
 
 
+def resolve_training_device(requested):
+    if requested == "auto":
+        return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    device = torch.device(requested)
+    if device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise ValueError("CUDA requested, but PyTorch cannot access a CUDA device")
+        index = torch.cuda.current_device() if device.index is None else device.index
+        if index >= torch.cuda.device_count():
+            raise ValueError(f"CUDA device index out of range: {index}")
+        return torch.device("cuda", index)
+    if device != torch.device("cpu"):
+        raise ValueError("Device must be auto, cpu, cuda, or cuda:N")
+    return device
+
+
 def main(args):
+    requested = getattr(args, "device", "auto")
+    device = resolve_training_device(requested)
+    previous_threads = torch.get_num_threads()
+    threads = getattr(args, "torch_threads", None)
+    if threads is None:
+        threads = 2 if device.type == "cuda" else min(previous_threads, 8)
+    if threads <= 0:
+        raise ValueError("torch_threads must be positive")
+
+    args.requested_device = requested
+    args.device = str(device)
+    args.effective_torch_threads = threads
+    torch.set_num_threads(threads)
+    try:
+        return train(args, device)
+    finally:
+        torch.set_num_threads(previous_threads)
+
+
+def train(args, device):
     if args.total_steps <= 0:
         raise ValueError("total_steps must be positive")
 
@@ -145,6 +185,10 @@ def main(args):
 
     if args.train_every <= 0 or args.log_every <= 0:
         raise ValueError("Invalid interval")
+
+    args.update_log_every = getattr(args, "update_log_every", 40)
+    if args.update_log_every <= 0:
+        raise ValueError("update_log_every must be positive")
 
     args.tau = getattr(args, "tau", 0.005)
     args.checkpoint_every = getattr(args, "checkpoint_every", 100000)
@@ -165,13 +209,19 @@ def main(args):
         args, "usp_penalty", 0.02
     )
 
+    args.reward_components = {
+        field.name: getattr(args, "reward_" + field.name, field.default)
+        for field in fields(MASACRewardConfig)
+    }
+    reward_config = MASACRewardConfig(**args.reward_components)
+
     # 1. 创建网络及优化器
     actors = MultiAgentGaussianActor(
-        ego_ids=AGENT_IDS
-    )
+        ego_ids=AGENT_IDS, nav_dim=TARGET_EXIT_DIM,
+    ).to(device)
     critic = CentralizedTwinQ(
-        num_agents=len(AGENT_IDS)
-    )
+        num_agents=len(AGENT_IDS), nav_dim=TARGET_EXIT_DIM,
+    ).to(device)
 
     trainer = MASACTrainer(
         actors=actors,
@@ -187,6 +237,7 @@ def main(args):
         capacity=args.buffer_capacity,
         seed=args.seed,
         agent_ids=AGENT_IDS,
+        nav_dim=TARGET_EXIT_DIM,
     )
 
     # 3. 创建双 Ego 环境
@@ -196,6 +247,7 @@ def main(args):
         collect_metrics=True,
         usp_enabled=args.usp,
         usp_penalty=args.usp_penalty,
+        reward_config=reward_config,
     )
 
     log = TrainingLog(output_dir / "train", args.tensorboard)
@@ -264,6 +316,11 @@ def main(args):
                 infos,
             ) = env.step(action_dict)
             
+            for ego_id in AGENT_IDS:
+                teleport = infos[ego_id]["teleport_event"]
+                if teleport is not None:
+                    log.write("teleport", global_step, **teleport)
+
             # 统计本步每辆 Ego 实际支付的 USP 奖励
             for ego_id in AGENT_IDS:
                 usp_value = float(
@@ -354,26 +411,27 @@ def main(args):
                 and len(buffer) >= args.batch_size
                 and global_step % args.train_every == 0
             ):
-                batch = buffer.sample(args.batch_size)
-
-                critic_stats = trainer.update_critic(batch)
-                actor_stats = trainer.update_actors(batch)
-                alpha_stats = trainer.update_alpha(batch)
-
-                last_losses = {
-                    **critic_stats,
-                    **actor_stats,
-                    **alpha_stats,
-                }
-
-                for i, key in enumerate(AGENT_IDS):
-                    last_losses.setdefault(key + "_alpha", float(trainer.alpha_values()[i].detach()))
-                    last_losses.setdefault(key + "_actor_loss", None)
-                    last_losses.setdefault(key + "_alpha_loss", None)
-                    last_losses.setdefault(key + "_mean_log_prob", None)
-                    last_losses.setdefault(key + "_valid_samples", 0)
                 update_count += 1
-                log.write("update", global_step, update_index=update_count, **last_losses)
+                record_update = (
+                    update_count == 1
+                    or update_count % args.update_log_every == 0
+                    or global_step + args.train_every > args.total_steps
+                )
+                batch = buffer.sample(args.batch_size, device=device)
+
+                critic_stats = trainer.update_critic(batch, collect_stats=record_update)
+                actor_stats = trainer.update_actors(batch, collect_stats=record_update)
+                alpha_stats = trainer.update_alpha(batch, collect_stats=record_update)
+
+                if record_update:
+                    last_losses = {**critic_stats, **actor_stats, **alpha_stats}
+                    alphas = trainer.alpha_values().cpu().tolist()
+                    for i, key in enumerate(AGENT_IDS):
+                        last_losses.setdefault(key + "_alpha", alphas[i])
+                        last_losses.setdefault(key + "_actor_loss", None)
+                        last_losses.setdefault(key + "_mean_log_prob", None)
+                        last_losses.setdefault(key + "_valid_samples", 0)
+                    log.write("update", global_step, update_index=update_count, **last_losses)
 
             if global_step % args.log_every == 0 or global_step == args.total_steps:
                 log.write("runtime", global_step, replay_size=len(buffer), update_count=update_count,
@@ -428,7 +486,7 @@ def main(args):
                 log.write("episode", global_step, episode_index=completed_episodes,
                     episode_global_steps=global_step - episode_start,
                     joint_success=all(r["success"] for r in agents.values()),
-                    **episode_values, **episode_window.add(agents))
+                    **env.reward_summary(), **episode_values, **episode_window.add(agents))
 
                 print(
                     f"episode={completed_episodes} "
@@ -538,6 +596,17 @@ def build_parser():
         default=0.02,
     )
 
+    for field in fields(MASACRewardConfig):
+        parser.add_argument(
+            "--reward-" + field.name.replace("_", "-"),
+            action=argparse.BooleanOptionalAction,
+            default=field.default,
+        )
+
+    parser.add_argument("--device", default="auto", help="Training device: auto (CUDA first), cpu, cuda, or cuda:N")
+    parser.add_argument("--torch-threads", type=int, default=None, help="PyTorch intra-op threads (default: 2 on CUDA, up to 8 on CPU)")
+    parser.add_argument("--update-log-every", type=int, default=40,
+                        help="Write update metrics every N optimizer rounds (1 logs every round)")
     parser.add_argument("--checkpoint-every", type=int, default=500000)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--tensorboard", action=argparse.BooleanOptionalAction, default=True)

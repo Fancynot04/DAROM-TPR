@@ -52,7 +52,8 @@ def test_one_step_delayed_commit():
     assert len(buffer) == 2
 
 
-def test_pre_step_missed_exit_attribution():
+@pytest.mark.parametrize("terminal_reward", [-400, 0])
+def test_pre_step_missed_exit_attribution(terminal_reward):
     buffer = JointReplayBuffer(capacity=10)
     collector = JointTransitionCollector(buffer)
 
@@ -70,7 +71,7 @@ def test_pre_step_missed_exit_attribution():
         make_transition(
             active=(1, 1),
             acted=(1, 0),
-            rewards=(0, -100),
+            rewards=(0, terminal_reward),
             dones=(0, 1),
             next_active=(1, 0),
         ),
@@ -80,7 +81,7 @@ def test_pre_step_missed_exit_attribution():
     # 上一步已被修正并正式存储
     assert len(buffer) == 1
 
-    assert buffer.data["rewards"][0, 1] == -100
+    assert buffer.data["rewards"][0, 1] == terminal_reward
     assert buffer.data["dones"][0, 1] == 1
     assert buffer.data["next_active_mask"][0, 1] == 0
 
@@ -95,7 +96,7 @@ def test_pre_step_missed_exit_attribution():
     assert len(buffer) == 2
 
     # Ego X 的失败只计入一次
-    assert buffer.data["rewards"][:2, 1].sum() == -100
+    assert buffer.data["rewards"][:2, 1].sum() == terminal_reward
 
     # 当前步 X 没有执行动作，不参与训练
     assert buffer.data["active_mask"][1, 1] == 0

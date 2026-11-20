@@ -35,6 +35,7 @@ class JointReplayBuffer:
         capacity=100_000,
         seed=42,
         agent_ids=AGENT_IDS,
+        nav_dim=0,
     ):
         if capacity <= 0:
             raise ValueError("Invalid capacity")
@@ -42,6 +43,13 @@ class JointReplayBuffer:
         if tuple(agent_ids) != self.AGENT_IDS:
             raise ValueError("Agent order mismatch")
 
+        self.shapes = {
+            **self.SHAPES,
+            "policy_obs": (2, 134 + nav_dim),
+            "next_policy_obs": (2, 134 + nav_dim),
+            "critic_obs": (2, 93 + nav_dim),
+            "next_critic_obs": (2, 93 + nav_dim),
+        }
         self.capacity = int(capacity)
         self.position = 0
         self.size = 0
@@ -53,7 +61,7 @@ class JointReplayBuffer:
                 (self.capacity, *shape),
                 dtype=np.float32,
             )
-            for name, shape in self.SHAPES.items()
+            for name, shape in self.shapes.items()
         }
 
     def __len__(self):
@@ -62,9 +70,9 @@ class JointReplayBuffer:
     def add(self, **transition):
         """保存一条联合经验，不保存调用者数组的引用。"""
 
-        if set(transition) != set(self.SHAPES):
-            missing = set(self.SHAPES) - set(transition)
-            extra = set(transition) - set(self.SHAPES)
+        if set(transition) != set(self.shapes):
+            missing = set(self.shapes) - set(transition)
+            extra = set(transition) - set(self.shapes)
             raise ValueError(
                 f"Transition fields: missing={missing}, "
                 f"extra={extra}"
@@ -72,7 +80,7 @@ class JointReplayBuffer:
 
         values = {}
 
-        for name, shape in self.SHAPES.items():
+        for name, shape in self.shapes.items():
             value = np.asarray(
                 transition[name],
                 dtype=np.float32,
@@ -154,7 +162,7 @@ class JointReplayBuffer:
 
         return {
             name: torch.as_tensor(
-                values[indices].copy(),
+                values[indices],
                 device=device,
             )
             for name, values in self.data.items()

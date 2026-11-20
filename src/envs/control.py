@@ -29,6 +29,7 @@ class ControlResult:
     lane_direction: int
     target_lane: int | None
     speed_limited: bool
+    lane_duration: float = 0.0
     
 
 
@@ -110,6 +111,7 @@ class EgoController:
 
         # 1. 处理横向换道
         target_lane = None
+        duration = 0.0
 
         if direction != 0 and road in LANE_CHANGE_EDGES:
             candidate = lane + direction
@@ -152,6 +154,7 @@ class EgoController:
             lane_direction=direction,
             target_lane=target_lane,
             speed_limited=executed_accel < accel,
+            lane_duration=duration,
         )
 
     def observe_after_step(self):

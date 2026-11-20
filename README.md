@@ -1,6 +1,6 @@
 # DAROM-TPR — Dual-Ego CTDE-MASAC for Highway D3 Exit
 
-> **状态：研究原型 / v0.1 训练管线基线（尚未证明策略收敛）。** 适用分支：`exp/o3-d3-ctde-v1`。本分支的主要任务是让两辆独立决策的 Ego 在同一个 SUMO 仿真中驶离 D3，而不是人为制造车辆冲突或同步出发时差。
+> **状态：研究原型 / v0.1 训练管线基线（尚未证明策略收敛）。** 适用分支：`exp/o3-d3-homogeneous-masac-v1`。本分支的主要任务是让两辆独立决策的 Ego 在同一个 SUMO 仿真中驶离 D3，而不是人为制造车辆冲突或同步出发时差。
 
 ## 1. 研究任务
 
@@ -9,25 +9,43 @@
 | 项目      | 当前实现                                                     |
 | --------- | ------------------------------------------------------------ |
 | 场景      | Antwerp **Easy**（双 Ego；Medium/Hard 双 Ego 尚未接入）      |
-| `ego_o3`  | O3 → D3；计划 120 s 出发；`O3_0` 起步                        |
-| `ego_e74` | E74 → D3；计划 120 s 出发；`E74_2` 起步                      |
+| `ego_1`   | O3 → D3；计划 120 s 出发；`O3_0` 起步                        |
+| `ego_2`   | O3 → D3；计划 123 s 出发；`O3_0` 起步                      |
 | 仿真      | 一个 SUMO 进程、一个 0.1 s 全局时钟；各车实际插入时刻可不同  |
 | 速度      | 道路及 Ego 限速 120 km/h（33.333 m/s）；Ego 出发速度 10 m/s  |
 | Episode   | 每辆 Ego 最多 **4,000 个活跃控制步**；分别终止，双方结束后重置 |
 | Ego 控制  | 纵向加速度 + 横向换道请求；`laneChangeMode=0`、无自定义安全拦截 |
-| 奖励      | B0 纯事件：Arrived +50；Collision/Missed Exit/Ego Teleported/Timeout −100；非终止 0 |
+| 奖励      | 模块化奖励，具体配置见下文 |
 
-**训练目标**：分别提高两辆 Ego 的安全抵达率，最终提高**同一回合两车同时抵达 D3 的联合成功率**。当前没有规则换道器替模型决策，也没有人为设置出发时间差 Δt。
+**训练目标**：分别提高两辆 Ego 的安全抵达率，最终提高**同一回合两车同时抵达 D3 的联合成功率**。两车均由各自的 Actor 决策，计划出发间隔为 3 s，实际插入时刻由 SUMO 决定。
 
 ## 2. CTDE-MASAC 结构
 
-- **分散 Actor**：每辆 Ego 使用独立的 `GaussianActor`（DAROM `DelayAwareGRUEncoder` + tanh-Gaussian 策略）；仅使用自己的 134 维延迟策略输入。
-- **Actor 输入（134）**：当前 Ego 状态及最多 30 辆邻车的 31×3 基础观测（93）＋20×2 自身动作历史（40）＋观测年龄（1）。邻车状态带通信延迟；Ego 自身状态实时更新。新动作位于历史开头，按实际观测年龄决定保留数量。
-- **集中 Critic**：`CentralizedTwinQ` 接收两辆 Ego 的当前真实 93 维观测、联合请求动作及 active mask，拼接为 192 维输入；两套 Q 网络分别对两辆车输出 Q 值。**Critic 不使用 Actor 的 256 维 GRU 特征。**
+- **分散 Actor**：每辆 Ego 使用独立的 `GaussianActor`（DAROM `DelayAwareGRUEncoder` + tanh-Gaussian 策略）；仅使用自己的 136 维延迟策略输入。
+- **Actor 输入（136）**：当前 Ego 状态及最多 30 辆邻车的 31×3 基础观测（93）＋目标出口编码（2）＋20×2 自身动作历史（40）＋观测年龄（1）。邻车状态带通信延迟；Ego 自身状态实时更新。新动作位于历史开头，按实际观测年龄决定保留数量。
+- **集中 Critic**：`CentralizedTwinQ` 接收两辆 Ego 的当前真实交通观测与目标出口（每车 95 维）、联合请求动作及 active mask，拼接为 196 维输入；两套 Q 网络分别对两辆车输出 Q 值。**Critic 不使用 Actor 的 256 维 GRU 特征。**
 - **联合 Replay**：每个 SUMO 全局步对应一条双 Ego 联合经验，分别保存奖励、done、active/acted/next-active mask。`JointTransitionCollector` 延迟一个全局步提交，以正确归因 pre-step Missed Exit。
 - **优化**：SAC Twin-Q 目标、Polyak 目标网络、分 Ego Actor 优化器和独立自动熵系数 α；Critic 使用真实联合状态，执行时只需各自 Actor。
 
 Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度（m/s²）；横向值经阈值离散化：小于 `−5/3` 请求朝车道 0 换道，在 `[-5/3, 5/3)` 保持，大于等于 `5/3` 请求反方向换道。当前训练中的 Critic 看到**连续请求动作**，而 SUMO 执行的是离散换道命令；这是后续需要检验的建模限制。
+
+### 模块化奖励
+
+新训练默认开启下列七个模块。参数采用 `--reward-<模块>` 和 `--no-reward-<模块>`，可独立组合。直接构造环境时传入 `MultiEgoEnv(reward_config=MASACRewardConfig(...))`。
+
+| 模块 | 结算规则 |
+| --- | --- |
+| `task` | 到达指定出口 +50、碰撞 −500、错过出口 −400、超时 −400。每车只结算一次终止事件。 |
+| `merge` | O3 车辆完全进入 E75 的主路车道，或经 E75_0 进入 E76 时，首次 +25。后续任务失败保留该奖励。 |
+| `following` | 每个活跃控制步按步前实际前车净间隙结算 −0.1 × C_f，安全时距 1.5 s。 |
+| `lane-change` | SUMO 出现实际换道运动时，按起点步的目标车道前后净间隙结算一次 −0.1 × C_lc。反应时暂用 1.5 s，最小缓冲 2 m，前后车共用参考减速度 4.5 m/s²。该参数仅用于计算风险间隙。 |
+| `efficiency` | 每个活跃控制步按步前速度结算 +0.01 × min(1, v/20)，速度单位 m/s。 |
+| `comfort` | 有实测步前和步后加速度时，结算 −0.01 × clip(加速度差的绝对值, 0, 1)。0.01 为待测权重。 |
+| `team` | 双车均到达指定出口时，回合一次性记录 +100。环境通过 `env.team_reward` 提供本步值，日志和评估 JSON 用 `team_reward` 记录回合值。团队 Q 及其 Actor 权重待确定。 |
+
+路线引导奖励为 0。Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 为 [1,0]，D3 为 [0,1]）。Teleport 由 SUMO 启动参数禁用，碰撞使用移除策略。残余 Ego teleport 在 `teleport_events` 记录时间和起止标志。若同一步检测到碰撞则记录该证据，其余原因标记为 `unknown`。个人回报包括已启用的个人模块及显式开启的旧 USP，可从 `reward_components` 和 USP 统计追溯；团队回报单独记账。
+
+例如，追加 `--no-reward-comfort --no-reward-team` 可关闭舒适度和团队奖励。开关保存在 checkpoint，评估自动复用。未含新奖励配置的旧 checkpoint 沿用 134 维 Actor 和 B0 终止奖励。
 
 ## 3. 目录结构
 
@@ -36,7 +54,7 @@ train_masac.py                     双 Ego CTDE-MASAC 训练（当前为基础�
 evaluate_masac.py                  双 Ego 独立评估（deterministic / --stochastic）
 src/agents/
   masac.py                         两个独立 DAROM-GRU Gaussian Actor
-  centralized_critic.py            集中式 Twin-Q，当前输入 192 维
+  centralized_critic.py            集中式 Twin-Q，当前输入 196 维
   replay_buffer.py                 联合经验回放
   transition_collector.py          pre-step 终止奖励归因
   masac_trainer.py                 Critic / Actor / alpha 更新
@@ -50,10 +68,11 @@ src/envs/
   control.py                        连续动作映射及 TraCI 控制
   exit_rules.py / lane_change.py    D3 终止判定与换道状态跟踪
 src/delay_encoder.py                DAROM 延迟感知 GRU
-src/rewards/events.py               事件奖励映射（由单 Ego 环境复用）
+src/rewards/events.py               终止事件映射及旧版 B0 奖励
+src/rewards/masac.py                模块化奖励配置及回合记账
 sumo_new/
   Antwerp.net.xml                   Antwerp 路网
-  Antwerp_easy_o3_d3_dual.rou.xml   当前双 Ego Easy 路线
+  Antwerp_easy_o3_d3_homogeneous_dual.rou.xml  当前双 Ego Easy 路线
   Antwerp_easy_o3_d3.rou.xml        单 Ego O3 参考路线
   Antwerp_medium_o3_d3.rou.xml      单 Ego Medium 路线
   Antwerp_hard_o3_d3.rou.xml        单 Ego Hard 路线
@@ -97,7 +116,7 @@ python3 train_masac.py \
   --output-dir runs/masac_smoke_2500
 ```
 
-正式训练默认参数为 1,000,000 个共享 SUMO 全局步、Replay 容量 1,000,000、batch 512、Learning Starts 1,000、学习率 3e-5、γ=0.999、`--tau=0.005`、seed 42，每 500,000 步保存 checkpoint，默认输出 `runs/masac`。两辆 Ego 的 α 独立学习。上述 2,500 步命令显式使用小参数，仅为历史冒烟配置。训练开始的前 `learning-starts` 个全局步使用均匀随机动作，后续使用随机 Actor 策略。
+正式训练默认参数为 1,000,000 个共享 SUMO 全局步、Replay 容量 1,000,000、batch 512、Learning Starts 100、学习率 3e-5、γ=0.99、`--tau=0.005`、seed 42，每 500,000 步保存 checkpoint，默认输出 `runs/masac`。两辆 Ego 的 α 独立学习。上述 2,500 步命令显式使用小参数，仅为历史冒烟配置。训练开始的前 `learning-starts` 个全局步使用均匀随机动作，后续使用随机 Actor 策略。
 
 训练结束保存 `runs/masac_smoke_2500/checkpoints/masac_seed42_step_2500.pt`，其中包含 Actor、Critic、Target Critic、α 和优化器状态；**不包含 Replay Buffer、SUMO 物理状态或随机数全状态，不能精确续训**。`runs/` 由 `.gitignore` 排除，模型文件需另行归档。
 
@@ -120,7 +139,7 @@ python3 evaluate_masac.py \
   --output runs/masac_eval_2500/stochastic_10/summary.json
 ```
 
-评估器加载已冻结的 Actor，不更新参数。默认生成 `runs/masac_eval/summary.json` 和同目录 `episodes.csv`；自定义 `--output` 保留 JSON 文件名，CSV 固定为同目录 `episodes.csv`。CSV 每个 seed 一行，以 `o3_`、`e74_`、`joint_` 区分。JSON 保留旧字段，并增加 `per_agent`、`joint`、统计版本和参考提交。旧 `success_rates` / `joint_success_rate` 使用 [0,1]；新增分组中的率使用百分数。
+评估器加载已冻结的 Actor，不更新参数。默认生成 `runs/masac_eval/summary.json` 和同目录 `episodes.csv`；自定义 `--output` 保留 JSON 文件名，CSV 固定为同目录 `episodes.csv`。CSV 每个 seed 一行，以 `ego_1_`、`ego_2_`、`joint_` 区分。JSON 保留旧字段，并增加 `per_agent`、`joint`、统计版本和参考提交。旧 `success_rates` / `joint_success_rate` 使用 [0,1]；新增分组中的率使用百分数。
 
 指标标准 `dual-ego-v1` 的统计参考固定为 `913a73fef22be64ca1ac0ade5426874374b566cd`，通过 `git show` 核实实现，不能用工作树后续版本替代。定义如下：
 
@@ -141,13 +160,15 @@ python3 evaluate_masac.py \
 
 `global_steps` 是评估循环中 SUMO 共享推进次数（不含 reset 的插入预热）；`agent_steps_sum` 是两车实际控制步数之和（与环境 `active_steps` 一致，不含步前 Missed Exit 已终止的车）。兼容字段 `steps` 等于 `global_steps`，不能将控制步数之和当作仿真推进次数。
 
-随机模式每回合固定 Python、NumPy、PyTorch、SUMO 和 delay buffer 种子。Actor 保持 O3→E74 的固定采样顺序，包括 inactive Actor 采样后掩码；诊断只读且不消耗随机数。确定性和随机模式分别汇报，不混合。复现保证限于相同模型、软件与硬件环境。
+随机模式每回合固定 Python、NumPy、PyTorch、SUMO 和 delay buffer 种子。Actor 保持 ego_1、ego_2 的固定采样顺序，包括 inactive Actor 采样后掩码；诊断只读且不消耗随机数。确定性和随机模式分别汇报，不混合。复现保证限于相同模型、软件与硬件环境。
 
 缺失/空终止原因、Unknown/UnknownRemoval、环境异常和步数上限导致的未完成评估直接报错，不计完整回合，也不输出本次最终文件。`Other` 仅用于环境正常返回的其他非空合法终止事件，原始原因同时保留。
 
 验证：`.venv/bin/python -m pytest tests/test_evaluation_metrics.py -q` 包括固定提交函数对照、独立掩码/分母、真实 SUMO 诊断开关前后确定性行为和随机状态对照、随机重复性、完整输出重算与中断拒绝。该验证属于小规模本地功能验证，不是正式远程性能评估。
 
 ### 6.1 训练记录与周期 checkpoint
+
+默认 `--device auto`，CUDA 可用时选择 `cuda:0` 并用 2 个 PyTorch CPU 算子线程，否则在 CPU 训练，线程数为 PyTorch 当前默认值与 8 的较小者。可用 `--device cpu`、`--device cuda:N` 或 `--torch-threads N` 显式覆盖。SUMO 与 Replay 存储在 CPU。请求设备、实际设备和线程数写入配置。评估器可在 CPU 读取 CUDA 训练生成的 checkpoint。
 
 训练参数 `--checkpoint-every 500000`；默认每 500,000 个共享 SUMO 控制步保存一次，结束时保存最终状态，恰逢节点只保存一次。`--tensorboard` 默认开启，可用 `--no-tensorboard` 关闭；JSONL 始终开启。动作窗口复用 `--log-every`（默认 40 步），最后不足窗口仍写实际长度。实验目录不可重复写入已有 `train/metrics.jsonl`，避免混合两次训练。
 
@@ -166,13 +187,13 @@ runs/<experiment_id>/
 JSONL 以 `event` 区分：
 
 - `config`：完整 CLI、Git 提交及工作树是否有修改；`global_step=0`。
-- `episode`：仅两车均完整终止后写入，包含 `episode_index`、`episode_global_steps`、每车终止原因/奖励/严格成功/有效控制步数、联合成功；最近 100 回合的 O3/E74 成功、碰撞、Missed Exit、Timeout 百分率和平均奖励，以及联合成功率和两车奖励和的均值。`rolling_episodes` 是实际分母，`policy=exploration_training`，不能冒充正式评估。
-- `update`：每次更新写原始 `critic_loss`、双 Q 均值 `mean_q`、`mean_target`、`valid_agents`、`update_index`；各车 `actor_loss`、`alpha`、`alpha_loss`、`mean_log_prob`、`valid_samples`。log-prob 是当前 actor 更新中已有采样的实际动作 log-prob，未再额外前向；无有效样本的损失为 null、样本数为 0。
+- `episode`：仅两车均完整终止后写入，包含 `episode_index`、`episode_global_steps`、每车终止原因/奖励/严格成功/有效控制步数、联合成功；最近 100 回合的 ego_1 / ego_2 成功、碰撞、Missed Exit、Timeout 百分率和平均奖励，以及联合成功率和两车奖励和的均值。`rolling_episodes` 是实际分母，`policy=exploration_training`，不能冒充正式评估。
+- `update`：第一轮、每隔 `--update-log-every` 轮（默认 40）以及最后一个可执行更新步记录一次。设置为 1 可记录每轮。每条记录保留该轮的原始 `critic_loss`、双 Q 均值 `mean_q`、`mean_target`、`valid_agents`、`update_index`；各车 `actor_loss`、`alpha`、`alpha_loss`、`mean_log_prob`、`valid_samples`。log-prob 是当前 actor 更新中已有采样的实际动作 log-prob，未再额外前向；无有效样本的损失为 null、样本数为 0。
 - `runtime`：窗口实际步数、速度（SUMO 全局训练步/墙钟秒）、Replay 大小、累计更新数、各车动作样本数/有效动作占比、加速度均值与总体标准差、横向动作均值、换道请求比例。只统计真正执行动作的样本；换道比例直接调用当前控制器 `parse_action()`，不另定义阈值。
 
-TensorBoard 的标量标签统一带 `exploration_training/` 前缀，以 `global_step` 为横轴；例如 `tensorboard --logdir runs/<experiment_id>/train/tb`。JSONL 不使用最后 minibatch 冒充窗口均值，绘图保留原始更新值，不默认平滑。
+TensorBoard 的标量标签统一带 `exploration_training/` 前缀，以 `global_step` 为横轴；例如 `tensorboard --logdir runs/<experiment_id>/train/tb`。更新曲线展示实际记录轮次的 minibatch 值，横轴使用真实全局步。运行窗口仍记录累计更新总数。
 
-checkpoint 保留原有模型/优化器字段，并增加 Git 和源码 SHA256；索引记录训练 seed、global_step、绝对路径、文件 SHA256、提交、源码哈希和配置。文件先写 `.partial`，flush/fsync 后原子替换，索引同样原子写入；残留 `.partial` 不参与发现。双 Ego 联合 Replay 的 float32 数组容量 1,000,000 时约 3.435 GiB/组（不含模型、Python 和采样临时张量）；同样的容量数值不代表与单 Ego 相同的内存或样本结构。checkpoint 仍缺 Replay、SUMO 状态、全部 RNG 状态，**不提供精确续训**。
+checkpoint 保留原有模型/优化器字段，并增加 Git 和源码 SHA256；索引记录训练 seed、global_step、绝对路径、文件 SHA256、提交、源码哈希和配置。文件先写 `.partial`，flush/fsync 后原子替换，索引同样原子写入；残留 `.partial` 不参与发现。双 Ego 联合 Replay 的 float32 数组容量 1,000,000 时约 3.49 GiB/组（不含模型、Python 和采样临时张量）；同样的容量数值不代表与单 Ego 相同的内存或样本结构。checkpoint 仍缺 Replay、SUMO 状态、全部 RNG 状态，**不提供精确续训**。
 
 ### 6.2 固定种子评估与只读行为诊断
 

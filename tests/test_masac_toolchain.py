@@ -377,6 +377,9 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         buffer_capacity=400,
         train_every=20,
         log_every=20,
+        update_log_every=40,
+        torch_threads=1,
+        device="cpu",
         gamma=0.999,
         learning_rate=3e-5,
         initial_alpha=0.01,
@@ -410,6 +413,13 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
             assert modes and all(isinstance(mode, int) for mode in modes)
             assert modes == report["records"][0]["per_agent"][key]["speed_modes"]
         assert report["sumo_version"]
+        record = report["records"][0]
+        assert record["team_reward"] == 0.0
+        assert record["teleport_events"] == []
+        for key in AGENT_IDS:
+            components = record["reward_components"][key]
+            assert components["task"] == -400.0
+            assert sum(components.values()) == pytest.approx(record["rewards"][key])
         validate_results(work / "short_evaluation/summary.json")
         assert "TRACE step=" not in capsys.readouterr().out
     finally:
@@ -426,7 +436,9 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         weights_only=True,
     )
     assert tuple(final["agent_ids"]) == AGENT_IDS
-    actor = MultiAgentGaussianActor(ego_ids=AGENT_IDS)
+    assert final["config"]["device"] == "cpu"
+    assert final["config"]["effective_torch_threads"] == 1
+    actor = MultiAgentGaussianActor(ego_ids=AGENT_IDS, nav_dim=2)
     actor.load_state_dict(final["actors"], strict=True)
     assert all(sha256(r["path"]) == r["sha256"] for r in index)
 
@@ -435,7 +447,10 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         for line in (work / "train/metrics.jsonl").read_text().splitlines()
     ]
     updates = [r for r in records if r["event"] == "update"]
-    assert updates
+    assert len(updates) == 2
+    assert updates[0]["update_index"] == 1
+    runtime = next(r for r in reversed(records) if r["event"] == "runtime")
+    assert runtime["update_count"] == updates[-1]["update_index"] == 3
     assert all("mean_q" in r and "valid_agents" in r for r in updates)
     assert all(r["global_step"] % 20 == 0 for r in updates)
     # 检查两套独立 Actor 都实际进行过参数更新
@@ -464,7 +479,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
     assert episodes[0]["rolling_episodes"] == 1
 
 
-def test_formal_training_defaults():
+def test_training_cli_defaults():
     from train_masac import build_parser
 
     args = build_parser().parse_args([])
@@ -473,9 +488,39 @@ def test_formal_training_defaults():
         args.buffer_capacity,
         args.batch_size,
         args.learning_starts,
-    ) == (1_000_000, 1_000_000, 512, 1000)
+    ) == (1_000_000, 1_000_000, 512, 100)
     assert args.learning_rate == 3e-5
-    assert args.gamma == 0.999
+    assert args.gamma == 0.99
     assert args.tau == 0.005
-    assert args.train_every == 10
-    assert args.checkpoint_every == 100_000
+    assert args.train_every == 1
+    assert args.checkpoint_every == 500_000
+    assert args.device == "auto"
+    assert args.torch_threads is None
+    assert args.update_log_every == 40
+
+
+@pytest.mark.parametrize(
+    "cuda_available, previous_threads, override, expected_device, expected_threads",
+    [(True, 23, None, "cuda:0", 2), (False, 23, None, "cpu", 8),
+     (False, 4, None, "cpu", 4), (True, 23, 4, "cuda:0", 4)],
+)
+def test_training_resolves_performance_defaults(
+    monkeypatch, cuda_available, previous_threads, override, expected_device, expected_threads,
+):
+    import train_masac
+
+    thread_changes = []
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda_available)
+    monkeypatch.setattr(torch, "get_num_threads", lambda: previous_threads)
+    monkeypatch.setattr(torch, "set_num_threads", thread_changes.append)
+
+    def validate(args, device):
+        assert args.requested_device == "auto"
+        assert args.device == str(device) == expected_device
+        assert args.effective_torch_threads == expected_threads
+
+    monkeypatch.setattr(train_masac, "train", validate)
+    args = train_masac.build_parser().parse_args([])
+    args.torch_threads = override
+    train_masac.main(args)
+    assert thread_changes == [expected_threads, previous_threads]

@@ -22,9 +22,11 @@ class GaussianActor(nn.Module):
         action_dim=2,
         action_scale=5.0,
         hidden_dim=256,
+        nav_dim=0,
     ):
         super().__init__()
 
+        self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.action_scale = float(action_scale)
 
@@ -47,7 +49,7 @@ class GaussianActor(nn.Module):
             features_dim=256,
             gru_hidden=64,
             input_mode="antwerp_scaled_reversed",
-            nav_dim=0,
+            nav_dim=nav_dim,
         )
 
         self.policy = nn.Sequential(
@@ -68,8 +70,8 @@ class GaussianActor(nn.Module):
     def forward(self, observation, deterministic=False):
         """返回动作和经过 tanh 修正的 log probability。"""
 
-        if observation.ndim != 2 or observation.shape[1] != 134:
-            raise ValueError("Expected observation (B, 134)")
+        if observation.ndim != 2 or observation.shape[1] != self.obs_dim:
+            raise ValueError(f"Expected observation (B, {self.obs_dim})")
 
         features = self.encoder(observation)
         hidden = self.policy(features)
@@ -113,10 +115,12 @@ class MultiAgentGaussianActor(nn.Module):
     def __init__(
         self,
         ego_ids=("ego_1", "ego_2"),
+        nav_dim=0,
     ):
         super().__init__()
 
         self.ego_ids = tuple(ego_ids)
+        self.obs_dim = 134 + nav_dim
 
         if len(set(self.ego_ids)) != len(self.ego_ids):
             raise ValueError("Duplicate Ego IDs")
@@ -125,7 +129,7 @@ class MultiAgentGaussianActor(nn.Module):
             raise ValueError("No Ego IDs")
 
         self.actors = nn.ModuleDict({
-            ego_id: GaussianActor()
+            ego_id: GaussianActor(obs_dim=self.obs_dim, nav_dim=nav_dim)
             for ego_id in self.ego_ids
         })
 
@@ -136,7 +140,7 @@ class MultiAgentGaussianActor(nn.Module):
         deterministic=False,
     ):
         """
-        observations: (B, N, 134)
+        observations: (B, N, obs_dim)
         active_mask: (B, N)
 
         返回:
@@ -147,7 +151,7 @@ class MultiAgentGaussianActor(nn.Module):
         batch = observations.shape[0]
         n = len(self.ego_ids)
 
-        if observations.shape != (batch, n, 134):
+        if observations.shape != (batch, n, self.obs_dim):
             raise ValueError("Invalid observation shape")
 
         if active_mask.shape != (batch, n):
@@ -167,7 +171,7 @@ class MultiAgentGaussianActor(nn.Module):
         for index, ego_id in enumerate(self.ego_ids):
             actor = self.actors[ego_id]
 
-            # 只使用当前 Ego 自己的 134 维观测
+            # 只使用当前 Ego 自己的 局部观测
             action, log_prob = actor(
                 observations[:, index, :],
                 deterministic=deterministic,
