@@ -9,9 +9,10 @@ from .sumo_world import SumoWorld, SUMO_DIR
 from .ego import Ego
 from .control import EgoController
 from .observation import build_observation
+from .stalled import StalledDetector
 
 from .exit_rules import missed_exit_before_step
-from src.rewards.events import b0_reward
+from src.rewards.events import STALLED_EVENT, b0_reward
 from src.rewards.masac import MASACRewards, TARGET_EXIT_DIM
 
 from .action_history import MultiEgoActionHistory
@@ -37,6 +38,8 @@ class MultiEgoEnv:
         reward_config=None,
         max_active_steps=DEFAULT_MAX_ACTIVE_STEPS,
         collect_control_trace=False,
+        stalled_shadow=False,
+        stalled_terminate=False,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -47,9 +50,14 @@ class MultiEgoEnv:
         if max_active_steps <= 0:
             raise ValueError("max_active_steps must be positive")
 
+        if stalled_terminate and usp_enabled:
+            raise ValueError("Stalled termination and USP cannot both be enabled")
+
         self.max_active_steps = max_active_steps
         self.collect_metrics = collect_metrics or collect_control_trace
         self.collect_control_trace = collect_control_trace
+        self.stalled_shadow = stalled_shadow
+        self.stalled_terminate = stalled_terminate
         self.scenario = scenario
         self.speed_mode = speed_mode
         self.gui = bool(gui)
@@ -294,6 +302,9 @@ class MultiEgoEnv:
         trips = {trip.attrib["id"]: trip.attrib for trip in ElementTree.parse(route_file).iter("trip")}
         self.target_exits = {ego_id: trips[ego_id]["to"] for ego_id in self.AGENTS}
         self.needs_merge = {ego_id: trips[ego_id]["from"] == "O3" for ego_id in self.AGENTS}
+        self.stall_detectors = {
+            ego_id: StalledDetector() for ego_id in self.AGENTS
+        } if self.stalled_shadow or self.stalled_terminate else {}
         self.teleport_events = []
         self.team_reward = 0.0
         if self.reward_tracker is not None:
@@ -304,7 +315,6 @@ class MultiEgoEnv:
             seed=seed,
             route_file=route_file,
             gui=self.gui,
-            disable_teleport=self.reward_tracker is not None,
         )
 
         self.egos = {
@@ -444,6 +454,15 @@ class MultiEgoEnv:
 
         # 2. 仅尚未终止的 Ego 提交动作
         acting_ids = active_ids - pre_terminated
+        stall_results = {}
+        if self.stall_detectors:
+            now = sim.getTime()
+            for ego_id, detector in self.stall_detectors.items():
+                if ego_id in acting_ids:
+                    stall_results[ego_id] = detector.sample(conn, ego_id, now)
+                else:
+                    stall_results[ego_id] = detector.observe(now, unavailable_reason="inactive")
+
         
         usp_candidates = {
             ego_id: 0.0 for ego_id in self.AGENTS
@@ -606,7 +625,7 @@ class MultiEgoEnv:
                 and road not in ("E77", "D3")
             )
 
-            # 沿用 B0 终止优先级
+            # Settle physical SUMO and route events before the shadow trigger.
             if ego_id in collisions:
                 event = "Collision"
 
@@ -618,6 +637,13 @@ class MultiEgoEnv:
 
             elif ego_id in arrivals:
                 event = "Arrived"
+
+            elif (
+                self.stalled_terminate
+                and state.status == "active"
+                and stall_results[ego_id]["would_stall"]
+            ):
+                event = STALLED_EVENT
 
             elif self.active_steps[ego_id] >= self.max_active_steps:
                 event = "Timeout"
@@ -658,7 +684,7 @@ class MultiEgoEnv:
         }
 
         for ego_id in acting_ids:
-            # 终止步只支付原 B0 事件奖励
+            # USP does not pay on an agent's terminal step.
             if self.terminations[ego_id]:
                 continue
 
@@ -682,6 +708,8 @@ class MultiEgoEnv:
         
             if self.collect_control_trace:
                 infos[ego_id]["control_trace"] = control_traces.get(ego_id)
+            if self.stalled_shadow:
+                infos[ego_id]["stalled_shadow"] = stall_results[ego_id]
             infos[ego_id]["teleport_event"] = teleport_details.get(ego_id)
             if tracker is not None:
                 infos[ego_id]["reward_components"] = components[ego_id]

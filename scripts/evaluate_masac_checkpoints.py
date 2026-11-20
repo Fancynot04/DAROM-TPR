@@ -22,7 +22,8 @@ def discover(directory):
     rows = []
     for path in paths:
         state = torch.load(path, map_location='cpu', weights_only=True)
-        rows.append(dict(path=path, global_step=int(state['global_step']), sha256=sha256(path)))
+        rows.append(dict(path=path, global_step=int(state['global_step']), sha256=sha256(path),
+                         stalled_terminate=state.get('config', {}).get('stalled_terminate', False)))
     rows.sort(key=lambda row: row['global_step'])
     if len({r['global_step'] for r in rows}) != len(rows):
         raise ValueError('Duplicate checkpoint steps: use one experiment directory per training seed')
@@ -39,7 +40,7 @@ def discover(directory):
     return rows
 
 
-def expected_environment(max_steps):
+def expected_environment(max_steps, stalled_terminate=False):
     root = Path(__file__).resolve().parents[1]
     from sumolib import checkBinary
 
@@ -51,6 +52,8 @@ def expected_environment(max_steps):
         step_length_s=0.1,
         max_steps=max_steps,
         stopped_speed_threshold_mps=0.5,
+        disable_teleport=True,
+        stalled_terminate=stalled_terminate,
         net_sha256=sha256(
             root / "sumo_new/Antwerp.net.xml"
         ),
@@ -72,7 +75,8 @@ def compatible(report, checkpoint, max_steps):
             and report['git']['commit'] == git_metadata()['commit']
             and report.get('evaluation_code_sha256') == evaluation_fingerprint()
             and report.get('runtime_versions') == runtime_versions()
-            and all(report['environment'].get(k) == v for k, v in expected_environment(max_steps).items())
+            and all(report['environment'].get(k) == v for k, v in
+                    expected_environment(max_steps, checkpoint.get('stalled_terminate', False)).items())
             and all(report['environment']['actual_speed_modes'][ego] for ego in AGENT_IDS))
 
 

@@ -138,11 +138,15 @@ class EpisodeWindow:
                 ('collision', [r['terminal_reason'] == 'Collision' for r in rows]),
                 ('missed_exit', [r['terminal_reason'] == 'Missed Exit' for r in rows]),
                 ('timeout', [r['terminal_reason'] == 'Timeout' for r in rows]),
+                ('stalled', [r['terminal_reason'] == 'Stalled' for r in rows]),
             ):
                 result[key + '_' + name + '_rate'] = 100 * sum(flags) / len(rows)
                 result[key + '_' + name + '_rate_stats'] = wilson(sum(flags), len(rows))
             result[key + '_mean_reward'] = float(np.mean([r['mean_policy_reward_return'] for r in rows]))
         result['joint_success_rate'] = 100 * sum(all(r['success'] for r in row.values()) for row in self.rows) / len(self.rows)
         result['joint_success_rate_stats'] = wilson(sum(all(r['success'] for r in row.values()) for row in self.rows), len(self.rows))
+        joint_stalls = sum(any(r['terminal_reason'] == 'Stalled' for r in row.values()) for row in self.rows)
+        result['joint_stalled_rate'] = 100 * joint_stalls / len(self.rows)
+        result['joint_stalled_rate_stats'] = wilson(joint_stalls, len(self.rows))
         result['mean_reward'] = float(np.mean([sum(r['mean_policy_reward_return'] for r in row.values()) for row in self.rows]))
         return result

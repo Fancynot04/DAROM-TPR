@@ -2,7 +2,10 @@
 import math
 
 REFERENCE_COMMIT = '913a73fef22be64ca1ac0ade5426874374b566cd'
-KNOWN_OUTCOMES = ('Arrived', 'Collision', 'Ego Teleported', 'Missed Exit', 'Timeout')
+LEGACY_OUTCOMES = ('Arrived', 'Collision', 'Ego Teleported', 'Missed Exit', 'Timeout')
+KNOWN_OUTCOMES = (*LEGACY_OUTCOMES, 'Stalled')
+LEGACY_FAILURES = (('Collision', 'collision'), ('Timeout', 'timeout'), ('Missed Exit', 'missed_exit'))
+FAILURES = (*LEGACY_FAILURES, ('Stalled', 'stalled'))
 
 
 def finite(value):
@@ -147,7 +150,7 @@ class AgentMetrics:
 
 
 
-def joint_record(agents):
+def joint_record(agents, *, include_stalled=True):
     rows = list(agents.values())
     result = dict(success=all(r['success'] for r in rows),
                   raw_arrival=all(r['raw_arrival'] for r in rows))
@@ -159,14 +162,14 @@ def joint_record(agents):
     for key in ('mean_speed_mps', 'mean_abs_jerk_mps3'):
         result[key] = mean([r[key] for r in rows])
         result[key + '_valid_agents'] = sum(r[key] is not None for r in rows)
-    for outcome, key in (('Collision', 'collision'), ('Timeout', 'timeout'), ('Missed Exit', 'missed_exit')):
+    for outcome, key in (FAILURES if include_stalled else LEGACY_FAILURES):
         result[key] = any(r['terminal_reason'] == outcome for r in rows)
     result['collision_free'] = not result['collision']
     result['mean_policy_reward_return'] = sum(r['mean_policy_reward_return'] for r in rows)
     return result
 
 
-def aggregate(rows):
+def aggregate(rows, *, include_stalled=True):
     n = len(rows)
     if not n:
         raise ValueError('No completed episodes')
@@ -185,11 +188,13 @@ def aggregate(rows):
         result[key] = sum(r[key] for r in rows)
     for key in ('hard_braking_episode', 'sumo_emergency_stopping_episode'):
         result[key + 's'] = sum(r[key] for r in rows)
+    failures = FAILURES if include_stalled else LEGACY_FAILURES
     if 'terminal_reason' in rows[0]:
+        known = KNOWN_OUTCOMES if include_stalled else LEGACY_OUTCOMES
         result['outcome_counts'] = {key: sum(r['outcome'] == key for r in rows)
-                                    for key in (*KNOWN_OUTCOMES, 'Other')}
-        for outcome, name in (('Collision', 'collision_rate'), ('Timeout', 'timeout_rate'),
-                              ('Missed Exit', 'missed_exit_rate')):
+                                    for key in (*known, 'Other')}
+        for outcome, key in failures:
+            name = key + '_rate'
             result[name] = 100 * result['outcome_counts'][outcome] / n
             result[name + "_stats"] = wilson(result["outcome_counts"][outcome], n)
         result['mean_policy_reward_return'] = mean([r['mean_policy_reward_return'] for r in rows])
@@ -205,7 +210,7 @@ def aggregate(rows):
         result['first_e77_lane_distribution'] = {str(lane): wilson(lanes.count(lane), len(lanes)) for lane in sorted(set(lanes))}
         result['first_e77_lane_valid_episodes'] = len(lanes)
     else:
-        for key in ('collision', 'timeout', 'missed_exit'):
+        for _, key in failures:
             result[key + '_rate'] = 100 * sum(r[key] for r in rows) / n
             result[key + '_rate_stats'] = wilson(sum(r[key] for r in rows), n)
         for key in ('mean_speed_mps', 'mean_abs_jerk_mps3'):

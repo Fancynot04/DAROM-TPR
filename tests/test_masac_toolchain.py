@@ -159,7 +159,7 @@ def test_efficiency_and_wilson():
     assert result["first_e77_lane_distribution"]["0"]["denominator"] == 1
 
 
-def fixture_report(checkpoint, seed=42, step=100_000, episodes=100):
+def fixture_report(checkpoint, seed=42, step=100_000, episodes=100, include_stalled=True):
     """Synthetic but internally consistent evaluator output."""
     from scripts.evaluate_masac_checkpoints import expected_environment
 
@@ -186,7 +186,7 @@ def fixture_report(checkpoint, seed=42, step=100_000, episodes=100):
                 global_steps=3,
                 agent_steps_sum=4,
                 per_agent=agents,
-                joint=joint_record(agents),
+                joint=joint_record(agents, include_stalled=include_stalled),
             )
         )
 
@@ -194,10 +194,10 @@ def fixture_report(checkpoint, seed=42, step=100_000, episodes=100):
         episodes=episodes,
         records=records,
         per_agent={
-            key: aggregate([r["per_agent"][key] for r in records])
+            key: aggregate([r["per_agent"][key] for r in records], include_stalled=include_stalled)
             for key in AGENT_IDS
         },
-        joint=aggregate([r["joint"] for r in records]),
+        joint=aggregate([r["joint"] for r in records], include_stalled=include_stalled),
         stochastic=False,
         training_step=step,
         training_seed=seed,
@@ -205,7 +205,7 @@ def fixture_report(checkpoint, seed=42, step=100_000, episodes=100):
         checkpoint_sha256=sha256(checkpoint),
         reference_commit=REFERENCE_COMMIT,
         metric_version=METRIC_VERSION,
-        evaluation_protocol_version=EVALUATION_PROTOCOL_VERSION,
+        evaluation_protocol_version=EVALUATION_PROTOCOL_VERSION if include_stalled else 2,
         git=git_metadata(),
         evaluation_code_sha256=evaluation_fingerprint(),
         runtime_versions=runtime_versions(),
@@ -267,6 +267,14 @@ def test_batch_fixed_protocol_skip_failure_and_recompute(work):
         run(work, evaluator=fake)
 
 
+def test_legacy_evaluation_report_remains_readable(work):
+    checkpoint = work / "model.pt"
+    torch.save({"global_step": 100_000}, checkpoint)
+    summary = work / "summary.json"
+    write_results(summary, fixture_report(checkpoint, episodes=2, include_stalled=False))
+    assert "stalled_rate" not in validate_results(summary)["joint"]
+
+
 def test_plot_single_multi_seed_and_algorithm(work, monkeypatch):
     from matplotlib.axes import Axes
     import pandas as pd
@@ -299,8 +307,9 @@ def test_plot_single_multi_seed_and_algorithm(work, monkeypatch):
             ego_1_alpha=0.01,
             ego_2_alpha=0.02,
         )
+        episode = dict(event="episode", global_step=40, rolling_episodes=1, ego_1_stalled_rate=100)
         (directory / "train/metrics.jsonl").write_text(
-            json.dumps(record) + "\n"
+            json.dumps(record) + "\n" + json.dumps(episode) + "\n"
         )
         experiments.append((algorithm, seed, str(directory)))
 
@@ -328,6 +337,9 @@ def test_plot_single_multi_seed_and_algorithm(work, monkeypatch):
     assert table[table.algorithm == "baseline"]["std"].isna().all()
     assert len(list((work / "multi").glob("*.png"))) == 7
     assert len(list((work / "multi").glob("*.pdf"))) == 7
+    failures = pd.read_csv(work / "single/02_failures_source.csv")
+    stalls = failures[failures.metric.eq("stalled_rate")]
+    assert set(stalls.source.unique()) == {"exploration_training_rolling100", "checkpoint_evaluation"}
     assert (work / "single/plot_source.csv").exists()
 
 
@@ -379,6 +391,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         log_every=20,
         update_log_every=40,
         trace_controls=True,
+        stalled_shadow=True,
         torch_threads=1,
         device="cpu",
         gamma=0.999,
@@ -451,6 +464,10 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         json.loads(line)
         for line in (work / "train/metrics.jsonl").read_text().splitlines()
     ]
+    shadows = [r for r in records if r["event"] == "stalled_shadow"]
+    assert len(shadows) == 220
+    assert shadows[0]["egos"]["ego_1"]["reason"] == "collecting_window"
+    assert shadows[0]["egos"]["ego_2"]["reason"] == "inactive"
     controls = [r for r in records if r["event"] == "control_trace"]
     first = controls[0]["egos"]["ego_1"]
     assert first["road"] == "O3"

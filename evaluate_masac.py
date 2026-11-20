@@ -51,6 +51,9 @@ def evaluate(args):
     actors.eval()
 
     gui_enabled = bool(getattr(args, "gui", False))
+    stalled_terminate = getattr(args, "stalled_terminate", None)
+    if stalled_terminate is None:
+        stalled_terminate = reward_config.get("stalled_terminate", False)
 
     env = MultiEgoEnv(
         scenario=getattr(args, "scenario", "easy"),
@@ -66,6 +69,7 @@ def evaluate(args):
         reward_config=MASACRewardConfig(**components) if components is not None else None,
         # Checkpoints written before the timeout became configurable used 4,000 steps.
         max_active_steps=reward_config.get("max_active_steps", 4000),
+        stalled_terminate=stalled_terminate,
     )
 
     records = []
@@ -305,8 +309,9 @@ def evaluate(args):
             "net_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp.net.xml"),
             "route_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp_easy_o3_d3_homogeneous_dual.rou.xml"),
             "stopped_speed_threshold_mps": 0.5,
-            "disable_teleport": components is not None,
+            "disable_teleport": True,
             "max_active_steps": env.max_active_steps,
+            "stalled_terminate": stalled_terminate,
         },
         "reference_commit": REFERENCE_COMMIT,
         "rate_unit": "fraction for legacy success_rates/joint_success_rate; percent in per_agent/joint",
@@ -429,6 +434,8 @@ if __name__ == "__main__":
         default=50,
     )
 
+    parser.add_argument("--stalled-terminate", action=argparse.BooleanOptionalAction, default=None,
+                        help="Override the checkpoint's Stalled-v1 termination setting")
     parser.add_argument("--trace", action="store_true", help="Print first episode trace")
     args = parser.parse_args()
 

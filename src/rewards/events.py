@@ -1,6 +1,9 @@
 """Terminal event names used by the E76 -> D3 reward contract."""
+STALLED_EVENT = "Stalled"
+STALLED_PENALTY = -400.0
+
 EVENTS = {'Arrived': 'success', 'Collision': 'collision', 'Missed Exit': 'missed_exit',
-          'Ego Teleported': 'teleport', 'Timeout': 'timeout'}
+          'Ego Teleported': 'teleport', STALLED_EVENT: 'stalled', 'Timeout': 'timeout'}
 
 def event_reward(outcome, config):
     key = EVENTS.get(outcome)
@@ -18,6 +21,7 @@ B0_EVENTS = {
     "missed_exit": -100.0,
     "teleport": -100.0,
     "timeout": -100.0,
+    "stalled": STALLED_PENALTY,
 }
 
 def b0_reward(event):

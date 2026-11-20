@@ -21,7 +21,7 @@ AGENT_IDS = JointReplayBuffer.AGENT_IDS
 # Figures use long-form source data, with each sampled global_step preserved.
 PANELS = {
     '01_success': ['success_rate'],
-    '02_failures': ['collision_rate', 'missed_exit_rate'],
+    '02_failures': ['collision_rate', 'missed_exit_rate', 'stalled_rate'],
     '03_critic': ['critic_loss', 'mean_q', 'mean_target'],
     '04_actor': ['actor_loss', 'alpha'],
     '05_comfort': ['mean_speed_mps', 'mean_abs_jerk_mps3', 'hard_braking_episode_rate'],
@@ -70,7 +70,7 @@ def load(experiments):
                             add(algorithm, seed, step, 'training_update', entity, metric, row.get(entity + '_' + metric))
                 if row['event'] == 'episode':
                     for entity in (*AGENT_IDS, 'joint'):
-                        for metric in ('success_rate', 'collision_rate', 'missed_exit_rate'):
+                        for metric in ('success_rate', 'collision_rate', 'missed_exit_rate', 'stalled_rate'):
                             add(algorithm, seed, step, 'exploration_training_rolling100', entity, metric,
                                 row.get(entity + '_' + metric), row['rolling_episodes'])
         paths = sorted((directory / 'eval').glob('step_*/summary.json'))

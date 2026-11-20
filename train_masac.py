@@ -196,6 +196,10 @@ def train(args, device):
         raise ValueError("Invalid interval")
 
     args.trace_controls = getattr(args, "trace_controls", False)
+    args.stalled_shadow = getattr(args, "stalled_shadow", False)
+    args.stalled_terminate = getattr(args, "stalled_terminate", False)
+    if args.stalled_terminate and getattr(args, "usp", False):
+        raise ValueError("Stalled termination and USP cannot both be enabled")
     args.max_active_steps = getattr(args, "max_active_steps", MultiEgoEnv.DEFAULT_MAX_ACTIVE_STEPS)
     if args.max_active_steps <= 0:
         raise ValueError("max_active_steps must be positive")
@@ -272,6 +276,8 @@ def train(args, device):
         reward_config=reward_config,
         max_active_steps=args.max_active_steps,
         collect_control_trace=args.trace_controls,
+        stalled_shadow=args.stalled_shadow,
+        stalled_terminate=args.stalled_terminate,
     )
 
     log = TrainingLog(output_dir / "train", args.tensorboard)
@@ -340,6 +346,9 @@ def train(args, device):
                 infos,
             ) = env.step(action_dict)
             
+            if args.stalled_shadow:
+                log.write("stalled_shadow", global_step, episode_index=completed_episodes + 1,
+                          egos={key: infos[key]["stalled_shadow"] for key in AGENT_IDS})
             if args.trace_controls:
                 traces = {
                     ego_id: {**info["control_trace"], "terminal_reason": info["terminal_reason"]}
@@ -653,10 +662,12 @@ def build_parser():
                         help="Write update metrics every N optimizer rounds (1 logs every round)")
     parser.add_argument("--team-q-weight", type=float, default=1.0,
                         help="Positive team Q weight in each Actor objective")
+    parser.add_argument("--stalled-terminate", action="store_true", help="End a stalled Ego episode with a -400 penalty")
+    parser.add_argument("--stalled-shadow", action="store_true", help="Log Stalled-v1 diagnostics without changing the task")
     parser.add_argument("--trace-controls", action="store_true", help="Log per-Ego TraCI gaps, motion, and control commands")
     parser.add_argument("--max-active-steps", type=int, default=MultiEgoEnv.DEFAULT_MAX_ACTIVE_STEPS,
                         help="Per-Ego timeout in active control steps")
-    parser.add_argument("--checkpoint-every", type=int, default=500000)
+    parser.add_argument("--checkpoint-every", type=int, default=200000)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--tensorboard", action=argparse.BooleanOptionalAction, default=True)
     return parser

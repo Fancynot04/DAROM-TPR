@@ -3,7 +3,7 @@
 from dataclasses import dataclass, fields
 from math import inf
 
-from .events import event_reward
+from .events import STALLED_EVENT, STALLED_PENALTY, event_reward
 
 
 TASK_EVENTS = {
@@ -11,6 +11,7 @@ TASK_EVENTS = {
     "collision": -500.0,
     "missed_exit": -400.0,
     "timeout": -400.0,
+    "stalled": STALLED_PENALTY,
     "teleport": 0.0,
 }
 TARGET_EXIT_DIM = 2
@@ -60,7 +61,9 @@ class MASACRewards:
         return dict.fromkeys(self.components, 0.0)
 
     def terminal(self, event):
-        return event_reward(event, {"events": TASK_EVENTS})[1] if self.config.task else 0.0
+        if self.config.task or event == STALLED_EVENT:
+            return event_reward(event, {"events": TASK_EVENTS})[1]
+        return 0.0
 
     def before_step(self, conn, ego_id, control):
         vehicle = conn.vehicle

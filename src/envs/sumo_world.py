@@ -12,14 +12,13 @@ SUMO_DIR = Path(__file__).resolve().parents[2] / "sumo_new"
 class SumoWorld:
     """管理一个 SUMO 仿真世界，不负责具体 Ego 的决策。"""
 
-    def __init__(self, scenario="easy", seed=42, gui=False, route_file=None, disable_teleport=False):
+    def __init__(self, scenario="easy", seed=42, gui=False, route_file=None):
         if scenario not in ("easy", "medium", "hard"):
             raise ValueError(f"Unknown scenario: {scenario}")
 
         self.scenario = scenario
         self.seed = seed
         self.gui = gui
-        self.disable_teleport = disable_teleport
 
         self.step_length = 0.1
         self.label = "o3_d3_world"
@@ -58,16 +57,12 @@ class SumoWorld:
             "--no-step-log",
             "--collision.check-junctions",
             "--collision.action", "remove",
+            "--time-to-teleport", "-1",
+            "--time-to-teleport.highways", "-1",
+            "--time-to-teleport.disconnected", "-1",
+            "--time-to-teleport.bidi", "-1",
             "-Q",
         ]
-
-        if self.disable_teleport:
-            command.extend([
-                "--time-to-teleport", "-1",
-                "--time-to-teleport.highways", "-1",
-                "--time-to-teleport.disconnected", "-1",
-                "--time-to-teleport.bidi", "-1",
-            ])
 
         # GUI 启动后自动运行，无需手动点击播放按钮
         if self.gui:
