@@ -104,7 +104,7 @@ def test_lane_change_risk_increments_and_stable_target(lane_change):
         (None, 1, 0, 0.3, None),
     ]
     rewards = [tick({"a": step})["a"] for step in steps]
-    assert rewards == pytest.approx([-0.4, -0.4, -0.8, 0, 0])
+    assert rewards == pytest.approx([-0.2, -0.2, -0.4, 0, 0])
     started, completed = tracker.lane_change_events
     assert started["event"] == "started"
     assert completed["event"] == "completed"
@@ -118,17 +118,17 @@ def test_lane_change_collision_and_reversal_are_independent(lane_change):
     tracker, tick = lane_change
     assert tick({
         "a": (1, 0, 1, 0.2, None), "b": (1, 0, 1, 0.1, None),
-    }) == pytest.approx({"a": -0.4, "b": -0.2})
+    }) == pytest.approx({"a": -0.2, "b": -0.1})
     assert tick({
         "a": (1, 0, 0, 0.7, "Collision"), "b": (1, 0, 1, 0.4, None),
-    }) == pytest.approx({"a": -1.0, "b": -0.6})
+    }) == pytest.approx({"a": -0.5, "b": -0.3})
     assert set(tracker.pending_changes) == {"b"}
     assert tick({"b": (None, 0, -1, 0.25, None)}) == {"b": 0}
     collision, reversal = tracker.lane_change_events[-2:]
     assert collision["reason"] == "Collision"
-    assert collision["cumulative_penalty"] == pytest.approx(-1.4)
+    assert collision["cumulative_penalty"] == pytest.approx(-0.7)
     assert reversal["reason"] == "reversed_or_returned"
-    assert reversal["cumulative_penalty"] == pytest.approx(-0.8)
+    assert reversal["cumulative_penalty"] == pytest.approx(-0.4)
     assert not tracker.pending_changes
     assert tracker.terminal("Collision") == -500
 

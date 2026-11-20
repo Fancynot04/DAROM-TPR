@@ -134,8 +134,6 @@ def test_efficiency_and_wilson():
                 post_road=post_road,
                 post_lane=post_lane,
                 agent_step=True,
-                teleport_started=False,
-                teleport_ended=False,
                 emergency_stopping=False,
                 depart_time=0.1,
             ),
@@ -392,6 +390,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         update_log_every=40,
         trace_controls=True,
         stalled_shadow=True,
+        stalled_terminate=False,
         torch_threads=1,
         device="cpu",
         gamma=0.99,
@@ -425,7 +424,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
         assert report["trainer_config"]["gamma"] == 0.99
         assert report["training_config"]["masac_env_version"] == 2
         assert report["training_config"]["safety_reward"] == {
-            "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 2.0,
+            "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 1.0,
         }
         assert report["environment"]["requested_speed_mode"] == 96
         for key in AGENT_IDS:
@@ -434,9 +433,10 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
             assert modes == report["records"][0]["per_agent"][key]["speed_modes"]
         assert report["sumo_version"]
         assert report["environment"]["max_active_steps"] == 2500
+        assert report["environment"]["stalled_terminate"] is False
         record = report["records"][0]
         assert record["team_reward"] == 0.0
-        assert record["teleport_events"] == []
+        assert "teleport_events" not in record
         for key in AGENT_IDS:
             components = record["reward_components"][key]
             assert components["task"] == -400.0
@@ -519,7 +519,9 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
 def test_training_cli_defaults():
     from train_masac import build_parser
 
-    args = build_parser().parse_args([])
+    parser = build_parser()
+    args = parser.parse_args([])
+    assert parser.parse_args(["--no-stalled-terminate"]).stalled_terminate is False
     assert (
         args.total_steps,
         args.buffer_capacity,

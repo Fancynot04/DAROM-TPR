@@ -50,7 +50,6 @@ class AgentMetrics:
         self.braking_samples = 0
         self.hard_braking_steps = 0
         self.emergency_steps = 0
-        self.teleported = False
         self.steps = 0
         self.transitions = 0
         self.event_samples = 0
@@ -83,11 +82,9 @@ class AgentMetrics:
             self.requests += int(direction != 0)
             self.toward += int(direction < 0 and pre['lane'] > 0)
             self.away += int(direction > 0)
-            if (sample.get('post_road') == pre['road'] and sample.get('post_lane') is not None
-                    and not sample['teleport_started'] and not sample['teleport_ended']):
+            if sample.get('post_road') == pre['road'] and sample.get('post_lane') is not None:
                 self.physical_pairs += 1
                 self.physical += int(sample['post_lane'] != pre['lane'])
-        self.teleported |= sample['teleport_started'] or sample['teleport_ended']
         self.emergency_steps += int(sample['emergency_stopping'])
         after = sample['post_acceleration']
         if after is not None:
@@ -112,8 +109,8 @@ class AgentMetrics:
             raise RuntimeError(f'Missing or invalid terminal reason: {outcome!r}')
         result = dict(terminal_reason=outcome,
                     outcome=outcome if outcome in KNOWN_OUTCOMES else 'Other',
-                    success=outcome == 'Arrived' and not self.teleported,
-                    raw_arrival=outcome == 'Arrived', ego_teleported=self.teleported,
+                    success=outcome == 'Arrived',
+                    raw_arrival=outcome == 'Arrived', ego_teleported=False,
                     event_samples=self.event_samples,
                     agent_steps=self.steps, mean_policy_reward_return=finite(reward),
                     mean_speed_mps=mean(self.speeds), speed_samples=len(self.speeds),

@@ -50,8 +50,6 @@ class Ego:
         # 记录本步 SUMO 事件，不能将消失视为成功
         if ego_id in sim.getCollidingVehiclesIDList():
             self.finish("Collision")
-        elif ego_id in sim.getStartingTeleportIDList():
-            self.finish("Teleport")
         elif ego_id in sim.getArrivedIDList():
             self.finish("Arrived")
 

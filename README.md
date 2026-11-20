@@ -35,15 +35,15 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 
 | 模块 | 结算规则 |
 | --- | --- |
-| `task` | 到达指定出口 +50、碰撞 −500、错过出口 −400、超时 −400。每车只结算一次终止事件。 |
+| `task` | 到达指定出口 +50、碰撞 −500、错过出口 −400、停滞 −400、超时 −400。每车只结算一次终止事件。 |
 | `merge` | O3 车辆完全进入 E75 的主路车道，或经 E75_0 进入 E76 时，首次 +25。后续任务失败保留该奖励。 |
 | `following` | 每个活跃控制步用步前真实状态计算净间距风险和 TTC 风险，结算 −0.1 × max(C_gap, C_TTC)。安全时距 1.5 s，TTC 阈值 3 s，前车查询前瞻 120 m。 |
-| `lane-change` | 实际横移开始后，每步按固定目标车道的前后净间距更新风险峰值，只对峰值的新增部分乘 −2 扣分。反应时间 1.5 s，最小缓冲 2 m，参考减速度 4.5 m/s²。车身完成横移前，同向重复动作不会提前发往再下一条车道。 |
+| `lane-change` | 实际横移开始后，每步按固定目标车道的前后净间距更新风险峰值，只对峰值的新增部分乘 −1.0 扣分。反应时间 1.5 s，最小缓冲 2 m，参考减速度 4.5 m/s²。车身完成横移前，同向重复动作不会提前发往再下一条车道。 |
 | `efficiency` | 每个活跃控制步按步前速度结算 +0.05 × min(1, v/20)，速度单位 m/s。 |
 | `comfort` | 有实测步前和步后加速度时，结算 −0.01 × clip(加速度差的绝对值, 0, 1)。0.01 为待测权重。 |
 | `team` | 双车均到达指定出口时，回合一次性记录 +100。环境通过 `env.team_reward` 提供本步值，日志和评估 JSON 用 `team_reward` 记录回合值。独立团队 Twin-Q 学习该回报，每辆 Actor 最大化个人 Q 加团队 Q。Actor 团队权重用 `--team-q-weight` 设置，默认 1.0。 |
 
-路线引导奖励为 0。Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 为 [1,0]，D3 为 [0,1]）。SUMO 启动时固定将等待、高速路错车道、断路和双向车道 teleport 阈值设为 `-1`，车辆碰撞使用 `remove` 策略。所有奖励模式、Shadow 和正式 Stalled 开关均使用此配置。残余 Ego teleport 在 `teleport_events` 记录时间和起止标志。若同一步检测到碰撞则记录该证据，其余原因标记为 `unknown`。个人回报包括已启用的个人模块及显式开启的旧 USP，可从 `reward_components` 和 USP 统计追溯；团队回报单独记账。
+路线引导奖励为 0。Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 为 [1,0]，D3 为 [0,1]）。SUMO 启动时关闭等待、高速路错车道、断路、双向车道及等候接载的 teleport，车辆碰撞使用 `remove` 策略。Ego 无故移除时报错。个人回报包括已启用的个人模块及显式开启的旧 USP，可从 `reward_components` 和 USP 统计追溯；团队回报单独记账。
 
 团队 Q 按共享 SUMO 步折扣。一辆 Ego 先到达时，团队价值继续沿后续状态传递，直至全员到达或任意 Ego 失败。Replay 区分已到达与尚未出发；个人奖励和团队奖励分别写入日志。
 
@@ -155,8 +155,8 @@ python3 evaluate_masac.py \
 | Jerk m/s³ | 实测步后/步前加速度差除以实际时间差，取绝对值；排除每车首个控制转换和终止转换 | 与旧评估器一致；旧 recorder 使用固定 dt，只有 dt=0.1s 时数值一致 |
 | 急刹 | 有效步后实际加速度 ≤ −4.5 m/s²，包含仍在路上的终止步；报告步数、发生回合数、回合率 | 阈值和终止步规则与旧 merging 一致 |
 | SUMO emergency stopping | 原始 SUMO 事件，报告步数和发生回合率 | 与旧事件统计一致；不等同于急刹 |
-| Teleport | 累计 starting 或 ending 事件，即使碰撞为最终原因也保留 | 与旧累计规则一致 |
-| 成功 / raw arrival | 成功为 Arrived 且从未 Teleport；raw arrival 只判断 Arrived | 成功公式与旧评估器一致；旧 recorder 的 success 仅判断 Arrived，非严格一致 |
+| Teleport | 历史报告保留该统计字段 | 当前 SUMO 配置禁用，评估不采集该事件 |
+| 成功 / raw arrival | 均以 Arrived 为准 | 评估报表兼容历史字段 |
 
 上述一致指同一有效输入上的统计规则；双 Ego 的插入时刻、路径和现有终止实现不同，不代表跨场景的成功事件或性能可直接等同。环境终止规则不因指标适配改变。
 
@@ -195,7 +195,7 @@ JSONL 以 `event` 区分：
 - `config`：完整 CLI、Git 提交及工作树是否有修改；`global_step=0`。
 - `episode`：仅两车均完整终止后写入，包含 `episode_index`、`episode_global_steps`、每车终止原因/奖励/严格成功/有效控制步数、联合成功；最近 100 回合的 ego_1 / ego_2 成功、碰撞、Missed Exit、Timeout 百分率和平均奖励，以及联合成功率和两车奖励和的均值。`rolling_episodes` 是实际分母，`policy=exploration_training`，不能冒充正式评估。
 - `stalled_shadow`：用 `--stalled-shadow` 开启 Stalled-v1。每个共享步输出两辆 Ego 的步前诊断，环境在 `infos[ego]["stalled_shadow"]` 中提供同样的数据。每车独立累计连续有效的 10 秒滑窗，用 SUMO 里程表计算前进距离，小于 20 m 时输出 `would_stall=true`。事件包含首次触发仿真时刻、道路、车道、窗内前进量、累计里程、50 m 内前车及判定原因。前车拥堵、计划停车、邻近红灯或路口冲突、无可通行连接及里程采样中断都会重置窗口。前车通行空间按净间隙扣除最小间距，加上前车按当前速度预计 10 秒的位移判断；路口只检测当前内部连接或距车道末端 20 m 内的冲突。影子输出仅供分析。
-- `--stalled-terminate`：默认关闭，可独立于 `--stalled-shadow` 开启。复用 Stalled-v1 的步前检测，在 SUMO 步完成后，按 Collision、Ego Teleported、Missed Exit、Arrived、Stalled、Timeout 的顺序结算。Stalled 仅结束触发的 Ego，单次任务分为 −400；正常步进奖励按原规则结算。团队目标在首次失败时结束。正式 Stalled 与 USP 互斥。评估默认从 checkpoint 继承，也可用 `--stalled-terminate` 或 `--no-stalled-terminate` 覆盖。训练滚动指标与评估报告均含 `stalled_rate`，自动绘图在失败指标图中展示。
+- `--stalled-terminate`：新 MASAC 训练默认启用。用 `--no-stalled-terminate` 关闭，可加 `--stalled-shadow` 单独记录诊断。复用 Stalled-v1 的步前检测，在 SUMO 步完成后，按 Collision、Missed Exit、Arrived、Stalled、Timeout 的顺序结算。Stalled 仅结束触发的 Ego，单次任务分为 −400；正常步进奖励按原规则结算。团队目标在首次失败时结束。旧 USP 训练默认沿用关闭停滞终止的配置，显式同时开启两个功能会报错。评估默认从 checkpoint 继承，缺少该设置的旧 checkpoint 按关闭处理。也可用 `--stalled-terminate` 或 `--no-stalled-terminate` 覆盖。训练滚动指标与评估报告均含 `stalled_rate`，自动绘图在失败指标图中展示。
 - `control_trace`：使用 `--trace-controls` 时，每个实际控制步记录前车 ID 和实际净间隙、Ego 道路和车道位置、步前和步后速度、策略请求加速度、TraCI 提交加速度、SUMO 步后实测加速度和原始到达标志。前车由 TraCI 沿当前路线搜索，搜索最短前瞻 100 m。查无前车或车辆已在步后移除时，相应字段为 `null`。
 - `update`：第一轮、每隔 `--update-log-every` 轮（默认 40）以及最后一个可执行更新步记录一次。设置为 1 可记录每轮。每条记录保留该轮的原始 `critic_loss`、双 Q 均值 `mean_q`、`mean_target`、`valid_agents`、`update_index`；各车 `actor_loss`、`alpha`、`alpha_loss`、`mean_log_prob`、`valid_samples`。log-prob 是当前 actor 更新中已有采样的实际动作 log-prob，未再额外前向；无有效样本的损失为 null、样本数为 0。
 - `runtime`：窗口实际步数、速度（SUMO 全局训练步/墙钟秒）、Replay 大小、累计更新数、各车动作样本数/有效动作占比、加速度均值与总体标准差、横向动作均值、换道请求比例。只统计真正执行动作的样本；换道比例直接调用当前控制器 `parse_action()`，不另定义阈值。

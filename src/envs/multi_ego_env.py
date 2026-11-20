@@ -159,7 +159,7 @@ class MultiEgoEnv:
         return np.array([target == "D2", target == "D3"], dtype=np.float32)
 
     def reward_summary(self):
-        values = {"teleport_events": self.teleport_events.copy()}
+        values = {}
         if self.reward_tracker is not None:
             values["team_reward"] = self.reward_tracker.team_return
             values["reward_components"] = self.reward_tracker.totals
@@ -314,7 +314,6 @@ class MultiEgoEnv:
         self.stall_detectors = {
             ego_id: StalledDetector() for ego_id in self.AGENTS
         } if self.stalled_shadow or self.stalled_terminate else {}
-        self.teleport_events = []
         self.team_reward = 0.0
         if self.reward_tracker is not None:
             self.reward_tracker.reset(self.AGENTS)
@@ -554,33 +553,16 @@ class MultiEgoEnv:
             sim.getArrivedIDList()
         )
 
-        started = set(sim.getStartingTeleportIDList())
-        ended = set(sim.getEndingTeleportIDList())
-        teleports = started | ended
-        teleport_details = {}
-        for ego_id in sorted(teleports.intersection(self.AGENTS)):
-            detail = {
-                "ego_id": ego_id,
-                "simulation_time": sim.getTime(),
-                "started": ego_id in started,
-                "ended": ego_id in ended,
-                "cause": "collision_detected" if ego_id in collisions else "unknown",
-            }
-            teleport_details[ego_id] = detail
-            self.teleport_events.append(detail)
-
         present = set(conn.vehicle.getIDList()) if self.collect_metrics or tracker is not None else set()
         if tracker is not None:
             for ego_id in acting_ids:
                 terminal_event = None
                 if ego_id in collisions:
                     terminal_event = "Collision"
-                elif ego_id in teleports:
-                    terminal_event = "Ego Teleported"
                 elif ego_id in arrivals:
                     terminal_event = "Arrived"
                 components[ego_id] = tracker.after_step(
-                    conn, ego_id, ego_id in present and ego_id not in teleports,
+                    conn, ego_id, ego_id in present,
                     self.needs_merge[ego_id], terminal_event=terminal_event,
                 )
 
@@ -590,8 +572,7 @@ class MultiEgoEnv:
             for ego_id in self.AGENTS:
                 if self.terminations[ego_id] and ego_id not in pre_terminated:
                     continue
-                on_road = (ego_id in present
-                           and (ego_id not in started or ego_id in ended))
+                on_road = ego_id in present
                 metric_steps[ego_id] = {
                     "pre": metric_pre.get(ego_id),
                     "post_acceleration": (float(conn.vehicle.getAcceleration(ego_id))
@@ -601,8 +582,6 @@ class MultiEgoEnv:
                     "post_road": conn.vehicle.getRoadID(ego_id) if on_road else None,
                     "post_lane": int(conn.vehicle.getLaneIndex(ego_id)) if on_road else None,
                     "depart_time": self.egos[ego_id].state.depart_time,
-                    "teleport_started": ego_id in started,
-                    "teleport_ended": ego_id in ended,
                     "emergency_stopping": ego_id in emergency,
                     "agent_step": ego_id in acting_ids,
                 }
@@ -656,8 +635,8 @@ class MultiEgoEnv:
             if ego_id in collisions:
                 event = "Collision"
 
-            elif ego_id in teleports:
-                event = "Ego Teleported"
+            elif state.terminal_reason == "UnknownRemoval":
+                raise RuntimeError(f"Unexpected removal: {ego_id}, reason={state.terminal_reason}")
 
             elif wrong_exit:
                 event = "Missed Exit"
@@ -677,13 +656,6 @@ class MultiEgoEnv:
 
             else:
                 event = None
-
-            # SUMO 车辆无故消失，不能默认为失败
-            if state.status == "finished" and event is None:
-                raise RuntimeError(
-                    f"Unexpected removal: {ego_id}, "
-                    f"reason={state.terminal_reason}"
-                )
 
             if event == "Arrived" and not self.reached_target[ego_id]:
                 # A short arrivalPos can be reached in the same step as edge entry.
@@ -737,7 +709,6 @@ class MultiEgoEnv:
                 infos[ego_id]["control_trace"] = control_traces.get(ego_id)
             if self.stalled_shadow:
                 infos[ego_id]["stalled_shadow"] = stall_results[ego_id]
-            infos[ego_id]["teleport_event"] = teleport_details.get(ego_id)
             if tracker is not None:
                 infos[ego_id]["reward_components"] = components[ego_id]
                 infos[ego_id]["following_risks"] = (

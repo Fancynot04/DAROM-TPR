@@ -185,7 +185,7 @@ def stalled_terminate_route(tmp_path, monkeypatch):
 
 def assert_teleport_disabled(sim):
     for option in ("time-to-teleport", "time-to-teleport.highways",
-                   "time-to-teleport.disconnected", "time-to-teleport.bidi"):
+                   "time-to-teleport.disconnected", "time-to-teleport.bidi", "time-to-teleport.ride"):
         assert float(sim.getOption(option)) == -1
     assert sim.getOption("collision.action") == "remove"
 
@@ -287,9 +287,10 @@ def test_stalled_training_replay_and_checkpoint_evaluation(stalled_terminate_rou
         "--total-steps", "163", "--device", "cpu", "--torch-threads", "1",
         "--learning-starts", "16", "--batch-size", "32", "--train-every", "20",
         "--buffer-capacity", "200", "--max-active-steps", "130", "--no-tensorboard",
-        "--stalled-terminate", "--output-dir", str(output),
+        "--output-dir", str(output),
     ])
     train_masac.main(args)
+    assert args.stalled_terminate is True
 
     indices = [i for i, row in enumerate(captured) if row["rewards"][0] == -400]
     assert len(indices) == 1

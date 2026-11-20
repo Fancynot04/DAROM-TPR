@@ -197,8 +197,11 @@ def train(args, device):
 
     args.trace_controls = getattr(args, "trace_controls", False)
     args.stalled_shadow = getattr(args, "stalled_shadow", False)
-    args.stalled_terminate = getattr(args, "stalled_terminate", False)
-    if args.stalled_terminate and getattr(args, "usp", False):
+    args.usp = getattr(args, "usp", False)
+    args.stalled_terminate = getattr(args, "stalled_terminate", None)
+    if args.stalled_terminate is None:
+        args.stalled_terminate = not args.usp
+    if args.stalled_terminate and args.usp:
         raise ValueError("Stalled termination and USP cannot both be enabled")
     args.max_active_steps = getattr(args, "max_active_steps", MultiEgoEnv.DEFAULT_MAX_ACTIVE_STEPS)
     if args.max_active_steps <= 0:
@@ -225,7 +228,6 @@ def train(args, device):
     if list((output_dir / "checkpoints").glob("*.pt")):
         raise FileExistsError("Experiment directory already contains checkpoints")
     
-    args.usp = getattr(args, "usp", False)
     args.usp_penalty = getattr(
         args, "usp_penalty", 0.02
     )
@@ -366,11 +368,6 @@ def train(args, device):
                 }
                 if traces:
                     log.write("control_trace", global_step, episode_index=completed_episodes + 1, egos=traces)
-
-            for ego_id in AGENT_IDS:
-                teleport = infos[ego_id]["teleport_event"]
-                if teleport is not None:
-                    log.write("teleport", global_step, **teleport)
 
             # 统计本步每辆 Ego 实际支付的 USP 奖励
             for ego_id in AGENT_IDS:
@@ -673,7 +670,8 @@ def build_parser():
                         help="Write update metrics every N optimizer rounds (1 logs every round)")
     parser.add_argument("--team-q-weight", type=float, default=1.0,
                         help="Positive team Q weight in each Actor objective")
-    parser.add_argument("--stalled-terminate", action="store_true", help="End a stalled Ego episode with a -400 penalty")
+    parser.add_argument("--stalled-terminate", action=argparse.BooleanOptionalAction, default=None,
+                        help="End a stalled Ego episode with a -400 penalty (default: enabled unless using USP)")
     parser.add_argument("--stalled-shadow", action="store_true", help="Log Stalled-v1 diagnostics without changing the task")
     parser.add_argument("--trace-controls", action="store_true", help="Log per-Ego TraCI gaps, motion, and control commands")
     parser.add_argument("--max-active-steps", type=int, default=MultiEgoEnv.DEFAULT_MAX_ACTIVE_STEPS,

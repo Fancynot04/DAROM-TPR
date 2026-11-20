@@ -328,7 +328,7 @@ def evaluate(args):
             "speed": "valid pre-step TraCI speed; episode means equally weighted",
             "jerk": "absolute measured acceleration difference / simulation dt; exclude first and terminal transitions",
             "hard_braking": "valid post-step acceleration <= -4.5 m/s^2, including terminal",
-            "success": "Arrived and no starting/ending teleport event",
+            "success": "Arrived",
             "joint_continuous": "equal agents within episode, then equal valid episodes",
             "global_steps": "env.step calls, excludes reset bootstrap simulation steps",
             "agent_steps_sum": "sum of environment active_steps (actions applied); excludes pre-step Missed Exit",

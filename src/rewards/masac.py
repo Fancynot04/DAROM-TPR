@@ -12,7 +12,6 @@ TASK_EVENTS = {
     "missed_exit": -400.0,
     "timeout": -400.0,
     "stalled": STALLED_PENALTY,
-    "teleport": 0.0,
 }
 TARGET_EXIT_DIM = 2
 MASAC_ENV_VERSION = 2
@@ -31,7 +30,7 @@ class MASACRewardConfig:
     team: bool = True
     ttc_threshold: float = 3.0
     following_lookahead: float = 120.0
-    lane_change_weight: float = 2.0
+    lane_change_weight: float = 1.0
 
     def __post_init__(self):
         for name in ("ttc_threshold", "following_lookahead", "lane_change_weight"):

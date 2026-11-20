@@ -27,7 +27,6 @@ def reference_function(path, name, extra=None):
 def sample(acc=-4.5, pre=True, agent=True):
     return dict(pre=dict(speed=20., acceleration=1., time=1.) if pre else None,
                 post_acceleration=acc, post_time=1.1, on_road=acc is not None,
-                teleport_started=False, teleport_ended=False,
                 emergency_stopping=False, agent_step=agent)
 
 
@@ -64,10 +63,6 @@ def test_masks_counts_and_aggregation():
     assert aggregate([b])['mean_abs_jerk_mps3'] is None
     old_mean = reference_function('evaluate_sac_delay.py', 'mean_valid_episode_jerk')
     assert aggregate([r, b])['mean_abs_jerk_mps3'] == old_mean([r, b])
-    teleport = sample(None); teleport['teleport_ended'] = True
-    a.observe(teleport, True)
-    assert not a.finish('Arrived', 50.)['success']
-    assert a.finish('Collision', -100.)['ego_teleported']
     for reason in (None, '', 'Unknown', 'UnknownRemoval'):
         with pytest.raises(RuntimeError): a.finish(reason, 0)
     assert a.finish('LegalNewEvent', 0)['outcome'] == 'Other'
@@ -180,10 +175,8 @@ def test_frozen_reference_speed_success_and_recorder_dt():
                    {'np': np, 'speed_samples': speeds})
         assert m.finish('Arrived', 0)['mean_speed_mps'] == old
     for outcome in ('Arrived', 'Collision', 'Timeout'):
-        for teleported in (False, True):
-            m = AgentMetrics(); m.teleported = teleported
-            old = eval(compile(ast.Expression(expressions['success']), '<reference>', 'eval'),
-                       {'outcome': outcome, 'teleported': teleported})
-            assert m.finish(outcome, 0)['success'] == old
+        old = eval(compile(ast.Expression(expressions['success']), '<reference>', 'eval'),
+                   {'outcome': outcome, 'teleported': False})
+        assert AgentMetrics().finish(outcome, 0)['success'] == old
     recorder = subprocess.check_output(['git', 'show', '913a73f:src/trajectory_recorder.py'], text=True)
     assert "(after - before) / self.dt" in recorder

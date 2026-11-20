@@ -61,6 +61,7 @@ class SumoWorld:
             "--time-to-teleport.highways", "-1",
             "--time-to-teleport.disconnected", "-1",
             "--time-to-teleport.bidi", "-1",
+            "--time-to-teleport.ride", "-1",
             "-Q",
         ]
 
