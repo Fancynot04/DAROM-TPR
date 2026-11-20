@@ -123,3 +123,35 @@ def test_pre_step_without_previous_action_rejected():
         )
 
     assert len(buffer) == 0
+
+
+def test_team_replay_keeps_idle_step_between_arrivals():
+    buffer = JointReplayBuffer(capacity=4, team=True)
+    collector = JointTransitionCollector(buffer)
+    for active, next_active, success, next_success, reward, done in [
+        ((1, 0), (0, 0), (0, 0), (1, 0), 0, 0),
+        ((0, 0), (0, 1), (1, 0), (1, 0), 0, 0),
+        ((0, 1), (0, 0), (1, 0), (1, 1), 100, 1),
+    ]:
+        row = make_transition(active=active, acted=active, next_active=next_active)
+        row.update(team_active=1, team_done=done, team_reward=reward,
+                   success_mask=success, next_success_mask=next_success)
+        collector.push(row, pre_step_terminal=[0, 0])
+    collector.flush()
+    assert len(buffer) == 3
+    np.testing.assert_array_equal(buffer.data["team_reward"][:3], [0, 0, 100])
+    np.testing.assert_array_equal(buffer.data["team_done"][:3], [0, 0, 1])
+    np.testing.assert_array_equal(buffer.data["acted_mask"][1], [0, 0])
+
+
+def test_team_replay_closes_on_pre_step_failure():
+    buffer = JointReplayBuffer(capacity=4, team=True)
+    collector = JointTransitionCollector(buffer)
+    team_fields = dict(team_active=1, team_done=0, team_reward=0,
+                       success_mask=(0, 0), next_success_mask=(0, 0))
+    collector.push({**make_transition(), **team_fields}, pre_step_terminal=[0, 0])
+    row = make_transition(acted=(1, 0), rewards=(0, -400), dones=(0, 1), next_active=(1, 0))
+    collector.push({**row, **team_fields, "team_done": 1}, pre_step_terminal=[0, 1])
+    collector.flush()
+    np.testing.assert_array_equal(buffer.data["team_active"][:2], [1, 0])
+    np.testing.assert_array_equal(buffer.data["team_done"][:2], [1, 1])

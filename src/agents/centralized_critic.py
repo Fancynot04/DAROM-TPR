@@ -17,6 +17,7 @@ class CentralizedTwinQ(nn.Module):
         hidden_dim=256,
         action_scale=5.0,
         nav_dim=0,
+        team=False,
     ):
         super().__init__()
 
@@ -33,6 +34,7 @@ class CentralizedTwinQ(nn.Module):
             raise ValueError("Invalid action_scale")
 
         self.num_agents = num_agents
+        self.team = team
         self.obs_dim = obs_dim + nav_dim
         self.action_dim = action_dim
         self.action_scale = float(action_scale)
@@ -51,7 +53,7 @@ class CentralizedTwinQ(nn.Module):
         # 每辆 Ego：
         # 交通观测及可选目标出口 + 2 维动作 + 1 维 Mask
         input_dim = num_agents * (
-            self.obs_dim + action_dim + 1
+            self.obs_dim + action_dim + 1 + int(team)
         )
 
         def make_network():
@@ -60,7 +62,7 @@ class CentralizedTwinQ(nn.Module):
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
-                nn.Linear(hidden_dim, num_agents),
+                nn.Linear(hidden_dim, 1 if team else num_agents),
             )
 
         self.q1 = make_network()
@@ -71,6 +73,8 @@ class CentralizedTwinQ(nn.Module):
         observations,
         actions,
         active_mask,
+        *,
+        success_mask=None,
     ):
         """
         observations: (B, 2, obs_dim)
@@ -78,8 +82,7 @@ class CentralizedTwinQ(nn.Module):
         active_mask:  (B, 2)
 
         返回:
-            q1: (B, 2)
-            q2: (B, 2)
+            个人 Critic 为 (B, N)，团队 Critic 为 (B,)。
         """
 
         batch = observations.shape[0]
@@ -129,22 +132,20 @@ class CentralizedTwinQ(nn.Module):
             actions / self.action_scale
         ) * mask.unsqueeze(-1)
 
-        # 3. 拼接两辆 Ego 的联合输入
-        joint_input = torch.cat(
-            [
-                normalized_obs.reshape(batch, -1),
-                normalized_actions.reshape(batch, -1),
-                mask,
-            ],
-            dim=-1,
-        )
+        features = [
+            normalized_obs.reshape(batch, -1),
+            normalized_actions.reshape(batch, -1),
+            mask,
+        ]
+        if self.team:
+            if success_mask is None or success_mask.shape != mask.shape:
+                raise ValueError("Team critic requires one success flag per Ego")
+            # 已到达车辆的动作和交通观测置零，成功状态仍参与团队估值。
+            features.append(success_mask.to(mask))
 
-        # 4. Twin-Q
+        joint_input = torch.cat(features, dim=-1)
         q1 = self.q1(joint_input)
         q2 = self.q2(joint_input)
-
-        # 5. 不输出无效 Ego 的 Q
-        q1 = q1 * mask
-        q2 = q2 * mask
-
-        return q1, q2
+        if self.team:
+            return q1.squeeze(-1), q2.squeeze(-1)
+        return q1 * mask, q2 * mask

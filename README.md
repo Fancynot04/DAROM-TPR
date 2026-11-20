@@ -41,9 +41,11 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 | `lane-change` | SUMO 出现实际换道运动时，按起点步的目标车道前后净间隙结算一次 −0.1 × C_lc。反应时暂用 1.5 s，最小缓冲 2 m，前后车共用参考减速度 4.5 m/s²。该参数仅用于计算风险间隙。 |
 | `efficiency` | 每个活跃控制步按步前速度结算 +0.01 × min(1, v/20)，速度单位 m/s。 |
 | `comfort` | 有实测步前和步后加速度时，结算 −0.01 × clip(加速度差的绝对值, 0, 1)。0.01 为待测权重。 |
-| `team` | 双车均到达指定出口时，回合一次性记录 +100。环境通过 `env.team_reward` 提供本步值，日志和评估 JSON 用 `team_reward` 记录回合值。团队 Q 及其 Actor 权重待确定。 |
+| `team` | 双车均到达指定出口时，回合一次性记录 +100。环境通过 `env.team_reward` 提供本步值，日志和评估 JSON 用 `team_reward` 记录回合值。独立团队 Twin-Q 学习该回报，每辆 Actor 最大化个人 Q 加团队 Q。Actor 团队权重用 `--team-q-weight` 设置，默认 1.0。 |
 
 路线引导奖励为 0。Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 为 [1,0]，D3 为 [0,1]）。新奖励协议将 SUMO 的等待、错车道高速路特例、断路和双向车道 teleport 阈值设为 `-1`，车辆碰撞使用 `remove` 策略。残余 Ego teleport 在 `teleport_events` 记录时间和起止标志。若同一步检测到碰撞则记录该证据，其余原因标记为 `unknown`。个人回报包括已启用的个人模块及显式开启的旧 USP，可从 `reward_components` 和 USP 统计追溯；团队回报单独记账。
+
+团队 Q 按共享 SUMO 步折扣。一辆 Ego 先到达时，团队价值继续沿后续状态传递，直至全员到达或任意 Ego 失败。Replay 区分已到达与尚未出发；个人奖励和团队奖励分别写入日志。
 
 例如，追加 `--no-reward-comfort --no-reward-team` 可关闭舒适度和团队奖励。开关保存在 checkpoint，评估自动复用。未含新奖励配置的旧 checkpoint 沿用 134 维 Actor 和 B0 终止奖励。
 

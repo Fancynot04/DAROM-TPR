@@ -440,6 +440,9 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
     assert tuple(final["agent_ids"]) == AGENT_IDS
     assert final["config"]["device"] == "cpu"
     assert final["config"]["effective_torch_threads"] == 1
+    assert final["config"]["team_q_weight"] == 1.0
+    assert final["team_critic"] and final["target_team_critic"]
+    assert final["team_critic_optimizer"]["state"]
     actor = MultiAgentGaussianActor(ego_ids=AGENT_IDS, nav_dim=2)
     actor.load_state_dict(final["actors"], strict=True)
     assert all(sha256(r["path"]) == r["sha256"] for r in index)
@@ -462,6 +465,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys):
     runtime = next(r for r in reversed(records) if r["event"] == "runtime")
     assert runtime["update_count"] == updates[-1]["update_index"] == 3
     assert all("mean_q" in r and "valid_agents" in r for r in updates)
+    assert any(r.get("team_valid_samples", 0) > 0 for r in updates)
     assert all(r["global_step"] % 20 == 0 for r in updates)
     # 检查两套独立 Actor 都实际进行过参数更新
     actor_updates = {

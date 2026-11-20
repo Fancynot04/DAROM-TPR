@@ -23,6 +23,8 @@ class JointReplayBuffer:
         "next_active_mask": (2,),
     }
 
+    TEAM_MASK_FIELDS = ("team_active", "team_done", "success_mask", "next_success_mask")
+
     MASK_FIELDS = (
         "dones",
         "active_mask",
@@ -36,6 +38,7 @@ class JointReplayBuffer:
         seed=42,
         agent_ids=AGENT_IDS,
         nav_dim=0,
+        team=False,
     ):
         if capacity <= 0:
             raise ValueError("Invalid capacity")
@@ -50,6 +53,11 @@ class JointReplayBuffer:
             "critic_obs": (2, 93 + nav_dim),
             "next_critic_obs": (2, 93 + nav_dim),
         }
+        self.mask_fields = self.MASK_FIELDS
+        if team:
+            self.shapes.update(team_reward=(), team_active=(), team_done=(),
+                               success_mask=(2,), next_success_mask=(2,))
+            self.mask_fields += self.TEAM_MASK_FIELDS
         self.capacity = int(capacity)
         self.position = 0
         self.size = 0
@@ -99,7 +107,7 @@ class JointReplayBuffer:
 
             values[name] = value.copy()
 
-        for name in self.MASK_FIELDS:
+        for name in self.mask_fields:
             mask = values[name]
 
             if not np.all((mask == 0) | (mask == 1)):

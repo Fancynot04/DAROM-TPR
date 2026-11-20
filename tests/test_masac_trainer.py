@@ -420,3 +420,70 @@ def test_alpha_update_no_actor_change():
             critic_before, critic.parameters()
         )
     )
+
+
+def test_team_target_bootstraps_past_early_arrival_and_waiting():
+    actors = MultiAgentGaussianActor()
+    critic = CentralizedTwinQ()
+    team = CentralizedTwinQ(team=True)
+    trainer = MASACTrainer(actors, critic, gamma=0.99, team_critic=team)
+    with torch.no_grad():
+        for param in trainer.target_team_critic.parameters():
+            param.zero_()
+        trainer.target_team_critic.q1[-1].bias.fill_(20)
+        trainer.target_team_critic.q2[-1].bias.fill_(30)
+    batch = make_batch()
+    # Early arrival, no-action wait, second arrival, first team failure.
+    batch["dones"][0] = torch.tensor([1.0, 0.0])
+    batch["next_active_mask"][0].zero_()
+    batch["active_mask"][1].zero_()
+    batch["acted_mask"][1].zero_()
+    batch.update(
+        team_active=torch.ones(4),
+        team_done=torch.tensor([0., 0., 1., 1.]),
+        team_reward=torch.tensor([0., 0., 100., 0.]),
+        success_mask=torch.tensor([[0., 0.], [1., 0.], [1., 0.], [0., 0.]]),
+        next_success_mask=torch.tensor([[1., 0.], [1., 0.], [1., 1.], [0., 0.]]),
+    )
+    before = team.q1[-1].bias.detach().clone()
+    stats = trainer.update_critic(batch)
+    assert stats["team_valid_samples"] == 4
+    assert abs(stats["team_mean_target"] - (2 * 0.99 * 20 + 100) / 4) < 1e-5
+    assert not torch.equal(before, team.q1[-1].bias)
+
+
+def test_team_q_changes_both_actor_updates():
+    from copy import deepcopy
+    from torch import nn
+
+    class ActionTeamCritic(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.scale = nn.Parameter(torch.ones(()))
+
+        def forward(self, observations, actions, active_mask, *, success_mask):
+            q = (actions[:, :, 0] * active_mask).sum(dim=1) * self.scale
+            return q, q
+
+    actors = MultiAgentGaussianActor()
+    critic = CentralizedTwinQ()
+    baseline = MASACTrainer(deepcopy(actors), deepcopy(critic))
+    team = ActionTeamCritic()
+    cooperative = MASACTrainer(actors, critic, team_critic=team, team_q_weight=1.0)
+    batch = make_batch()
+
+    torch.manual_seed(123)
+    baseline.update_actors(batch)
+    batch.update(team_active=torch.ones(4), success_mask=torch.zeros(4, 2))
+    torch.manual_seed(123)
+    stats = cooperative.update_actors(batch)
+
+    for key in actors.ego_ids:
+        assert stats[f"{key}_actor_updates"] == 1
+        assert f"{key}_team_q" in stats
+        assert not torch.equal(
+            baseline.actors.actors[key].mean_head.weight,
+            cooperative.actors.actors[key].mean_head.weight,
+        )
+    assert team.scale.grad is None
+    assert team.scale.requires_grad

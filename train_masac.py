@@ -6,6 +6,7 @@
 """
 
 import argparse
+import math
 from dataclasses import fields
 import random
 from pathlib import Path
@@ -107,7 +108,15 @@ def save_checkpoint(
 ):
     """保存模型和优化器状态。"""
 
+    team_state = {}
+    if trainer.team_critic is not None:
+        team_state = {
+            "team_critic": trainer.team_critic.state_dict(),
+            "target_team_critic": trainer.target_team_critic.state_dict(),
+            "team_critic_optimizer": trainer.team_critic_optimizer.state_dict(),
+        }
     atomic_write(path, lambda stream: torch.save({
+        **team_state,
         "git": git_metadata(),
         "source_sha256": evaluation_fingerprint(),
         "global_step": global_step,
@@ -218,6 +227,10 @@ def train(args, device):
         for field in fields(MASACRewardConfig)
     }
     reward_config = MASACRewardConfig(**args.reward_components)
+    args.team_q_weight = getattr(args, "team_q_weight", 1.0)
+    if reward_config.team and (not math.isfinite(args.team_q_weight) or args.team_q_weight <= 0):
+        raise ValueError("team_q_weight must be finite and positive when team reward is enabled")
+
 
     # 1. 创建网络及优化器
     actors = MultiAgentGaussianActor(
@@ -227,6 +240,8 @@ def train(args, device):
         num_agents=len(AGENT_IDS), nav_dim=TARGET_EXIT_DIM,
     ).to(device)
 
+    team_critic = CentralizedTwinQ(nav_dim=TARGET_EXIT_DIM, team=True).to(device) if reward_config.team else None
+
     trainer = MASACTrainer(
         actors=actors,
         critic=critic,
@@ -234,6 +249,8 @@ def train(args, device):
         tau=args.tau,
         learning_rate=args.learning_rate,
         alpha=(args.initial_alpha,) * len(AGENT_IDS),
+        team_critic=team_critic,
+        team_q_weight=args.team_q_weight,
     )
 
     # 2. 创建联合经验池
@@ -242,6 +259,7 @@ def train(args, device):
         seed=args.seed,
         agent_ids=AGENT_IDS,
         nav_dim=TARGET_EXIT_DIM,
+        team=reward_config.team,
     )
 
     # 3. 创建双 Ego 环境
@@ -398,6 +416,18 @@ def train(args, device):
                 "next_critic_obs": next_critic,
                 "next_active_mask": next_mask,
             }
+
+            if reward_config.team:
+                reasons = [env.terminal_reasons[key] for key in AGENT_IDS]
+                transition.update(
+                    team_reward=env.team_reward,
+                    team_active=float(all(reason == "Arrived" for reason in outcomes.values())),
+                    team_done=float(all(terminations.values()) or any(
+                        reason not in (None, "Arrived") for reason in reasons
+                    )),
+                    success_mask=[outcomes.get(key) == "Arrived" for key in AGENT_IDS],
+                    next_success_mask=[reason == "Arrived" for reason in reasons],
+                )
 
             # E. 由采集器处理 pre-step 奖励归因
             collector.push(
@@ -621,6 +651,8 @@ def build_parser():
     parser.add_argument("--torch-threads", type=int, default=None, help="PyTorch intra-op threads (default: 2 on CUDA, up to 8 on CPU)")
     parser.add_argument("--update-log-every", type=int, default=40,
                         help="Write update metrics every N optimizer rounds (1 logs every round)")
+    parser.add_argument("--team-q-weight", type=float, default=1.0,
+                        help="Positive team Q weight in each Actor objective")
     parser.add_argument("--trace-controls", action="store_true", help="Log per-Ego TraCI gaps, motion, and control commands")
     parser.add_argument("--max-active-steps", type=int, default=MultiEgoEnv.DEFAULT_MAX_ACTIVE_STEPS,
                         help="Per-Ego timeout in active control steps")

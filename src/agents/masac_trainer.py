@@ -1,5 +1,5 @@
 
-"""CTDE-MASAC 更新器：第一阶段仅实现 Critic 更新。"""
+"""CTDE-MASAC 的个人、团队和熵系数更新。"""
 
 from copy import deepcopy
 
@@ -38,7 +38,7 @@ def compute_td_target(
 
 
 class MASACTrainer:
-    """当前仅负责集中式 Critic 的学习。"""
+    """更新集中 Critic 和分散 Actor。"""
 
     def __init__(
         self,
@@ -48,6 +48,8 @@ class MASACTrainer:
         tau=0.005,
         learning_rate=3e-5,
         alpha=(0.01, 0.01),
+        team_critic=None,
+        team_q_weight=1.0,
     ):
         if not 0.0 <= gamma <= 1.0:
             raise ValueError("Invalid gamma")
@@ -70,6 +72,16 @@ class MASACTrainer:
         self.target_critic = deepcopy(critic)
         self.target_critic.eval()
         self.target_critic.requires_grad_(False)
+
+        if team_critic is not None and (not math.isfinite(team_q_weight) or team_q_weight <= 0):
+            raise ValueError("team_q_weight must be finite and positive when team reward is enabled")
+        self.team_critic = team_critic
+        self.team_q_weight = team_q_weight
+        self.target_team_critic = None
+        self.team_critic_optimizer = None
+        if self.team_critic is not None:
+            self.target_team_critic = deepcopy(self.team_critic).eval().requires_grad_(False)
+            self.team_critic_optimizer = torch.optim.Adam(self.team_critic.parameters(), lr=learning_rate)
 
         self.gamma = gamma
         self.tau = tau
@@ -126,12 +138,54 @@ class MASACTrainer:
     def soft_update_target(self):
         """Polyak 平滑更新目标 Critic。"""
 
-        for online, target in zip(
-            self.critic.parameters(),
-            self.target_critic.parameters(),
-        ):
-            target.mul_(1.0 - self.tau)
-            target.add_(online, alpha=self.tau)
+        pairs = [(self.critic, self.target_critic)]
+        if self.team_critic is not None:
+            pairs.append((self.team_critic, self.target_team_critic))
+        for online, target in pairs:
+            for source, destination in zip(online.parameters(), target.parameters()):
+                destination.mul_(1.0 - self.tau)
+                destination.add_(source, alpha=self.tau)
+
+    def update_team_critic(self, batch, next_actions, *, collect_stats):
+        # A failure ends the team objective. Samples after that event have no team target.
+        eligible = batch["team_active"].bool()
+        valid = int(eligible.sum().item())
+        if not valid:
+            return {}
+
+        with torch.no_grad():
+            target_q1, target_q2 = self.target_team_critic(
+                batch["next_critic_obs"][eligible],
+                next_actions[eligible],
+                batch["next_active_mask"][eligible],
+                success_mask=batch["next_success_mask"][eligible],
+            )
+            targets = batch["team_reward"][eligible] + self.gamma * (
+                1.0 - batch["team_done"][eligible]
+            ) * torch.minimum(target_q1, target_q2)
+
+        q1, q2 = self.team_critic(
+            batch["critic_obs"][eligible],
+            batch["actions"][eligible],
+            batch["active_mask"][eligible],
+            success_mask=batch["success_mask"][eligible],
+        )
+        loss = ((q1 - targets).square() + (q2 - targets).square()).mean()
+        if not torch.isfinite(loss):
+            raise RuntimeError("Non-finite team Critic loss")
+
+        self.team_critic_optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.team_critic.parameters(), max_norm=10.0)
+        self.team_critic_optimizer.step()
+        if not collect_stats:
+            return {}
+        return {
+            "team_critic_loss": loss.item(),
+            "team_valid_samples": valid,
+            "team_mean_target": targets.mean().item(),
+            "team_mean_q": ((q1.detach() + q2.detach()) / 2).mean().item(),
+        }
 
     def update_critic(self, batch, *, collect_stats=True):
         """使用一批联合经验更新一次 Twin-Q。"""
@@ -149,7 +203,7 @@ class MASACTrainer:
         valid_count = acted_mask.sum()
 
         count = int(valid_count.item())
-        if count == 0:
+        if count == 0 and self.team_critic is None:
             raise ValueError(
                 "Batch contains no executed actions"
             )
@@ -195,58 +249,36 @@ class MASACTrainer:
                 gamma=self.gamma,
             )
 
-        # 2. 计算当前 Twin-Q
-        q1, q2 = self.critic(
-            batch["critic_obs"],
-            batch["actions"],
-            batch["active_mask"],
-        )
+        stats = {}
+        if count:
+            q1, q2 = self.critic(
+                batch["critic_obs"],
+                batch["actions"],
+                batch["active_mask"],
+            )
+            errors = (q1 - targets).square() + (q2 - targets).square()
+            loss = (errors * acted_mask).sum() / valid_count
+            if not torch.isfinite(loss):
+                raise RuntimeError("Non-finite Critic loss")
 
-        # 3. 对两个 Q 网络分别计算 TD 误差
-        errors = (
-            (q1 - targets).square()
-            + (q2 - targets).square()
-        )
+            self.critic_optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=10.0)
+            self.critic_optimizer.step()
 
-        # 仅使用真正执行动作的 Ego 样本
-        loss = (
-            errors * acted_mask
-        ).sum() / valid_count
+            if collect_stats:
+                stats.update(
+                    critic_loss=loss.item(),
+                    valid_agents=count,
+                    mean_q=((((q1.detach() + q2.detach()) / 2) * acted_mask).sum().item() / count),
+                    mean_target=(targets * acted_mask).sum().item() / count,
+                )
 
-        if not torch.isfinite(loss):
-            raise RuntimeError("Non-finite Critic loss")
-
-        # 4. 更新当前 Critic
-        self.critic_optimizer.zero_grad(
-            set_to_none=True
-        )
-
-        loss.backward()
-
-        nn.utils.clip_grad_norm_(
-            self.critic.parameters(),
-            max_norm=10.0,
-        )
-
-        self.critic_optimizer.step()
-
-        # 5. 更新目标 Critic
+        if self.team_critic is not None:
+            stats.update(self.update_team_critic(batch, next_actions, collect_stats=collect_stats))
         self.soft_update_target()
+        return stats
 
-        if not collect_stats:
-            return {}
-        return {
-            "critic_loss": float(loss.item()),
-            "valid_agents": count,
-            "mean_q": float((((q1.detach() + q2.detach()) / 2) * acted_mask).sum().item() / count),
-            "mean_target": float(
-                (
-                    targets * acted_mask
-                ).sum().item() / count
-            ),
-        }
-
-    
     def update_actors(self, batch, *, collect_stats=True):
         """逐个更新 Actor，阻止跨 Agent 梯度传播。"""
 
@@ -271,12 +303,15 @@ class MASACTrainer:
         # Actor 更新时不修改 Critic 参数，
         # 但必须保留 Q 对当前 Actor 动作的梯度。
         critic_params = list(self.critic.parameters())
+        if self.team_critic is not None:
+            critic_params.extend(self.team_critic.parameters())
         old_flags = [
             p.requires_grad for p in critic_params
         ]
 
         try:
-            self.critic.requires_grad_(False)
+            for parameter in critic_params:
+                parameter.requires_grad_(False)
 
             for i, ego_id in enumerate(self.actors.ego_ids):
                 valid = valid_mask[:, i]
@@ -313,6 +348,16 @@ class MASACTrainer:
                     q1[:, i],
                     q2[:, i],
                 )
+
+                if self.team_critic is not None:
+                    team_q1, team_q2 = self.team_critic(
+                        critic_obs, joint_actions, active_mask,
+                        success_mask=batch["success_mask"],
+                    )
+                    team_q = torch.minimum(team_q1, team_q2) * batch["team_active"]
+                    q_i = q_i + self.team_q_weight * team_q
+                    if collect_stats:
+                        results[f"{ego_id}_team_q"] = (team_q.detach() * valid).sum().item() / count
 
                 # 实际动作概率密度 -> 归一化动作密度
                 log_prob_norm = (

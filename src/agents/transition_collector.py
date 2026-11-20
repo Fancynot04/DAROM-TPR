@@ -38,7 +38,7 @@ class JointTransitionCollector:
 
             result[name] = value.copy()
 
-        for name in self.buffer.MASK_FIELDS:
+        for name in self.buffer.mask_fields:
             value = result[name]
             if not np.all((value == 0) | (value == 1)):
                 raise ValueError(f"Invalid {name}")
@@ -131,15 +131,19 @@ class JointTransitionCollector:
             current["next_active_mask"][i] = 0
             current["actions"][i] = 0
 
+        if np.any(pre) and "team_active" in current:
+            # 步前的 Missed Exit 已使全员成功不可能，归入上一步的团队结束。
+            previous["team_done"][...] = 1
+            current["team_active"][...] = 0
+
         # 现在可以安全提交上一步经验。
         if previous is not None:
             self.buffer.add(**previous)
 
-        # 当前步至少有一辆 Ego 执行动作，才需要暂存。
-        # 全部 Ego 都没有行动时，不产生空训练样本。
+        # 团队任务仍可成功时保留等待步，团队折扣按 SUMO 共享时钟推进。
         self.pending = (
             current
-            if np.any(current["acted_mask"] == 1)
+            if np.any(current["acted_mask"] == 1) or current.get("team_active", 0)
             else None
         )
 
