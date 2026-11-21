@@ -18,6 +18,7 @@ LEGACY_MASAC_ENV_VERSION = 2
 MASAC_ENV_VERSION = 3
 # Shared reference for gap scoring, independent of SUMO vehicle braking limits.
 LANE_CHANGE_REFERENCE_DECEL = 4.5
+FOLLOWING_WEIGHT = 0.1
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class MASACRewardConfig:
     ttc_threshold: float = 3.0
     following_lookahead: float = 120.0
     lane_change_weight: float = 1.0
+    rear_following: bool = True
 
     def __post_init__(self):
         for name in ("ttc_threshold", "following_lookahead", "lane_change_weight"):
@@ -88,7 +90,8 @@ class MASACRewards:
         self.config = config
         self.protocol = protocol
         self.components = (
-            "task", "merge", "following", "lane_change", "efficiency", "comfort", "route_guidance",
+            "task", "merge", "following", "rear_following", "lane_change",
+            "efficiency", "comfort", "route_guidance",
         )
         self.reset(())
 
@@ -123,28 +126,44 @@ class MASACRewards:
             return self.protocol.route_guidance_weight
         return 0.0
 
+    def _following_risks(self, gap, behind_speed, ahead_speed):
+        gap_risk = gap_deficit(gap, max(1.5 * behind_speed, 1e-6))
+        closing_speed = behind_speed - ahead_speed
+        ttc = max(gap, 0.0) / closing_speed if closing_speed > 0 else inf
+        return gap_risk, gap_deficit(ttc, self.config.ttc_threshold)
+
     def before_step(self, conn, ego_id, control):
         vehicle = conn.vehicle
         speed = (vehicle.getSpeed(ego_id) if any((
-            self.config.efficiency, self.config.following, self.config.lane_change,
+            self.config.efficiency, self.config.following, self.config.rear_following,
+            self.config.lane_change,
         )) else 0.0)
         values = self.empty()
         if self.config.efficiency:
             values["efficiency"] = self.protocol.efficiency_weight * min(1.0, speed / 20.0)
         gap_risk = ttc_risk = 0.0
+        rear_gap_risk = rear_ttc_risk = 0.0
         if self.config.following:
             leader = vehicle.getLeader(ego_id, self.config.following_lookahead)
             if leader and leader[0]:
                 # TraCI reports the bumper gap minus the following vehicle's minGap.
                 gap = leader[1] + vehicle.getMinGap(ego_id)
-                gap_risk = gap_deficit(gap, max(1.5 * speed, 1e-6))
-                closing_speed = speed - vehicle.getSpeed(leader[0])
-                ttc = max(gap, 0.0) / closing_speed if closing_speed > 0 else inf
-                ttc_risk = gap_deficit(ttc, self.config.ttc_threshold)
-                values["following"] = -0.1 * max(gap_risk, ttc_risk)
+                gap_risk, ttc_risk = self._following_risks(gap, speed, vehicle.getSpeed(leader[0]))
+                values["following"] = -FOLLOWING_WEIGHT * max(gap_risk, ttc_risk)
+        if self.config.rear_following:
+            follower = vehicle.getFollower(ego_id, self.config.following_lookahead)
+            if follower and follower[0]:
+                follower_id, distance = follower
+                gap = distance + vehicle.getMinGap(follower_id)
+                rear_gap_risk, rear_ttc_risk = self._following_risks(
+                    gap, vehicle.getSpeed(follower_id), speed,
+                )
+                values["rear_following"] = -FOLLOWING_WEIGHT * max(rear_gap_risk, rear_ttc_risk)
         self.following_risks[ego_id] = {
             "gap_risk": gap_risk, "ttc_risk": ttc_risk,
             "following_reward": values["following"],
+            "rear_gap_risk": rear_gap_risk, "rear_ttc_risk": rear_ttc_risk,
+            "rear_following_reward": values["rear_following"],
         }
 
         risk = 0.0

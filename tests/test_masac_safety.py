@@ -64,7 +64,7 @@ def test_route_guidance_scores_traversed_link_once(via, destination, expected):
 @pytest.mark.parametrize("event", ["Arrived", "Collision", "Missed Exit", "Stalled", "Timeout"])
 @pytest.mark.parametrize("legacy", [False, True])
 def test_merge_bonus_and_efficiency(event, legacy):
-    config = MASACRewardConfig(following=False, lane_change=False, comfort=False)
+    config = MASACRewardConfig(following=False, rear_following=False, lane_change=False, comfort=False)
     tracker = MASACRewards(config, LEGACY_MASAC_REWARD_PROTOCOL) if legacy else MASACRewards(config)
     vehicle = Mock()
     vehicle.getRoadID.return_value = "E76"
@@ -196,26 +196,44 @@ def test_route_deviation_settles_before_next_actor_observation(tmp_path, monkeyp
         (20, 0, 20, 1 / 3, 2 / 3),
     ],
 )
-def test_following_net_gap_and_ttc(speed, front, gap, gap_risk, ttc_risk):
-    tracker = MASACRewards(MASACRewardConfig(lane_change=False))
+@pytest.mark.parametrize("rear", [False, True])
+def test_following_net_gap_and_ttc(speed, front, gap, gap_risk, ttc_risk, rear):
+    tracker = MASACRewards(MASACRewardConfig(
+        following=not rear, rear_following=rear, lane_change=False,
+    ))
     vehicle = Mock()
-    vehicle.getLeader.return_value = ("lead", gap - 2.5) if front is not None else ("", -1)
-    vehicle.getMinGap.return_value = 2.5
-    vehicle.getSpeed.side_effect = {"ego": speed, "lead": front}.__getitem__
+    neighbor = ("neighbor", gap - (3.5 if rear else 2.5)) if front is not None else ("", -1)
+    vehicle.getMinGap.side_effect = {"ego": 2.5, "neighbor": 3.5}.__getitem__
+    if rear:
+        vehicle.getFollower.return_value = neighbor
+        vehicle.getSpeed.side_effect = {"ego": front if front is not None else 0, "neighbor": speed}.__getitem__
+    else:
+        vehicle.getLeader.return_value = neighbor
+        vehicle.getSpeed.side_effect = {"ego": speed, "neighbor": front}.__getitem__
     tracker.before_step(SimpleNamespace(vehicle=vehicle), "ego", None)
-    vehicle.getLeader.assert_called_once_with("ego", 120.0)
+    query = vehicle.getFollower if rear else vehicle.getLeader
+    query.assert_called_once_with("ego", 120.0)
+    disabled_query = vehicle.getLeader if rear else vehicle.getFollower
+    disabled_query.assert_not_called()
     values = tracker.after_step(None, "ego", False, False)
+    penalty = -0.1 * max(gap_risk, ttc_risk)
     assert tracker.following_risks["ego"] == pytest.approx({
-        "gap_risk": gap_risk, "ttc_risk": ttc_risk,
-        "following_reward": -0.1 * max(gap_risk, ttc_risk),
+        "gap_risk": 0 if rear else gap_risk,
+        "ttc_risk": 0 if rear else ttc_risk,
+        "following_reward": 0 if rear else penalty,
+        "rear_gap_risk": gap_risk if rear else 0,
+        "rear_ttc_risk": ttc_risk if rear else 0,
+        "rear_following_reward": penalty if rear else 0,
     })
-    assert -0.1 <= values["following"] <= 0
-    assert values["following"] == pytest.approx(-0.1 * max(gap_risk, ttc_risk))
+    assert values["following"] == pytest.approx(0 if rear else penalty)
+    assert values["rear_following"] == pytest.approx(penalty if rear else 0)
 
 
 @pytest.fixture
 def lane_change():
-    tracker = MASACRewards(MASACRewardConfig(following=False, merge=False, comfort=False))
+    tracker = MASACRewards(MASACRewardConfig(
+        following=False, rear_following=False, merge=False, comfort=False,
+    ))
     lanes = {"a": 0, "b": 0}
     lateral_speed = dict.fromkeys(lanes, 0)
     vehicle = Mock()
@@ -440,6 +458,9 @@ def test_real_leader_gap_and_ttc_beyond_old_lookahead(tmp_path, actor_leader_fea
         _, _, _, _, infos = env.step(dict.fromkeys(env.AGENTS, [0, 0]))
         assert infos["ego_1"]["following_risks"] == pytest.approx({
             "gap_risk": 0, "ttc_risk": 1 / 3, "following_reward": -1 / 30,
+            "rear_gap_risk": 0, "rear_ttc_risk": 0, "rear_following_reward": 0,
         })
+        assert infos["ego_2"]["following_risks"]["rear_ttc_risk"] == pytest.approx(1 / 3)
+        assert infos["ego_2"]["reward_components"]["rear_following"] == pytest.approx(-1 / 30)
     finally:
         env.close()

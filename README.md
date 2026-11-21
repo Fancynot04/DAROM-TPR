@@ -32,13 +32,14 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 
 ### 模块化奖励
 
-新训练默认开启下表前七个模块，路线引导需显式开启。参数采用 `--reward-<模块>` 和 `--no-reward-<模块>`，可独立组合。直接构造环境时传入 `MultiEgoEnv(reward_config=MASACRewardConfig(...))`。
+新训练默认开启任务、汇入、前后车安全间距、换道、效率、舒适度和团队模块，路线引导需显式开启。参数采用 `--reward-<模块>` 和 `--no-reward-<模块>`，可独立组合。直接构造环境时传入 `MultiEgoEnv(reward_config=MASACRewardConfig(...))`。
 
 | 模块 | 结算规则 |
 | --- | --- |
 | `task` | 到达指定出口 +50、碰撞 −500、错过出口 −400、停滞 −400、超时 −400。每车只结算一次终止事件。 |
 | `merge` | 需要汇入的任务沿用原判定。O3 Ego 完全进入 E75 主路车道或进入 E76 时只标记完成。该车成功到达自己的出口时另付 +25 一次，碰撞、错过出口、停滞和超时均为 0。 |
 | `following` | 每个活跃控制步用步前真实状态计算净间距风险和 TTC 风险，结算 −0.1 × max(C_gap, C_TTC)。安全时距 1.5 s，TTC 阈值 3 s，前车查询前瞻 120 m。 |
+| `rear-following` | 按同样的公式和权重独立扣分。用后车速度计算 1.5 s 安全间距，用后车速度减 Ego 速度计算闭合速度。前后车可在同一步各扣最多 0.1。无后车时该项为 0，可用 `--no-reward-rear-following` 单独关闭。 |
 | `lane-change` | 实际横移开始后，每步按固定目标车道的前后净间距更新风险峰值，只对峰值的新增部分乘 −1.0 扣分。反应时间 1.5 s，最小缓冲 2 m，参考减速度 4.5 m/s²。车身完成横移前，同向重复动作不会提前发往再下一条车道。 |
 | `efficiency` | 每个活跃控制步按步前速度结算 +0.01 × min(1, v/20)，速度单位 m/s。 |
 | `comfort` | 有实测步前和步后加速度时，结算 −0.01 × clip(加速度差的绝对值, 0, 1)。0.01 为待测权重。 |
@@ -51,7 +52,7 @@ Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 
 
 团队 Q 按共享 SUMO 步折扣。一辆 Ego 先到达时，团队价值继续沿后续状态传递，直至全员到达或任意 Ego 失败。Replay 区分已到达与尚未出发；个人奖励和团队奖励分别写入日志。
 
-例如，追加 `--no-reward-comfort --no-reward-team` 可关闭舒适度和团队奖励。TTC 阈值、查询前瞻和换道权重可用 `--reward-ttc-threshold`、`--reward-following-lookahead` 和 `--reward-lane-change-weight` 设置。开关与参数保存在 checkpoint，评估自动复用。单步信息提供 `gap_risk`、`ttc_risk`、`following_reward`，训练可用 `--trace-controls` 记录。换道事件写入回合训练日志和评估 JSON，包含开始、完成或中断时刻、目标车道、风险峰值与累计扣分。
+例如，追加 `--no-reward-comfort --no-reward-team` 可关闭舒适度和团队奖励。前后车共用 `--reward-ttc-threshold` 和 `--reward-following-lookahead`，换道权重用 `--reward-lane-change-weight` 设置。开关与参数保存在 checkpoint，评估自动复用。旧 checkpoint 缺少 `rear_following` 开关时，评估按关闭处理。单步信息分别提供 `gap_risk`、`ttc_risk`、`following_reward` 和 `rear_gap_risk`、`rear_ttc_risk`、`rear_following_reward`，训练可用 `--trace-controls` 记录。换道事件写入回合训练日志和评估 JSON，包含开始、完成或中断时刻、目标车道、风险峰值与累计扣分。
 
 每辆 Actor 的首维是到该车任务终点的沿路线剩余米数，沿用编码器固定的 1000 m 缩放。环境从双 Ego 路线文件中各自的 `<trip>` 读取目标 Edge 和 `arrivalPos`，默认取末端，支持 `max`、`center` 和数值位置。可用 `MultiEgoEnv(route_file=...)` 指定同一路网的其他双 Ego 路线。活动 Ego 的无效距离会报告车辆、道路、路线和目标。Critic 仍使用实时累计行驶距离。
 

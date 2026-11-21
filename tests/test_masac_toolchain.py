@@ -464,6 +464,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     assert final["config"]["device"] == "cpu"
     assert final["config"]["effective_torch_threads"] == 1
     assert final["config"]["team_q_weight"] == 1.0
+    assert final["config"]["reward_components"]["rear_following"] is True
     assert final["config"]["reward_components"]["route_guidance"] is False
     assert final["config"]["reward_protocol"] == {
         "merge_on_success": True, "efficiency_weight": 0.01, "route_guidance_weight": 5.0,
@@ -554,6 +555,8 @@ def test_training_cli_defaults():
     assert args.torch_threads is None
     assert args.update_log_every == 40
     assert args.max_active_steps == 2500
+    assert args.reward_rear_following
+    assert not parser.parse_args(["--no-reward-rear-following"]).reward_rear_following
     assert not args.reward_route_guidance
     assert parser.parse_args(["--reward-route-guidance"]).reward_route_guidance
     assert args.reward_route_guidance_weight == 5.0
@@ -592,6 +595,7 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(work, env_version, leg
     assert protocol["route_guidance_weight"] == (0.0 if legacy else 7.0)
     assert report["route_guidance_rules"] == config.get("route_guidance_rules", [])
     for values in report["records"][0]["reward_components"].values():
+        assert values["rear_following"] == 0
         assert values["efficiency"] == pytest.approx(0.025 if legacy else 0.005)
         assert values["route_guidance"] == 0
 

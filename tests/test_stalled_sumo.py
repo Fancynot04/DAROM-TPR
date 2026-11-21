@@ -192,7 +192,7 @@ def assert_teleport_disabled(sim):
 
 @pytest.mark.parametrize("reward_config", [
     None,
-    MASACRewardConfig(task=False, merge=False, following=False, lane_change=False,
+    MASACRewardConfig(task=False, merge=False, following=False, rear_following=False, lane_change=False,
                       efficiency=False, comfort=False, team=False),
     MASACRewardConfig(),
 ], ids=["legacy-b0", "all-modules-off", "default-masac"])

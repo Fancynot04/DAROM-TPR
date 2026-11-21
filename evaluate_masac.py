@@ -59,6 +59,8 @@ def evaluate(args):
     else:
         reward_protocol = MASACRewardProtocol(**protocol_settings)
         route_guidance_rules = reward_config["route_guidance_rules"]
+    if components is not None:
+        components = {"rear_following": False, **components}
     actor_leader_features = reward_config.get("actor_leader_features", False)
     actors = MultiAgentGaussianActor(
         ego_ids=AGENT_IDS,
