@@ -6,6 +6,8 @@
 """
 
 import argparse
+import hashlib
+import json
 import math
 from dataclasses import asdict, fields
 import random
@@ -17,6 +19,7 @@ import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
 from src.envs.route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES
+from src.envs.route_preparation import DEFAULT_ROUTE_PREPARATION_STAGES, DEFAULT_ROUTE_PREPARATION_WEIGHTS
 from src.envs.stalled import stalled_block_grace_for_version
 from src.rewards.masac import (
     LEGACY_MASAC_ENV_VERSION, MASACRewardConfig, MASACRewardProtocol, MASAC_ENV_VERSION,
@@ -148,6 +151,26 @@ def save_checkpoint(
     }, stream))
 
 
+def initialize_actor_weights(actors, path, expected_sha256, actor_leader_features):
+    """Start an independent reward run with only the verified source Actor weights."""
+    with Path(path).open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        if expected_sha256 is not None and digest != expected_sha256.lower():
+            raise ValueError(f"Actor initialization checkpoint SHA-256 mismatch: {path}")
+        stream.seek(0)
+        state = torch.load(stream, map_location="cpu", weights_only=True)
+    config = state.get("config", {})
+    if (
+        tuple(state.get("agent_ids", ())) != AGENT_IDS
+        or config.get("masac_env_version") not in SUPPORTED_MASAC_ENV_VERSIONS[1:]
+        or config.get("actor_leader_features", False) != actor_leader_features
+    ):
+        raise ValueError("Actor initialization requires matching route-aware observation semantics and Ego IDs")
+    actors.load_state_dict(state["actors"], strict=True)
+    return {"path": str(Path(path).resolve()), "sha256": digest, "source_global_step": state["global_step"],
+            "mode": "actors_only_fresh_critics_optimizers_alpha_and_replay"}
+
+
 def resolve_training_device(requested):
     if requested == "auto":
         return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -180,6 +203,7 @@ def main(args):
     args.effective_torch_threads = threads
     torch.set_num_threads(threads)
     try:
+        print(f"Training device: {device} (requested: {requested}, PyTorch CPU threads: {threads})", flush=True)
         return train(args, device)
     finally:
         torch.set_num_threads(previous_threads)
@@ -260,6 +284,13 @@ def train(args, device):
     )
     args.reward_protocol = asdict(reward_protocol)
     args.route_guidance_rules = getattr(args, "route_guidance_rules", DEFAULT_ROUTE_GUIDANCE_RULES)
+    stage_file = getattr(args, "route_preparation_stages", None)
+    args.route_preparation_settings = {
+        "stages": json.loads(Path(stage_file).read_text(encoding="utf-8")) if stage_file else
+                  DEFAULT_ROUTE_PREPARATION_STAGES,
+        "weights": {kind: getattr(args, "reward_route_preparation_" + kind + "_weight", default)
+                    for kind, default in DEFAULT_ROUTE_PREPARATION_WEIGHTS.items()},
+    }
     args.team_q_weight = getattr(args, "team_q_weight", 1.0)
     if reward_config.team and (not math.isfinite(args.team_q_weight) or args.team_q_weight <= 0):
         raise ValueError("team_q_weight must be finite and positive when team reward is enabled")
@@ -270,6 +301,14 @@ def train(args, device):
         ego_ids=AGENT_IDS, nav_dim=TARGET_EXIT_DIM,
         actor_leader_features=args.actor_leader_features,
     ).to(device)
+    init_checkpoint = getattr(args, "init_actors_from", None)
+    init_sha = getattr(args, "init_actors_sha256", None)
+    if init_sha is not None and init_checkpoint is None:
+        raise ValueError("--init-actors-sha256 requires --init-actors-from")
+    args.actor_initialization = (
+        initialize_actor_weights(actors, init_checkpoint, init_sha, args.actor_leader_features)
+        if init_checkpoint else None
+    )
     critic = CentralizedTwinQ(
         num_agents=len(AGENT_IDS), nav_dim=TARGET_EXIT_DIM,
     ).to(device)
@@ -307,6 +346,7 @@ def train(args, device):
         reward_config=reward_config,
         reward_protocol=reward_protocol,
         route_guidance_rules=args.route_guidance_rules,
+        route_preparation_settings=args.route_preparation_settings,
         max_active_steps=args.max_active_steps,
         collect_control_trace=args.trace_controls,
         stalled_shadow=args.stalled_shadow,
@@ -693,8 +733,16 @@ def build_parser():
         )
     parser.add_argument("--reward-route-guidance-weight", type=float,
                         default=MASACRewardProtocol().route_guidance_weight)
+    for kind, weight in DEFAULT_ROUTE_PREPARATION_WEIGHTS.items():
+        parser.add_argument(f"--reward-route-preparation-{kind}-weight", type=float, default=weight)
+    parser.add_argument("--route-preparation-stages", help="JSON file containing route preparation stage rules")
+    parser.add_argument("--init-actors-from", help="Load only Actor weights from a route-aware MASAC checkpoint")
+    parser.add_argument("--init-actors-sha256", help="Expected SHA-256 of the Actor initialization checkpoint")
 
-    parser.add_argument("--device", default="auto", help="Training device: auto (CUDA first), cpu, cuda, or cuda:N")
+    parser.add_argument(
+        "--device", default="auto",
+        help="Training device: auto (default: cuda:0 if available, otherwise cpu), cpu, cuda, or cuda:N",
+    )
     parser.add_argument("--torch-threads", type=int, default=None, help="PyTorch intra-op threads (default: 2 on CUDA, up to 8 on CPU)")
     parser.add_argument("--update-log-every", type=int, default=40,
                         help="Write update metrics every N optimizer rounds (1 logs every round)")

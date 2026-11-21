@@ -32,7 +32,7 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 
 ### 模块化奖励
 
-新训练默认开启任务、汇入、前后车安全间距、换道、效率、舒适度和团队模块，路线引导需显式开启。参数采用 `--reward-<模块>` 和 `--no-reward-<模块>`，可独立组合。直接构造环境时传入 `MultiEgoEnv(reward_config=MASACRewardConfig(...))`。
+新训练默认开启任务、汇入、前后车安全间距、换道、效率、舒适度、团队和路线准备模块。一次性路线引导需显式开启。参数采用 `--reward-<模块>` 和 `--no-reward-<模块>`，可独立组合。直接构造环境时传入 `MultiEgoEnv(reward_config=MASACRewardConfig(...))`。
 
 | 模块 | 结算规则 |
 | --- | --- |
@@ -45,10 +45,21 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 | `comfort` | 有实测步前和步后加速度时，结算 −0.01 × clip(加速度差的绝对值, 0, 1)。0.01 为待测权重。 |
 | `team` | 双车均到达指定出口时，回合一次性记录 +100。环境通过 `env.team_reward` 提供本步值，日志和评估 JSON 用 `team_reward` 记录回合值。独立团队 Twin-Q 学习该回报，每辆 Actor 最大化个人 Q 加团队 Q。Actor 团队权重用 `--team-q-weight` 设置，默认 1.0。 |
 | `route-guidance` | 默认 0。加 `--reward-route-guidance` 后，每车首次实际通过任务允许的关键连接时 +5。可用 `--reward-route-guidance-weight` 设置权重。无匹配规则的任务为 0。 |
+| `route-preparation` | 独立的逐步惩罚，默认交织区 0.001，驶离准备区 0.002。按距阶段末端的紧迫度和局部必要换道数计算，仅在有安全换道机会而尚未实际执行必要换道时扣分。 |
 
 Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 为 [1,0]，D3 为 [0,1]）。SUMO 启动时关闭等待、高速路错车道、断路、双向车道及等候接载的 teleport，车辆碰撞使用 `remove` 策略。Ego 无故移除时报错。个人回报包括已启用的个人模块及显式开启的旧 USP，可从 `reward_components` 和 USP 统计追溯。逐步信息、`--trace-controls` 训练明细和回合汇总分别记录 `task`、`merge`、`route_guidance`，团队回报单独记账。
 
 路线规则位于 [`DEFAULT_ROUTE_GUIDANCE_RULES`](src/envs/route_lane_plan.py)。以该 Ego 实际 SUMO 路线的完整外部 edge 序列匹配 `route`，因此同一出口的不同进场路线可各自配置。新增规则填写 `route`、关键分流的相邻上游和下游 edge `critical_connection`，以及一个或多个实际可接受的 `[上游车道 ID, 下游车道 ID]` 组成的 `accepted_connections`。现有示例匹配 `O3 → E75 → E76 → E77 → D3`，仅接受 `E76_0 → E77_0`，经 `E76_0 → E77_1` 为 0。由实际经过的 SUMO 内部车道识别连接，保持车道自然通过也计分，每辆车每回合最多一次。直接构造环境时可通过 `route_guidance_rules` 传入规则。
+
+路线准备、效率和一次性路线引导分别记账。路线准备实现
+`−weight × clip(1 − distance / preparation_distance, 0, 1) × min(local_changes / max_local_changes, 1)`。
+O3→D3 的交织区取 E76 末端 300 m，要求接入 `E77_0`。驶离准备区取 E77 的 172.35 m，要求接入 `D3_0`。两个阶段的合法车道最大局部换道数分别为 4 和 5。距离采用当前阶段上游车道到连接入口的剩余纵向米数。汇入 E75、非配置阶段、不可达车道和局部需求为零的状态都没有该项扣分。300 m 是尚未筛选的初始配置。
+
+安全机会在提交当步动作前读取 SUMO 实时相邻车道前后车、速度和保险杠间距，使用与换道风险项相同的安全间距公式。只有合法且能减少局部换道需求的相邻车道才参与判定。无安全间隙或测量不可用时为零。通过步前和步后实测横移识别实际换道，只有请求时仍按原样结算。Actor 仍可使用自身状态、既有的路线剩余距离和换道需求、延迟邻车观测。奖励另用的实时目标车道间隙和阶段开关不直接输入 Actor。
+
+可用 `--no-reward-route-preparation` 总关，或用 `--reward-route-preparation-weaving-weight` 和 `--reward-route-preparation-exit-weight` 独立设置，权重为 0 时该阶段无扣分。用 `--route-preparation-stages FILE.json` 提供与 [默认阶段](src/envs/route_preparation.py) 同结构的完整路线列表。D2 可为对应完整路线配置 `["E82", "D2"]`，列出经核实可进入的 `D2_0`、`D2_1`、`D2_2` 和该阶段准备距离。目前默认仅配置 O3→D3。训练日志和 checkpoint 保存开关、权重和阶段列表。评估按 checkpoint 恢复，缺少路线准备配置的旧 checkpoint 关闭该项。
+
+训练回合日志和评估 JSON 的 `route_preparation_diagnostics` 按车和阶段保存开关、准备区步数、安全机会步数、扣分步数、累计扣分、不可达步数、首次扣分位置和最后一次使局部换道需求归零的稳定完成位置。后者没有观察到时保留 `null`。评估逐种子 CSV 同样保存这些记录，`--trace-controls` 可额外输出步级明细。
 
 团队 Q 按共享 SUMO 步折扣。一辆 Ego 先到达时，团队价值继续沿后续状态传递，直至全员到达或任意 Ego 失败。Replay 区分已到达与尚未出发；个人奖励和团队奖励分别写入日志。
 
@@ -113,7 +124,7 @@ python3 -m pip install pytest
 
 ## 5. 训练
 
-当前入口提供**从零训练**、联合采样、梯度更新、结构化日志及周期 checkpoint，不提供精确断点续训。训练步数是 SUMO 全局控制步，不是两车活跃步数之和。
+当前入口提供从零训练、联合采样、梯度更新、结构化日志及周期 checkpoint。奖励对照可用 `--init-actors-from CHECKPOINT --init-actors-sha256 SHA256` 仅加载两辆 Actor，其他模型、温度、优化器和 replay 用新运行初始化。入口校验源 checkpoint 的观测语义、特征配置和 Ego ID，并记录源步数和哈希。训练步数按 SUMO 全局控制步计。
 
 ```bash
 # 已经过本地 2,500 全局步的训练冒烟验证
@@ -184,7 +195,7 @@ python3 evaluate_masac.py \
 
 ### 6.1 训练记录与周期 checkpoint
 
-默认 `--device auto`，CUDA 可用时选择 `cuda:0` 并用 2 个 PyTorch CPU 算子线程，否则在 CPU 训练，线程数为 PyTorch 当前默认值与 8 的较小者。可用 `--device cpu`、`--device cuda:N` 或 `--torch-threads N` 显式覆盖。SUMO 与 Replay 存储在 CPU。请求设备、实际设备和线程数写入配置。评估器可在 CPU 读取 CUDA 训练生成的 checkpoint。
+省略 `--device` 时使用 `auto`。PyTorch 检测到 CUDA 时选择 `cuda:0` 并用 2 个 PyTorch CPU 算子线程，否则回退到 CPU，线程数为 PyTorch 当前默认值与 8 的较小者。可用 `--device cpu`、`--device cuda:N` 或 `--torch-threads N` 显式覆盖。SUMO 与 Replay 存储在 CPU。训练启动时打印请求设备、实际设备和线程数，并将其写入配置。评估器可在 CPU 读取 CUDA 训练生成的 checkpoint。
 
 训练参数 `--checkpoint-every 200000`；默认每 200,000 个共享 SUMO 控制步保存一次，结束时保存最终状态，恰逢节点只保存一次。`--tensorboard` 默认开启，可用 `--no-tensorboard` 关闭；JSONL 始终开启。动作窗口复用 `--log-every`（默认 40 步），最后不足窗口仍写实际长度。实验目录不可重复写入已有 `train/metrics.jsonl`，避免混合两次训练。
 
@@ -228,7 +239,7 @@ checkpoint 保留原有模型/优化器字段，并增加 Git 和源码 SHA256�
 
 复用结果前核对 JSON/CSV 所有回合字段、分组汇总重算、checkpoint SHA256、种子序列、协议版本、Git 提交、源码哈希、路网/路线和 SUMO 二进制哈希、环境配置及实际 speed mode 读回记录。任何失败记录到 `eval/index.json` 后报错，后续项保留 pending，不能当作已评估；索引缺少模型文件也报错。
 
-单模型入口新增 `--trace`，默认关闭首回合 TRACE。请求 `speed_mode=96` 保持不变，实际 `getSpeedMode()` 的所有读回值按车保留在每回合和环境元数据中。本机 SUMO 1.20.0 的短程测试读回为 32（请求为 96）；工具原样记录，不将请求值冒充实际值，也不修改控制模式。JSON 同时记录 checkpoint SHA256、训练配置、Git/源码哈希、SUMO 版本、NumPy/PyTorch 版本、路网/路线哈希及关键评估配置。
+单模型和批量评估默认保存 `eval_trajectory.jsonl.gz`。逐种子、逐步记录两辆 Ego 的位置、车道与横移、动作、间距、奖励分项、路线准备和停滞诊断，以及终止事件。完整评估结束后发布文件，`summary.json` 记录轨迹 SHA-256 和步数，可用 `--no-trajectory` 在单模型评估中关闭采集。`--trace` 独立控制首回合的控制台打印。请求 `speed_mode=96`，实际 `getSpeedMode()` 的所有读回值按车保留在每回合和环境元数据中。本机 SUMO 1.20.0 的短程测试读回为 32。JSON 同时记录 checkpoint SHA256、训练配置、Git/源码哈希、SUMO 版本、NumPy/PyTorch 版本、路网/路线哈希及关键评估配置。
 
 核心统计仍为 `homogeneous-dual-ego-v1`，扩展输出协议为 v4。普通到达、联合无碰撞及其他历史指标保留既有字段与单位。回合率的 `*_stats` 提供分子、分母和 Wilson 95% CI。100 个评估回合不构成 100 个独立训练重复。
 

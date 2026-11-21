@@ -118,6 +118,7 @@ def test_evaluator_files_and_incomplete_error():
     tmp_path = Path("tmp/ai/masac_metrics") / str(uuid.uuid4())
     tmp_path.mkdir(parents=True)
     import csv
+    import gzip
     import json
     from evaluate_masac import evaluate
     torch.manual_seed(19)
@@ -137,10 +138,22 @@ def test_evaluator_files_and_incomplete_error():
     assert 'joint_lane_end_block_free_arrival' in row
     assert report['records'][0]['traffic_sumo_warnings'] is not None
     assert validate_results(args.output) == report
+    trace = tmp_path / report['trajectory']['file']
+    with gzip.open(trace, 'rt', encoding='utf-8') as stream:
+        samples = [json.loads(line) for line in stream]
+    assert samples[0]['event'] == 'reset' and samples[0]['seed'] == 200001
+    assert len(samples) - 1 == report['global_steps']
+    assert samples[1]['egos']['ego_1']['pre_position'] is not None
+    assert samples[1]['egos']['ego_1']['control'] is not None
+    observed_terminals = {ego: sample['egos'][ego]['terminal']
+                          for sample in samples[1:] for ego in AGENT_IDS
+                          if sample['egos'][ego]['terminal'] is not None}
+    assert observed_terminals == report['records'][0]['outcomes']
     args.max_steps = 1
-    args.output = tmp_path / 'incomplete.json'
+    args.output = tmp_path / 'incomplete' / 'summary.json'
     with pytest.raises(RuntimeError, match='incomplete episode'): evaluate(args)
     assert not args.output.exists()
+    assert not (args.output.parent / trace.name).exists()
 
 
 def test_lane_end_warnings_are_grouped_and_exclude_only_blocked_arrivals(tmp_path):

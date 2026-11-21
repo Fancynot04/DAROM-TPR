@@ -27,6 +27,7 @@ from src.evaluation_metrics import (
     AgentMetrics, BrakingResponse, aggregate, joint_record, lane_end_arrival_fields, REFERENCE_COMMIT, wilson,
 )
 from src.evaluation_warnings import read_sumo_warnings
+from src.evaluation_trajectory import EvaluationTrajectory
 from src.experiment_tracking import sha256, git_metadata, evaluation_fingerprint, runtime_versions
 from src.evaluation_results import write_results, EVALUATION_PROTOCOL_VERSION
 from sumolib import checkBinary
@@ -64,8 +65,12 @@ def evaluate(args):
     else:
         reward_protocol = MASACRewardProtocol(**protocol_settings)
         route_guidance_rules = reward_config["route_guidance_rules"]
+    preparation_settings = reward_config.get("route_preparation_settings")
     if components is not None:
         components = {"rear_following": False, **components}
+        components["route_preparation"] = (
+            preparation_settings is not None and components.get("route_preparation", False)
+        )
     actor_leader_features = reward_config.get("actor_leader_features", False)
     actors = MultiAgentGaussianActor(
         ego_ids=AGENT_IDS,
@@ -79,6 +84,7 @@ def evaluate(args):
     actors.eval()
 
     gui_enabled = bool(getattr(args, "gui", False))
+    record_trajectory = getattr(args, "trajectory", True)
     stalled_terminate = getattr(args, "stalled_terminate", None)
     if stalled_terminate is None:
         stalled_terminate = reward_config.get("stalled_terminate", False)
@@ -87,6 +93,8 @@ def evaluate(args):
         scenario=getattr(args, "scenario", "easy"),
         speed_mode=96,
         collect_metrics=True,
+        collect_control_trace=record_trajectory,
+        stalled_shadow=record_trajectory,
         usp_enabled=bool(
             reward_config.get("usp", False)
         ),
@@ -100,6 +108,7 @@ def evaluate(args):
         ),
         reward_protocol=reward_protocol,
         route_guidance_rules=route_guidance_rules,
+        route_preparation_settings=preparation_settings,
         # Checkpoints written before the timeout became configurable used 4,000 steps.
         max_active_steps=reward_config.get("max_active_steps", 4000),
         stalled_terminate=stalled_terminate,
@@ -117,8 +126,12 @@ def evaluate(args):
     output.parent.mkdir(parents=True, exist_ok=True)
     warning_logs = TemporaryDirectory(prefix="sumo-warnings-", dir=output.parent)
     env.sumo_warning_log_dir = Path(warning_logs.name)
+    trajectory = None
+    trajectory_metadata = None
 
     try:
+        if record_trajectory:
+            trajectory = EvaluationTrajectory(Path(warning_logs.name) / "trajectory.partial.gz", AGENT_IDS)
         for episode in range(args.episodes):
             seed = args.seed_start + episode
             random.seed(seed)
@@ -126,6 +139,8 @@ def evaluate(args):
             np.random.seed(seed)
             observations, _ = env.reset(seed=seed)
             sumo_version = list(env.world.conn.getVersion())
+            if trajectory is not None:
+                trajectory.reset(seed, sumo_version)
             
             # GUI：定位到已经出发的 Ego
             if gui_enabled:
@@ -203,6 +218,8 @@ def evaluate(args):
                         )
 
 
+                if trajectory is not None:
+                    positions_before = trajectory.positions(env.world.conn.vehicle, actions)
                 (
                     observations,
                     rewards,
@@ -210,6 +227,8 @@ def evaluate(args):
                     truncations,
                     infos,
                 ) = env.step(actions)
+                if trajectory is not None:
+                    trajectory.step(env, step + 1, actions, positions_before, rewards, infos, outcomes)
                 if getattr(args, "trace", False) and episode == 0:
                     for ego_id, info in infos.items():
                         values = info.get("reward_components")
@@ -329,6 +348,10 @@ def evaluate(args):
                 for ego_id in AGENT_IDS
             )
 
+            episode_summary = env.reward_summary()
+            preparation_diagnostics = episode_summary.get("route_preparation_diagnostics", {})
+            for ego_id, diagnostics in preparation_diagnostics.items():
+                agent_records[ego_id]["route_preparation"] = diagnostics
             record = {
                 "seed": seed,
                 "global_steps": step + 1,
@@ -342,7 +365,7 @@ def evaluate(args):
                 "traffic_sumo_warnings": (None if warnings is None else {
                     vehicle_id: events for vehicle_id, events in warnings.items() if vehicle_id not in AGENT_IDS
                 }),
-                **env.reward_summary(),
+                **episode_summary,
             }
             records.append(record)
 
@@ -353,11 +376,18 @@ def evaluate(args):
                 flush=True,
             )
 
+        if trajectory is not None:
+            trajectory.close()
+            trajectory_metadata = trajectory.publish(output)
     finally:
         try:
             env.close()
         finally:
-            warning_logs.cleanup()
+            try:
+                if trajectory is not None:
+                    trajectory.close()
+            finally:
+                warning_logs.cleanup()
 
     per_agent = {ego_id: aggregate([r["per_agent"][ego_id] for r in records])
                  for ego_id in AGENT_IDS}
@@ -372,6 +402,10 @@ def evaluate(args):
         "training_config": checkpoint.get("config", {}),
         "reward_protocol": asdict(reward_protocol) if components is not None else None,
         "route_guidance_rules": route_guidance_rules,
+        "route_preparation": {
+            "enabled_in_checkpoint": bool(components and components["route_preparation"]),
+            "settings": preparation_settings,
+        },
         "checkpoint_git": checkpoint.get("git"),
         "checkpoint_source_sha256": checkpoint.get("source_sha256"),
         "trainer_config": checkpoint.get("trainer_config"),
@@ -422,6 +456,7 @@ def evaluate(args):
         "checkpoint": str(args.checkpoint),
         "training_step": checkpoint["global_step"],
         "episodes": len(records),
+        "trajectory": trajectory_metadata,
         "success_rates": {},
         "success_rates_stats": {key: wilson(sum(r["per_agent"][key]["success"] for r in records), len(records), scale=1) for key in AGENT_IDS},
         "joint_success_rate_stats": wilson(sum(r["both_success"] for r in records), len(records), scale=1),
@@ -530,6 +565,8 @@ if __name__ == "__main__":
     parser.add_argument("--stalled-terminate", action=argparse.BooleanOptionalAction, default=None,
                         help="Override the checkpoint's Stalled-v1 termination setting")
     parser.add_argument("--trace", action="store_true", help="Print first episode trace")
+    parser.add_argument("--trajectory", action=argparse.BooleanOptionalAction, default=True,
+                        help="Save a gzip JSONL trajectory for every evaluation episode")
     args = parser.parse_args()
 
     if args.max_steps <= 0:

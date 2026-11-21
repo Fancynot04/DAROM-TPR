@@ -568,6 +568,10 @@ def test_training_cli_defaults():
     assert args.update_log_every == 40
     assert args.max_active_steps == 2500
     assert args.reward_rear_following
+    assert args.reward_route_preparation
+    assert not parser.parse_args(["--no-reward-route-preparation"]).reward_route_preparation
+    assert args.reward_route_preparation_weaving_weight == 0.001
+    assert args.reward_route_preparation_exit_weight == 0.002
     assert not parser.parse_args(["--no-reward-rear-following"]).reward_rear_following
     assert not args.reward_route_guidance
     assert parser.parse_args(["--reward-route-guidance"]).reward_route_guidance
@@ -582,6 +586,7 @@ def test_training_cli_defaults():
     (4, False, 0.0, 0.0),
     (4, False, 2.0, 2.0),
     (5, False, None, 3.0),
+    (5, False, 3.0, 3.0),
 ])
 def test_checkpoint_evaluation_uses_saved_reward_protocol(
     work, monkeypatch, env_version, legacy, saved_grace, effective_grace,
@@ -590,9 +595,11 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(
     from src.agents.masac import MultiAgentGaussianActor
 
     env_class = evaluate_masac.MultiEgoEnv
+    with_preparation = env_version == 5 and saved_grace is not None
 
     def check_env_configuration(**kwargs):
         assert kwargs["stalled_match_route_links"] is (env_version == 5)
+        assert kwargs["reward_config"].route_preparation is with_preparation
         return env_class(**kwargs)
 
     monkeypatch.setattr(evaluate_masac, "MultiEgoEnv", check_env_configuration)
@@ -605,6 +612,13 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(
     }
     if saved_grace is not None:
         config["stalled_block_grace_s"] = saved_grace
+    if with_preparation:
+        from src.envs.route_preparation import DEFAULT_ROUTE_PREPARATION_STAGES
+
+        config["reward_components"]["route_preparation"] = True
+        config["route_preparation_settings"] = {
+            "weights": {"weaving": 0.001, "exit": 0.005}, "stages": DEFAULT_ROUTE_PREPARATION_STAGES,
+        }
     if not legacy:
         config["reward_components"]["route_guidance"] = True
         config["reward_protocol"] = {
@@ -621,16 +635,26 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(
     report = evaluate_masac.evaluate(SimpleNamespace(
         checkpoint=str(checkpoint), episodes=1, seed_start=200001, stochastic=False,
         max_steps=150, output=str(work / "summary.json"),
+        **({"trajectory": False} if env_version == 2 else {}),
     ))
+    if env_version == 2:
+        assert report["trajectory"] is None
+        assert not (work / "eval_trajectory.jsonl.gz").exists()
+    else:
+        assert report["trajectory"]["step_records"] == report["global_steps"]
     protocol = report["reward_protocol"]
     assert report["environment"]["masac_env_version"] == env_version
     assert report["environment"]["stalled_block_grace_s"] == effective_grace
     assert ("stalled_diagnostics" in report["records"][0]) is bool(effective_grace)
     assert protocol["merge_on_success"] is not legacy
+    assert report["route_preparation"]["enabled_in_checkpoint"] is with_preparation
+    assert report["route_preparation"]["settings"] == config.get("route_preparation_settings")
+    assert report["records"][0]["per_agent"]["ego_1"]["route_preparation"]["enabled"] is with_preparation
     assert protocol["route_guidance_weight"] == (0.0 if legacy else 7.0)
     assert report["route_guidance_rules"] == config.get("route_guidance_rules", [])
     for values in report["records"][0]["reward_components"].values():
         assert values["rear_following"] == 0
+        assert values["route_preparation"] == 0
         assert values["efficiency"] == pytest.approx(0.025 if legacy else 0.005)
         assert values["route_guidance"] == 0
 

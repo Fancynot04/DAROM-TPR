@@ -40,6 +40,7 @@ class MASACRewardConfig:
     following_lookahead: float = 120.0
     lane_change_weight: float = 1.0
     rear_following: bool = True
+    route_preparation: bool = True
 
     def __post_init__(self):
         for name in ("ttc_threshold", "following_lookahead", "lane_change_weight"):
@@ -90,13 +91,42 @@ def required_gap(behind_speed, ahead_speed):
     )
 
 
+def adjacent_lane_risk(vehicle, ego_id, direction, speed, *, require_valid=False):
+    leaders = vehicle.getLeftLeaders if direction > 0 else vehicle.getRightLeaders
+    followers = vehicle.getLeftFollowers if direction > 0 else vehicle.getRightFollowers
+
+    def deficit(gap, min_gap, behind_speed, ahead_speed):
+        if require_valid and (
+            not all(value is not None and isfinite(value) for value in (gap, min_gap, behind_speed, ahead_speed))
+            or min(min_gap, behind_speed, ahead_speed) < 0
+        ):
+            raise ValueError("Invalid adjacent-lane gap measurement")
+        return gap_deficit(gap + min_gap, required_gap(behind_speed, ahead_speed))
+
+    ahead = leaders(ego_id)
+    if require_valid and ahead is None:
+        raise ValueError("Missing adjacent leaders")
+    front = max((
+        deficit(gap, vehicle.getMinGap(ego_id), speed, vehicle.getSpeed(other))
+        for other, gap in ahead
+    ), default=0.0)
+    behind = followers(ego_id)
+    if require_valid and behind is None:
+        raise ValueError("Missing adjacent followers")
+    rear = max((
+        deficit(gap, vehicle.getMinGap(other), vehicle.getSpeed(other), speed)
+        for other, gap in behind
+    ), default=0.0)
+    return max(front, rear)
+
+
 class MASACRewards:
     def __init__(self, config, protocol=MASACRewardProtocol()):
         self.config = config
         self.protocol = protocol
         self.components = (
             "task", "merge", "following", "rear_following", "lane_change",
-            "efficiency", "comfort", "route_guidance",
+            "efficiency", "comfort", "route_guidance", "route_preparation",
         )
         self.reset(())
 
@@ -221,17 +251,7 @@ class MASACRewards:
 
         if lane != change.source_lane:
             return 0.0
-        leaders = vehicle.getLeftLeaders if change.direction > 0 else vehicle.getRightLeaders
-        followers = vehicle.getLeftFollowers if change.direction > 0 else vehicle.getRightFollowers
-        front = max((
-            gap_deficit(gap + vehicle.getMinGap(ego_id), required_gap(speed, vehicle.getSpeed(other)))
-            for other, gap in leaders(ego_id)
-        ), default=0.0)
-        rear = max((
-            gap_deficit(gap + vehicle.getMinGap(other), required_gap(vehicle.getSpeed(other), speed))
-            for other, gap in followers(ego_id)
-        ), default=0.0)
-        return max(front, rear)
+        return adjacent_lane_risk(vehicle, ego_id, change.direction, speed)
 
     def _log_change(self, ego_id, change, now, event, reason=None):
         self.lane_change_events.append({

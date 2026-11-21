@@ -13,6 +13,7 @@ from .stalled import StalledDetector
 
 from .exit_rules import missed_exit_before_step, route_missed_before_step
 from .route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES, RouteLaneNetwork, UNREACHABLE_LANE_CHANGES
+from .route_preparation import DEFAULT_ROUTE_PREPARATION_STAGES, DEFAULT_ROUTE_PREPARATION_WEIGHTS, RoutePreparation
 from src.rewards.events import STALLED_EVENT, b0_reward
 from src.rewards.masac import MASACRewardProtocol, MASACRewards, TARGET_EXIT_DIM
 
@@ -48,6 +49,7 @@ class MultiEgoEnv:
         route_guidance_rules=DEFAULT_ROUTE_GUIDANCE_RULES,
         stalled_block_grace_s=0.0,
         stalled_match_route_links=False,
+        route_preparation_settings=None,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -76,6 +78,13 @@ class MultiEgoEnv:
         self.speed_mode = speed_mode
         self.gui = bool(gui)
         self.reward_tracker = MASACRewards(reward_config, reward_protocol) if reward_config is not None else None
+        self.route_preparation = None
+        if reward_config is not None and reward_config.route_preparation:
+            self.route_preparation = RoutePreparation(
+                route_preparation_settings if route_preparation_settings is not None else {
+                    "weights": DEFAULT_ROUTE_PREPARATION_WEIGHTS, "stages": DEFAULT_ROUTE_PREPARATION_STAGES,
+                },
+            )
         self.route_guidance_rules = {}
         if reward_config is not None and reward_config.route_guidance:
             for rule in route_guidance_rules:
@@ -143,17 +152,19 @@ class MultiEgoEnv:
 
                 controller.configure()
                 self.controllers[ego_id] = controller
-                if self.legacy_route_semantics and not self.route_guidance_rules:
+                if self.legacy_route_semantics and not self.route_guidance_rules and self.route_preparation is None:
                     continue
                 vehicle = conn.vehicle
                 route = tuple(vehicle.getRoute(ego_id))
                 if not self.legacy_route_semantics and (not route or route[-1] != self.target_exits[ego_id]):
                     raise RuntimeError(f"{ego_id}: route {route} does not end at {self.target_exits[ego_id]}")
                 guidance = self.route_guidance_rules.get(route)
-                if not self.legacy_route_semantics or guidance is not None:
+                if not self.legacy_route_semantics or guidance is not None or self.route_preparation is not None:
                     plan = self.lane_network.plan(route, vehicle.getVehicleClass(ego_id))
-                    if not self.legacy_route_semantics:
+                    if not self.legacy_route_semantics or self.route_preparation is not None:
                         self.route_lane_plans[ego_id] = plan
+                    if self.route_preparation is not None:
+                        self.route_preparation.configure(ego_id, self.lane_network, plan)
                     if guidance is not None:
                         self.ego_guidance[ego_id] = plan, *guidance
 
@@ -205,6 +216,11 @@ class MultiEgoEnv:
             values["team_reward"] = self.reward_tracker.team_return
             values["reward_components"] = self.reward_tracker.totals
             values["lane_change_events"] = self.reward_tracker.lane_change_events.copy()
+            values["route_preparation_diagnostics"] = (
+                self.route_preparation.diagnostics if self.route_preparation is not None else {
+                    ego_id: {"enabled": False, "reason": "disabled", "phases": {}} for ego_id in self.AGENTS
+                }
+            )
         if self.stalled_block_grace_s and self.stall_detectors:
             values["stalled_diagnostics"] = {
                 ego_id: detector.summary() for ego_id, detector in self.stall_detectors.items()
@@ -381,6 +397,8 @@ class MultiEgoEnv:
         self.team_reward = 0.0
         if self.reward_tracker is not None:
             self.reward_tracker.reset(self.AGENTS)
+        if self.route_preparation is not None:
+            self.route_preparation.reset(self.AGENTS)
 
         self.world = SumoWorld(
             scenario=self.scenario,
@@ -390,7 +408,8 @@ class MultiEgoEnv:
             warning_log=(self.sumo_warning_log_dir / f"seed-{seed}.log"
                          if self.sumo_warning_log_dir is not None else None),
         )
-        if (not self.legacy_route_semantics or self.route_guidance_rules) and self.lane_network is None:
+        if (not self.legacy_route_semantics or self.route_guidance_rules or self.route_preparation is not None
+                ) and self.lane_network is None:
             self.lane_network = RouteLaneNetwork(self.world.net_file)
         self.route_lane_plans = {}
         self.route_lane_positions = {}
@@ -547,6 +566,17 @@ class MultiEgoEnv:
 
         # 2. 仅尚未终止的 Ego 提交动作
         acting_ids = active_ids - pre_terminated
+        preparation_samples = {}
+        if self.route_preparation is not None:
+            self.route_preparation.step_info.clear()
+            for ego_id in acting_ids:
+                position = (self._route_lane_position(ego_id) if self.legacy_route_semantics
+                            else route_positions_before[ego_id])
+                sample = self.route_preparation.before_step(
+                    conn, ego_id, position, tracker.pending_changes.get(ego_id),
+                )
+                if sample is not None:
+                    preparation_samples[ego_id] = sample
         guidance_before = {
             ego_id: (conn.vehicle.getRouteIndex(ego_id), conn.vehicle.getLaneID(ego_id))
             for ego_id in acting_ids & self.ego_guidance.keys()
@@ -648,6 +678,7 @@ class MultiEgoEnv:
         present = set(conn.vehicle.getIDList()) if self.collect_metrics or tracker is not None else set()
         if tracker is not None:
             for ego_id in acting_ids:
+                change_events_before = len(tracker.lane_change_events)
                 terminal_event = None
                 if ego_id in collisions:
                     terminal_event = "Collision"
@@ -657,6 +688,15 @@ class MultiEgoEnv:
                     conn, ego_id, ego_id in present,
                     self.needs_merge[ego_id], terminal_event=terminal_event,
                 )
+                if ego_id in preparation_samples:
+                    completed_change = None
+                    if len(tracker.lane_change_events) > change_events_before:
+                        latest = tracker.lane_change_events[-1]
+                        if latest["event"] == "completed":
+                            completed_change = latest
+                    components[ego_id]["route_preparation"] = self.route_preparation.after_step(
+                        conn, ego_id, preparation_samples[ego_id], ego_id in present, completed_change,
+                    )
 
         metric_steps = {}
         if self.collect_metrics:
@@ -822,6 +862,9 @@ class MultiEgoEnv:
                 infos[ego_id]["stalled_shadow"] = stall_results[ego_id]
             if tracker is not None:
                 infos[ego_id]["reward_components"] = components[ego_id]
+                preparation_info = (self.route_preparation.step_info.get(ego_id)
+                                    if self.route_preparation is not None else None)
+                infos[ego_id]["route_preparation"] = preparation_info
                 infos[ego_id]["following_risks"] = (
                     tracker.following_risks[ego_id] if ego_id in acting_ids else None
                 )
@@ -831,6 +874,8 @@ class MultiEgoEnv:
                 ]
                 if ego_id in control_traces:
                     control_traces[ego_id].update(tracker.following_risks[ego_id])
+                    if preparation_info is not None:
+                        control_traces[ego_id]["route_preparation"] = preparation_info
             infos[ego_id]["usp_reward"] = applied_usp[ego_id]
 
             infos[ego_id]["usp_triggered"] = (

@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 
 from src.evaluation_metrics import aggregate, joint_record, lane_end_arrival_fields
-from src.experiment_tracking import atomic_write, atomic_json
+from src.evaluation_trajectory import TRAJECTORY_FILENAME
+from src.experiment_tracking import atomic_write, atomic_json, sha256
 
 from src.agents.replay_buffer import JointReplayBuffer
 
@@ -48,6 +49,14 @@ def validate_results(path):
     include_stalled = protocol_version >= 3
     if len(records) != summary['episodes'] or not records:
         raise ValueError('Incomplete episode records')
+    trajectory = summary.get("trajectory")
+    if trajectory is not None:
+        trace_path = path.with_name(TRAJECTORY_FILENAME)
+        if (trajectory["file"] != TRAJECTORY_FILENAME or not trace_path.is_file()
+                or trajectory["sha256"] != sha256(trace_path)
+                or trajectory["episodes"] != len(records)
+                or trajectory["step_records"] != sum(r["global_steps"] for r in records)):
+            raise ValueError("Evaluation trajectory mismatch")
     with path.with_name('episodes.csv').open(newline='', encoding='utf-8') as stream:
         actual = list(csv.DictReader(stream))
     expected_stream = io.StringIO(newline='')
