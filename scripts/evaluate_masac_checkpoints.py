@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.experiment_tracking import sha256, atomic_json, git_metadata, evaluation_fingerprint, runtime_versions
 from src.evaluation_results import validate_results, EVALUATION_PROTOCOL_VERSION
 from src.evaluation_metrics import REFERENCE_COMMIT
+from src.envs.stalled import stalled_block_grace_for_version
 
 from src.agents.replay_buffer import JointReplayBuffer
 
@@ -22,8 +23,13 @@ def discover(directory):
     rows = []
     for path in paths:
         state = torch.load(path, map_location='cpu', weights_only=True)
+        config = state.get('config', {})
+        env_version = config.get('masac_env_version') if config.get('reward_components') is not None else None
         rows.append(dict(path=path, global_step=int(state['global_step']), sha256=sha256(path),
-                         stalled_terminate=state.get('config', {}).get('stalled_terminate', False)))
+                         stalled_terminate=config.get('stalled_terminate', False),
+                         masac_env_version=env_version, stalled_block_grace_s=stalled_block_grace_for_version(
+                             env_version, config.get('stalled_block_grace_s'),
+                         )))
     rows.sort(key=lambda row: row['global_step'])
     if len({r['global_step'] for r in rows}) != len(rows):
         raise ValueError('Duplicate checkpoint steps: use one experiment directory per training seed')
@@ -40,7 +46,7 @@ def discover(directory):
     return rows
 
 
-def expected_environment(max_steps, stalled_terminate=False):
+def expected_environment(max_steps, stalled_terminate=False, masac_env_version=None, stalled_block_grace_s=0.0):
     root = Path(__file__).resolve().parents[1]
     from sumolib import checkBinary
 
@@ -54,6 +60,8 @@ def expected_environment(max_steps, stalled_terminate=False):
         stopped_speed_threshold_mps=0.5,
         disable_teleport=True,
         stalled_terminate=stalled_terminate,
+        masac_env_version=masac_env_version,
+        stalled_block_grace_s=stalled_block_grace_s,
         net_sha256=sha256(
             root / "sumo_new/Antwerp.net.xml"
         ),
@@ -76,7 +84,10 @@ def compatible(report, checkpoint, max_steps):
             and report.get('evaluation_code_sha256') == evaluation_fingerprint()
             and report.get('runtime_versions') == runtime_versions()
             and all(report['environment'].get(k) == v for k, v in
-                    expected_environment(max_steps, checkpoint.get('stalled_terminate', False)).items())
+                    expected_environment(
+                        max_steps, checkpoint.get('stalled_terminate', False),
+                        checkpoint.get('masac_env_version'), checkpoint.get('stalled_block_grace_s', 0.0),
+                    ).items())
             and all(report['environment']['actual_speed_modes'][ego] for ego in AGENT_IDS))
 
 

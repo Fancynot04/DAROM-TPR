@@ -12,9 +12,10 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
+from src.envs.stalled import stalled_block_grace_for_version
 from src.rewards.masac import (
     LEGACY_MASAC_ENV_VERSION, LEGACY_MASAC_REWARD_PROTOCOL, MASACRewardConfig,
-    MASACRewardProtocol, MASAC_ENV_VERSION, TARGET_EXIT_DIM,
+    MASACRewardProtocol, SUPPORTED_MASAC_ENV_VERSIONS, TARGET_EXIT_DIM,
 )
 from src.visualization.gui_camera import (
     update_gui_camera,
@@ -44,8 +45,8 @@ def evaluate(args):
 
     reward_config = checkpoint.get("config", {})
     components = reward_config.get("reward_components")
-    env_version = reward_config.get("masac_env_version")
-    if components is not None and env_version not in (LEGACY_MASAC_ENV_VERSION, MASAC_ENV_VERSION):
+    env_version = reward_config.get("masac_env_version") if components is not None else None
+    if components is not None and env_version not in SUPPORTED_MASAC_ENV_VERSIONS:
         raise ValueError(
             "Checkpoint has a different MASAC environment version. "
             "Evaluate it with its original training code and observation semantics."
@@ -98,6 +99,9 @@ def evaluate(args):
         # Checkpoints written before the timeout became configurable used 4,000 steps.
         max_active_steps=reward_config.get("max_active_steps", 4000),
         stalled_terminate=stalled_terminate,
+        stalled_block_grace_s=stalled_block_grace_for_version(
+            env_version, reward_config.get("stalled_block_grace_s"),
+        ),
         legacy_route_semantics=components is None or env_version == LEGACY_MASAC_ENV_VERSION,
         actor_leader_features=actor_leader_features,
     )
@@ -355,6 +359,8 @@ def evaluate(args):
             "disable_teleport": True,
             "max_active_steps": env.max_active_steps,
             "stalled_terminate": stalled_terminate,
+            "masac_env_version": env_version,
+            "stalled_block_grace_s": env.stalled_block_grace_s,
         },
         "reference_commit": REFERENCE_COMMIT,
         "rate_unit": "fraction for legacy success_rates/joint_success_rate; percent in per_agent/joint",

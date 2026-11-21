@@ -536,7 +536,8 @@ def test_training_cli_defaults():
     parser = build_parser()
     args = parser.parse_args([])
     assert parser.parse_args(["--no-stalled-terminate"]).stalled_terminate is False
-    assert args.masac_env_version == 3
+    assert args.masac_env_version == 4
+    assert parser.parse_args(["--masac-env-version", "3"]).masac_env_version == 3
     assert parser.parse_args(["--masac-env-version", "2"]).masac_env_version == 2
     assert not args.actor_leader_features
     assert parser.parse_args(["--actor-leader-features"]).actor_leader_features
@@ -562,8 +563,15 @@ def test_training_cli_defaults():
     assert args.reward_route_guidance_weight == 5.0
 
 
-@pytest.mark.parametrize("env_version,legacy", [(2, True), (3, True), (3, False)])
-def test_checkpoint_evaluation_uses_saved_reward_protocol(work, env_version, legacy):
+@pytest.mark.parametrize("env_version,legacy,saved_grace,effective_grace", [
+    (2, True, None, 0.0),
+    (3, True, 3.0, 0.0),
+    (3, False, None, 0.0),
+    (4, False, None, 3.0),
+    (4, False, 0.0, 0.0),
+    (4, False, 2.0, 2.0),
+])
+def test_checkpoint_evaluation_uses_saved_reward_protocol(work, env_version, legacy, saved_grace, effective_grace):
     from evaluate_masac import evaluate
     from src.agents.masac import MultiAgentGaussianActor
 
@@ -572,7 +580,10 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(work, env_version, leg
         "masac_env_version": env_version,
         "max_active_steps": 1,
         "reward_components": {},
+        "stalled_terminate": True,
     }
+    if saved_grace is not None:
+        config["stalled_block_grace_s"] = saved_grace
     if not legacy:
         config["reward_components"]["route_guidance"] = True
         config["reward_protocol"] = {
@@ -591,6 +602,9 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(work, env_version, leg
         max_steps=150, output=str(work / "summary.json"),
     ))
     protocol = report["reward_protocol"]
+    assert report["environment"]["masac_env_version"] == env_version
+    assert report["environment"]["stalled_block_grace_s"] == effective_grace
+    assert ("stalled_diagnostics" in report["records"][0]) is bool(effective_grace)
     assert protocol["merge_on_success"] is not legacy
     assert protocol["route_guidance_weight"] == (0.0 if legacy else 7.0)
     assert report["route_guidance_rules"] == config.get("route_guidance_rules", [])

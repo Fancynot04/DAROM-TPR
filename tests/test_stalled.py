@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.envs.stalled import StalledDetector
+from src.envs.stalled import BLOCK_GRACE_SECONDS, StalledDetector
 
 
 def samples(detector, speed, stop=101):
@@ -59,6 +59,94 @@ def test_road_and_junction_names_do_not_reset_odometer_window():
         row = detector.observe(i / 10, road=road, lane=road + "_0", distance=150 + i * .06)
     assert row["would_stall"] and row["road"] == "D3"
     assert row["window_progress_m"] == pytest.approx(6)
+
+
+@pytest.mark.parametrize("speed", [0, 0.6, 2.0, 3.0])
+def test_grace_matches_legacy_at_every_clear_sample(speed):
+    legacy = samples(StalledDetector(block_grace_s=0), speed, 210)
+    active = samples(StalledDetector(BLOCK_GRACE_SECONDS), speed, 210)
+    for old, new in zip(legacy, active):
+        assert new["window_progress_m"] == pytest.approx(old["window_progress_m"])
+        assert {k: v for k, v in new.items() if k != "window_progress_m"} == {
+            k: v for k, v in old.items() if k != "window_progress_m"
+        }
+
+
+def test_repeated_short_blocks_preserve_v4_progress_without_crediting_blocked_motion():
+    legacy = StalledDetector(block_grace_s=0)
+    active = StalledDetector(BLOCK_GRACE_SECONDS)
+    distance = 0.0
+    first_trigger = None
+    for tick in range(150):
+        blocked = tick % 50 < 10 and tick >= 50
+        if blocked:
+            distance += 1.0
+        reason = "leader_constrained" if blocked else None
+        assert not legacy.observe(tick / 10, distance=distance, unavailable_reason=reason)["would_stall"]
+        row = active.observe(tick / 10, distance=distance, unavailable_reason=reason)
+        if tick == 50:
+            assert row["valid_window_s"] == 4.9
+        if tick == 60:
+            assert row["reason"] == "confirming_clear_passage"
+        if row["would_stall"] and first_trigger is None:
+            first_trigger = row["trigger_time_s"]
+    assert first_trigger == 14.0
+    assert row["window_progress_m"] == 0.0
+    assert active.summary()["pause_count"] == 2
+    assert active.summary()["block_duration_histogram_steps"] == {"10": 2}
+    assert active.summary()["window_resets"] == 0
+
+
+def test_long_block_clears_at_threshold_and_moving_recovery_does_not_stall():
+    detector = StalledDetector(BLOCK_GRACE_SECONDS)
+    samples(detector, 0, stop=50)
+    for tick in range(50, 350):
+        row = detector.observe(tick / 10, distance=0, unavailable_reason="traffic_signal")
+        assert not row["would_stall"]
+        if tick == 79:
+            assert row["valid_window_s"] == 4.9
+        if tick == 80:
+            assert row["valid_window_s"] == 0.0
+    for tick in range(350, 460):
+        row = detector.observe(tick / 10, distance=(tick - 350) * 0.5)
+        assert not row["would_stall"]
+    assert row["window_progress_m"] == pytest.approx(50)
+    summary = detector.summary()
+    assert summary["window_resets"] == 1
+    assert summary["window_resets_by_reason"] == {"long_block:traffic_signal": 1}
+    assert summary["block_duration_histogram_steps"] == {"300": 1}
+
+
+def test_one_clear_sample_per_second_does_not_accumulate_in_a_yield_queue():
+    detector = StalledDetector(BLOCK_GRACE_SECONDS)
+    samples(detector, 0, stop=50)
+    for tick in range(50, 1600):
+        reason = None if tick % 10 == 9 else "junction_conflict"
+        assert not detector.observe(tick / 10, distance=0, unavailable_reason=reason)["would_stall"]
+    summary = detector.summary()
+    assert summary["pause_count"] == 1
+    assert summary["window_resets_by_reason"] == {"long_block:junction_conflict": 1}
+    assert summary["open_block_observed_s"] == 154.9
+    assert summary["raw_block_duration_histogram_steps"] == {"9": 155}
+
+
+@pytest.mark.parametrize("time,distance,reason,expected", [
+    (5.1, 1, None, "discontinuous_sample"),
+    (5.0, 0, "leader_constrained", "discontinuous_sample"),
+    (5.0, float("nan"), "leader_constrained", "invalid_distance"),
+    (5.0, 99, "teleport", "teleport"),
+    (5.0, None, "traci_unavailable", "traci_unavailable"),
+])
+def test_grace_clears_invalid_or_discontinuous_samples(time, distance, reason, expected):
+    detector = StalledDetector(BLOCK_GRACE_SECONDS)
+    samples(detector, 0, stop=49)
+    detector.observe(4.9, distance=1, unavailable_reason="leader_constrained")
+    row = detector.observe(time, distance=distance, unavailable_reason=reason)
+    assert row["reason"] == expected
+    assert not row["would_stall"] and row["valid_window_s"] == 0
+    summary = detector.summary()
+    assert summary["window_resets_by_reason"] == {expected: 1}
+    assert summary["censored_block_duration_histogram_steps"] == {"0": 1}
 
 
 @pytest.mark.parametrize(

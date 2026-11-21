@@ -46,6 +46,7 @@ class MultiEgoEnv:
         actor_leader_features=False,
         reward_protocol=MASACRewardProtocol(),
         route_guidance_rules=DEFAULT_ROUTE_GUIDANCE_RULES,
+        stalled_block_grace_s=0.0,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -64,6 +65,8 @@ class MultiEgoEnv:
         self.collect_control_trace = collect_control_trace
         self.stalled_shadow = stalled_shadow
         self.stalled_terminate = stalled_terminate
+        self.stalled_block_grace_s = stalled_block_grace_s
+        self.stall_detectors = {}
         self.route_file = (route_file if route_file is not None else
                            SUMO_DIR / "Antwerp_easy_o3_d3_homogeneous_dual.rou.xml")
         self.scenario = scenario
@@ -199,6 +202,10 @@ class MultiEgoEnv:
             values["team_reward"] = self.reward_tracker.team_return
             values["reward_components"] = self.reward_tracker.totals
             values["lane_change_events"] = self.reward_tracker.lane_change_events.copy()
+        if self.stalled_block_grace_s and self.stall_detectors:
+            values["stalled_diagnostics"] = {
+                ego_id: detector.summary() for ego_id, detector in self.stall_detectors.items()
+            }
         return values
 
     def _build_output(self):
@@ -366,7 +373,7 @@ class MultiEgoEnv:
         self.target_exits = {ego_id: trips[ego_id]["to"] for ego_id in self.AGENTS}
         self.needs_merge = {ego_id: trips[ego_id]["from"] == "O3" for ego_id in self.AGENTS}
         self.stall_detectors = {
-            ego_id: StalledDetector() for ego_id in self.AGENTS
+            ego_id: StalledDetector(self.stalled_block_grace_s) for ego_id in self.AGENTS
         } if self.stalled_shadow or self.stalled_terminate else {}
         self.team_reward = 0.0
         if self.reward_tracker is not None:
@@ -543,8 +550,14 @@ class MultiEgoEnv:
         stall_results = {}
         if self.stall_detectors:
             now = sim.getTime()
+            teleports = set()
+            if self.stalled_block_grace_s:
+                teleports.update(sim.getStartingTeleportIDList())
+                teleports.update(sim.getEndingTeleportIDList())
             for ego_id, detector in self.stall_detectors.items():
-                if ego_id in acting_ids:
+                if ego_id in teleports:
+                    stall_results[ego_id] = detector.observe(now, unavailable_reason="teleport")
+                elif ego_id in acting_ids:
                     stall_results[ego_id] = detector.sample(conn, ego_id, now)
                 else:
                     stall_results[ego_id] = detector.observe(now, unavailable_reason="inactive")

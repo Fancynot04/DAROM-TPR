@@ -17,8 +17,10 @@ import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
 from src.envs.route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES
+from src.envs.stalled import stalled_block_grace_for_version
 from src.rewards.masac import (
     LEGACY_MASAC_ENV_VERSION, MASACRewardConfig, MASACRewardProtocol, MASAC_ENV_VERSION,
+    SUPPORTED_MASAC_ENV_VERSIONS,
     TARGET_EXIT_DIM,
 )
 from src.agents.masac import MultiAgentGaussianActor
@@ -218,8 +220,9 @@ def train(args, device):
         raise ValueError("O3-D3 MASAC requires gamma=0.99")
     args.gamma = 0.99
     args.masac_env_version = getattr(args, "masac_env_version", MASAC_ENV_VERSION)
-    if args.masac_env_version not in (LEGACY_MASAC_ENV_VERSION, MASAC_ENV_VERSION):
+    if args.masac_env_version not in SUPPORTED_MASAC_ENV_VERSIONS:
         raise ValueError(f"Unsupported MASAC environment version: {args.masac_env_version}")
+    args.stalled_block_grace_s = stalled_block_grace_for_version(args.masac_env_version)
     args.actor_leader_features = getattr(args, "actor_leader_features", False)
     args.tau = getattr(args, "tau", 0.005)
     args.checkpoint_every = getattr(args, "checkpoint_every", 100000)
@@ -308,6 +311,7 @@ def train(args, device):
         collect_control_trace=args.trace_controls,
         stalled_shadow=args.stalled_shadow,
         stalled_terminate=args.stalled_terminate,
+        stalled_block_grace_s=args.stalled_block_grace_s,
         legacy_route_semantics=args.masac_env_version == LEGACY_MASAC_ENV_VERSION,
         actor_leader_features=args.actor_leader_features,
     )
@@ -697,10 +701,10 @@ def build_parser():
                         help="Positive team Q weight in each Actor objective")
     parser.add_argument("--stalled-terminate", action=argparse.BooleanOptionalAction, default=None,
                         help="End a stalled Ego episode with a -400 penalty (default: enabled unless using USP)")
-    parser.add_argument("--stalled-shadow", action="store_true", help="Log Stalled-v1 diagnostics without changing the task")
+    parser.add_argument("--stalled-shadow", action="store_true", help="Log per-step stalled diagnostics")
     parser.add_argument("--masac-env-version", type=int,
-                        choices=(LEGACY_MASAC_ENV_VERSION, MASAC_ENV_VERSION), default=MASAC_ENV_VERSION,
-                        help="Use version 2 to match legacy checkpoints' lane observation and exit rules")
+                        choices=SUPPORTED_MASAC_ENV_VERSIONS, default=MASAC_ENV_VERSION,
+                        help="v2: legacy route rules; v3: route-aware with Stalled-v1; v4: stalled block grace")
     parser.add_argument("--actor-leader-features", action="store_true",
                         help="Add delayed leader bumper gap, closing speed and TTC to each Actor")
     parser.add_argument("--trace-controls", action="store_true", help="Log per-Ego TraCI gaps, motion, and control commands")

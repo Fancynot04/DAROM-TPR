@@ -3,7 +3,7 @@
 import pytest
 
 import src.envs.multi_ego_env as env_module
-from src.envs.stalled import StalledDetector
+from src.envs.stalled import BLOCK_GRACE_SECONDS, StalledDetector
 from src.envs.sumo_world import SumoWorld
 from src.rewards.masac import MASACRewardConfig
 
@@ -206,8 +206,9 @@ def test_sumo_disables_teleport_without_stalled_termination(stalled_terminate_ro
         env.close()
 
 
-def test_stalled_termination_is_independent_and_precedes_timeout(stalled_terminate_route):
-    env = env_module.MultiEgoEnv(stalled_terminate=True, max_active_steps=101)
+@pytest.mark.parametrize("block_grace_s", [0, BLOCK_GRACE_SECONDS])
+def test_stalled_termination_is_independent_and_precedes_timeout(stalled_terminate_route, block_grace_s):
+    env = env_module.MultiEgoEnv(stalled_terminate=True, max_active_steps=101, stalled_block_grace_s=block_grace_s)
     try:
         env.reset(seed=42)
         sim = env.world.conn.simulation
@@ -231,6 +232,11 @@ def test_stalled_termination_is_independent_and_precedes_timeout(stalled_termina
         assert total_penalties == 1
         assert env.active_steps["ego_1"] == 101
         assert env.world.conn.vehicle.getLanePosition("ego_2") > stalled_ego2_position
+        summary = env.reward_summary()
+        if block_grace_s:
+            assert set(summary["stalled_diagnostics"]) == set(env.AGENTS)
+        else:
+            assert "stalled_diagnostics" not in summary
     finally:
         env.close()
 
