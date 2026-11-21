@@ -562,7 +562,9 @@ def test_training_cli_defaults():
     assert args.gamma == 0.99
     assert args.tau == 0.005
     assert args.train_every == 1
-    assert args.checkpoint_every == 200_000
+    assert args.checkpoint_every == 500_000
+    assert args.resume
+    assert not parser.parse_args(["--no-resume"]).resume
     assert args.device == "auto"
     assert args.torch_threads is None
     assert args.update_log_every == 40
@@ -576,6 +578,55 @@ def test_training_cli_defaults():
     assert not args.reward_route_guidance
     assert parser.parse_args(["--reward-route-guidance"]).reward_route_guidance
     assert args.reward_route_guidance_weight == 5.0
+
+
+def test_training_resumes_replay_and_updates_after_interruption(work):
+    from scripts.evaluate_masac_checkpoints import discover
+    from train_masac import build_parser, main
+
+    parser = build_parser()
+    flags = ["--output-dir", str(work), "--device", "cpu", "--torch-threads", "1",
+             "--batch-size", "4", "--learning-starts", "4", "--buffer-capacity", "16",
+             "--checkpoint-every", "12", "--log-every", "4", "--no-tensorboard"]
+    main(parser.parse_args(flags + ["--total-steps", "20"]))
+    directory = work / "checkpoints"
+    index_path = directory / "index.json"
+    index = json.loads(index_path.read_text())
+    assert [row["global_step"] for row in index] == [12, 20]
+    model = directory / "masac_seed42_step_20.pt"
+    before = torch.load(model, weights_only=True, map_location="cpu")
+    replay = before["resume_state"]["replay"]
+    assert replay["size"] == 16
+    with np.load(directory / replay["path"], allow_pickle=False) as data:
+        metadata = json.loads(data["metadata"].item())
+    assert metadata["position"] != 0
+
+    # Simulate a published model whose index write was interrupted, with stale log tail.
+    index_path.write_text(json.dumps(index[:-1]))
+    metrics_path = work / "train/metrics.jsonl"
+    with metrics_path.open("a") as stream:
+        stream.write('{"event":"interrupted","global_step":21}\n')
+    main(parser.parse_args(flags + ["--total-steps", "28"]))
+    final = torch.load(directory / "masac_seed42_step_28.pt", weights_only=True, map_location="cpu")
+    assert final["resume_state"]["update_count"] == before["resume_state"]["update_count"] + 8
+    assert final["resume_state"]["replay"]["size"] == 16
+    for parameter, original in before["critic_optimizer"]["state"].items():
+        assert final["critic_optimizer"]["state"][parameter]["step"] == original["step"] + 8
+    replay_rng = np.random.default_rng()
+    replay_rng.bit_generator.state = metadata["rng"]
+    for _ in range(8):
+        replay_rng.choice(16, size=4, replace=False)
+    with np.load(directory / final["resume_state"]["replay"]["path"], allow_pickle=False) as data:
+        assert json.loads(data["metadata"].item())["rng"] == replay_rng.bit_generator.state
+    assert [row["global_step"] for row in discover(work)] == [12, 20, 24, 28]
+
+    metrics = [json.loads(line) for line in metrics_path.read_text().splitlines()]
+    assert not any(row["event"] == "interrupted" for row in metrics)
+    assert len(list(metrics_path.parent.glob("metrics.before-resume-20-*.jsonl"))) == 1
+    resume = next(row for row in metrics if row["event"] == "resume")
+    assert resume["global_step"] == 20 and resume["replay_size"] == 16 and resume["sumo_seed"] == 43
+    with pytest.raises(ValueError, match="configuration mismatch: batch_size"):
+        main(parser.parse_args(flags + ["--total-steps", "32", "--batch-size", "8"]))
 
 
 @pytest.mark.parametrize("env_version,legacy,saved_grace,effective_grace", [

@@ -38,6 +38,15 @@ from src.experiment_tracking import (TrainingLog, ActionWindow, EpisodeWindow,
 from src.evaluation_metrics import AgentMetrics
 
 AGENT_IDS = JointReplayBuffer.AGENT_IDS
+DEFAULT_CHECKPOINT_EVERY = 500_000
+
+RESUME_CONFIG_KEYS = (
+    "seed", "batch_size", "buffer_capacity", "learning_starts", "train_every",
+    "gamma", "tau", "learning_rate", "initial_alpha", "team_q_weight",
+    "masac_env_version", "actor_leader_features", "max_active_steps", "usp",
+    "usp_penalty", "stalled_terminate", "stalled_block_grace_s", "reward_components",
+    "safety_reward", "reward_protocol", "route_guidance_rules", "route_preparation_settings",
+)
 
 
 def snapshot(env, observations):
@@ -114,6 +123,7 @@ def save_checkpoint(
     global_step,
     episodes,
     config,
+    resume_state,
 ):
     """保存模型和优化器状态。"""
 
@@ -124,7 +134,7 @@ def save_checkpoint(
             "target_team_critic": trainer.target_team_critic.state_dict(),
             "team_critic_optimizer": trainer.team_critic_optimizer.state_dict(),
         }
-    atomic_write(path, lambda stream: torch.save({
+    state = {
         **team_state,
         "git": git_metadata(),
         "source_sha256": evaluation_fingerprint(),
@@ -132,6 +142,7 @@ def save_checkpoint(
         "episodes": episodes,
         "agent_ids": AGENT_IDS,
         "config": vars(config),
+        "resume_state": resume_state,
         "trainer_config": {"gamma": trainer.gamma, "tau": trainer.tau, "target_entropy": trainer.target_entropy},
         "actors": actors.state_dict(),
         "critic": critic.state_dict(),
@@ -148,7 +159,76 @@ def save_checkpoint(
             k: v.state_dict()
             for k, v in trainer.alpha_optimizers.items()
         },
-    }, stream))
+    }
+    atomic_write(path, lambda stream: torch.save(state, stream))
+    return checkpoint_index_row(path, state, sha256(path))
+
+
+def checkpoint_index_row(path, state, digest):
+    return dict(training_seed=state["config"]["seed"], global_step=state["global_step"],
+                path=str(path.resolve()), sha256=digest, git=state["git"],
+                source_sha256=state["source_sha256"], config=state["config"],
+                replay=state["resume_state"]["replay"])
+
+
+def find_resume_checkpoint(directory, args):
+    paths = {path.name: path for path in directory.glob("*.pt")}
+    index_path = directory / "index.json"
+    if not paths and not index_path.exists():
+        return None, None, []
+    if not args.resume:
+        raise FileExistsError("Experiment already has checkpoints; use a new --output-dir with --no-resume")
+
+    index = json.loads(index_path.read_text()) if index_path.exists() else []
+    indexed = {Path(row["path"]).name: row for row in index}
+    if len(indexed) != len(index) or indexed.keys() - paths.keys():
+        raise ValueError("Checkpoint index contains missing or duplicate checkpoints")
+    # A model published just before an interruption is complete even if its index was not written.
+    orphaned = paths.keys() - indexed.keys()
+    states = {}
+    for name in sorted(orphaned):
+        path = paths[name]
+        state = torch.load(path, map_location="cpu", weights_only=True)
+        if not state.get("resume_state"):
+            raise ValueError(f"{path} has no resumable Replay Buffer; use a new --output-dir")
+        row = checkpoint_index_row(path, state, sha256(path))
+        index.append(row)
+        states[name] = state
+    if not index or len({row["global_step"] for row in index}) != len(index):
+        raise ValueError("Checkpoint index has no entries or has duplicate training steps")
+    index.sort(key=lambda row: row["global_step"])
+    latest = index[-1]
+    name = Path(latest["path"]).name
+    path = paths[name]
+    if name not in states and sha256(path) != latest["sha256"]:
+        raise ValueError(f"Checkpoint SHA256 mismatch: {path}")
+    state = states[name] if name in states else torch.load(path, map_location="cpu", weights_only=True)
+    resume = state.get("resume_state")
+    if not resume:
+        raise ValueError(f"{path} has no resumable Replay Buffer; use a new --output-dir")
+    if (resume["version"] != 1 or tuple(state["agent_ids"]) != AGENT_IDS
+            or state["global_step"] != latest["global_step"]):
+        raise ValueError(f"Invalid resume metadata: {path}")
+    changed = [key for key in RESUME_CONFIG_KEYS if state["config"].get(key) != getattr(args, key)]
+    if changed:
+        raise ValueError(f"Resume configuration mismatch: {', '.join(changed)}")
+    replay_path = path.with_suffix(".replay.npz")
+    if not replay_path.is_file() or sha256(replay_path) != resume["replay"]["sha256"]:
+        raise ValueError(f"Replay Buffer missing or SHA256 mismatch: {replay_path}")
+    if orphaned:
+        atomic_json(index_path, index)
+    return state, replay_path, index
+
+
+def restore_training_state(state, trainer):
+    for key in ("actors", "critic", "target_critic", "log_alpha", "critic_optimizer"):
+        getattr(trainer, key).load_state_dict(state[key])
+    if trainer.team_critic is not None:
+        for key in ("team_critic", "target_team_critic", "team_critic_optimizer"):
+            getattr(trainer, key).load_state_dict(state[key])
+    for key in ("actor_optimizers", "alpha_optimizers"):
+        for ego_id, optimizer in getattr(trainer, key).items():
+            optimizer.load_state_dict(state[key][ego_id])
 
 
 def initialize_actor_weights(actors, path, expected_sha256, actor_leader_features):
@@ -210,6 +290,19 @@ def main(args):
 
 
 def train(args, device):
+    import fcntl
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with (output_dir / ".training.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError(f"Training already active in {output_dir}") from error
+        return train_locked(args, device, output_dir)
+
+
+def train_locked(args, device, output_dir):
     if args.total_steps <= 0:
         raise ValueError("total_steps must be positive")
 
@@ -249,7 +342,8 @@ def train(args, device):
     args.stalled_block_grace_s = stalled_block_grace_for_version(args.masac_env_version)
     args.actor_leader_features = getattr(args, "actor_leader_features", False)
     args.tau = getattr(args, "tau", 0.005)
-    args.checkpoint_every = getattr(args, "checkpoint_every", 100000)
+    args.checkpoint_every = getattr(args, "checkpoint_every", DEFAULT_CHECKPOINT_EVERY)
+    args.resume = getattr(args, "resume", True)
     args.tensorboard = getattr(args, "tensorboard", True)
     if args.checkpoint_every <= 0:
         raise ValueError("checkpoint_every must be positive")
@@ -257,11 +351,6 @@ def train(args, device):
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    if list((output_dir / "checkpoints").glob("*.pt")):
-        raise FileExistsError("Experiment directory already contains checkpoints")
-    
     args.usp_penalty = getattr(
         args, "usp_penalty", 0.02
     )
@@ -295,6 +384,16 @@ def train(args, device):
     if reward_config.team and (not math.isfinite(args.team_q_weight) or args.team_q_weight <= 0):
         raise ValueError("team_q_weight must be finite and positive when team reward is enabled")
 
+    checkpoint_dir = output_dir / "checkpoints"
+    state, replay_path, checkpoint_index = find_resume_checkpoint(checkpoint_dir, args)
+    start_step = state["global_step"] if state is not None else 0
+    if state is None and (output_dir / "train/metrics.jsonl").exists():
+        raise FileExistsError("Existing training log has no resumable checkpoint; use a new --output-dir")
+    if args.total_steps < start_step:
+        raise ValueError(f"--total-steps must be at least the saved step ({start_step})")
+    if args.total_steps == start_step:
+        print(f"Training already reached {start_step} global steps", flush=True)
+        return
 
     # 1. 创建网络及优化器
     actors = MultiAgentGaussianActor(
@@ -305,10 +404,13 @@ def train(args, device):
     init_sha = getattr(args, "init_actors_sha256", None)
     if init_sha is not None and init_checkpoint is None:
         raise ValueError("--init-actors-sha256 requires --init-actors-from")
-    args.actor_initialization = (
-        initialize_actor_weights(actors, init_checkpoint, init_sha, args.actor_leader_features)
-        if init_checkpoint else None
-    )
+    if state is not None:
+        args.actor_initialization = state["config"].get("actor_initialization")
+    else:
+        args.actor_initialization = (
+            initialize_actor_weights(actors, init_checkpoint, init_sha, args.actor_leader_features)
+            if init_checkpoint else None
+        )
     critic = CentralizedTwinQ(
         num_agents=len(AGENT_IDS), nav_dim=TARGET_EXIT_DIM,
     ).to(device)
@@ -335,6 +437,17 @@ def train(args, device):
         team=reward_config.team,
         policy_obs_dim=actors.obs_dim,
     )
+    resume = None if state is None else state["resume_state"]
+    if state is not None:
+        buffer.load(replay_path)
+        if len(buffer) != resume["replay"]["size"]:
+            raise ValueError("Replay Buffer size does not match the checkpoint")
+        restore_training_state(state, trainer)
+    completed_episodes = state["episodes"] if state is not None else 0
+    update_count = resume["update_count"] if resume is not None else 0
+    episode_seed_index = resume["next_episode_seed_index"] if resume is not None else 0
+    last_losses = resume["last_losses"] if resume is not None else {}
+    del state
 
     # 3. 创建双 Ego 环境
     env = MultiEgoEnv(
@@ -357,35 +470,39 @@ def train(args, device):
         actor_leader_features=args.actor_leader_features,
     )
 
-    log = TrainingLog(output_dir / "train", args.tensorboard)
     provenance = git_metadata()
-    log.write("config", 0, config=vars(args), git=provenance, policy="exploration_training")
-    action_window = ActionWindow(AGENT_IDS)
     episode_window = EpisodeWindow()
-    checkpoint_index = []
-
-    def checkpoint_at(step, episodes):
-        path = output_dir / "checkpoints" / f"masac_seed{args.seed}_step_{step}.pt"
-        save_checkpoint(path, actors, critic, trainer, step, episodes, args)
-        checkpoint_index.append(dict(training_seed=args.seed, global_step=step,
-            path=str(path.resolve()), sha256=sha256(path), git=provenance, source_sha256=evaluation_fingerprint(), config=vars(args)))
-        atomic_json(output_dir / "checkpoints" / "index.json", checkpoint_index)
-        return path
-
-    completed_episodes = 0
-    update_count = 0
-    last_losses = {}
+    if resume is not None:
+        episode_window.rows.extend(resume["episode_window"])
+    log = TrainingLog(output_dir / "train", args.tensorboard,
+                      resume_step=start_step if resume is not None else None)
     started = time.monotonic()
 
     try:
-        observations, _ = env.reset(seed=args.seed)
+        if resume is None:
+            log.write("config", 0, config=vars(args), git=provenance, policy="exploration_training")
+        else:
+            log.write("resume", start_step, config=vars(args), git=provenance,
+                      replay_size=len(buffer), update_count=update_count,
+                      sumo_seed=args.seed + episode_seed_index,
+                      replay_sha256=resume["replay"]["sha256"],
+                      discarded_pending_transition=resume["pending_transition"])
+            print(f"Resuming at step {start_step} with {len(buffer)} replay transitions", flush=True)
+        action_window = ActionWindow(AGENT_IDS)
+        observations, _ = env.reset(seed=args.seed + episode_seed_index)
+        if resume is not None:
+            random.setstate(resume["python_rng"])
+            rng.bit_generator.state = resume["exploration_rng"]
+            torch.set_rng_state(resume["torch_rng"])
+            if device.type == "cuda" and resume["cuda_rng"] is not None:
+                torch.cuda.set_rng_state(resume["cuda_rng"], device=device)
         collector = JointTransitionCollector(buffer)
 
         episode_rewards = np.zeros(
             len(AGENT_IDS), dtype=np.float64
         )
         outcomes = {}
-        episode_start = 0
+        episode_start = start_step
         episode_metrics = {key: AgentMetrics() for key in AGENT_IDS}
 
         episode_usp_steps = {
@@ -396,7 +513,7 @@ def train(args, device):
             ego_id: 0.0 for ego_id in AGENT_IDS
         }
 
-        for global_step in range(1, args.total_steps + 1):
+        for global_step in range(start_step + 1, args.total_steps + 1):
 
             # A. 推进前快照
             policy_obs, critic_obs, active_mask = (
@@ -584,7 +701,8 @@ def train(args, device):
             observations = next_observations
 
             # H. 两辆车都终止后，开始新回合
-            if len(outcomes) == len(AGENT_IDS):
+            episode_finished = len(outcomes) == len(AGENT_IDS)
+            if episode_finished:
                 collector.flush()
 
                 completed_episodes += 1
@@ -623,33 +741,39 @@ def train(args, device):
                     flush=True,
                 )
 
-                if global_step < args.total_steps:
-                    observations, _ = env.reset(
-                        seed=args.seed + completed_episodes
-                    )
-
-                    collector = JointTransitionCollector(
-                        buffer
-                    )
-
-                    outcomes = {}
-                    episode_start = global_step
-                    episode_metrics = {key: AgentMetrics() for key in AGENT_IDS}
-                    episode_rewards = np.zeros(
-                        len(AGENT_IDS), dtype=np.float64
-                    )
-                    
-                    # 新 Episode，重置 USP 统计
-                    episode_usp_steps = {
-                        ego_id: 0 for ego_id in AGENT_IDS
-                    }
-
-                    episode_usp_total = {
-                        ego_id: 0.0 for ego_id in AGENT_IDS
-                    }
-
             if checkpoint_due(global_step, args.total_steps, args.checkpoint_every):
-                checkpoint = checkpoint_at(global_step, completed_episodes)
+                checkpoint = checkpoint_dir / f"masac_seed{args.seed}_step_{global_step}.pt"
+                replay = checkpoint.with_suffix(".replay.npz")
+                atomic_write(replay, buffer.save)
+                resume_state = dict(
+                    version=1,
+                    replay=dict(path=replay.name, sha256=sha256(replay), size=len(buffer)),
+                    update_count=update_count,
+                    next_episode_seed_index=episode_seed_index + 1,
+                    pending_transition=collector.pending is not None,
+                    last_losses=last_losses,
+                    episode_window=list(episode_window.rows),
+                    python_rng=random.getstate(),
+                    exploration_rng=rng.bit_generator.state,
+                    torch_rng=torch.get_rng_state(),
+                    cuda_rng=torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
+                )
+                checkpoint_index.append(save_checkpoint(
+                    checkpoint, actors, critic, trainer, global_step, completed_episodes,
+                    args, resume_state,
+                ))
+                atomic_json(checkpoint_dir / "index.json", checkpoint_index)
+
+            if episode_finished and global_step < args.total_steps:
+                episode_seed_index += 1
+                observations, _ = env.reset(seed=args.seed + episode_seed_index)
+                collector = JointTransitionCollector(buffer)
+                outcomes = {}
+                episode_start = global_step
+                episode_metrics = {key: AgentMetrics() for key in AGENT_IDS}
+                episode_rewards = np.zeros(len(AGENT_IDS), dtype=np.float64)
+                episode_usp_steps = {ego_id: 0 for ego_id in AGENT_IDS}
+                episode_usp_total = {ego_id: 0.0 for ego_id in AGENT_IDS}
 
         print("\n===== Training smoke summary =====")
         print("Global steps:", args.total_steps)
@@ -661,10 +785,6 @@ def train(args, device):
         ))
         print("Checkpoint:", checkpoint)
 
-        assert update_count > 0, (
-            "No gradient update was performed"
-        )
-        
         assert tuple(env.AGENTS) == tuple(AGENT_IDS)
         assert tuple(actors.ego_ids) == tuple(AGENT_IDS)
         assert critic.num_agents == len(AGENT_IDS)
@@ -760,7 +880,10 @@ def build_parser():
     parser.add_argument("--trace-controls", action="store_true", help="Log per-Ego TraCI gaps, motion, and control commands")
     parser.add_argument("--max-active-steps", type=int, default=MultiEgoEnv.DEFAULT_MAX_ACTIVE_STEPS,
                         help="Per-Ego timeout in active control steps")
-    parser.add_argument("--checkpoint-every", type=int, default=200000)
+    parser.add_argument("--checkpoint-every", type=int, default=DEFAULT_CHECKPOINT_EVERY,
+                        help="Save model and replay every N global steps (default: 500000)")
+    parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True,
+                        help="Continue from the latest checkpoint in --output-dir (default: enabled)")
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--tensorboard", action=argparse.BooleanOptionalAction, default=True)
     return parser

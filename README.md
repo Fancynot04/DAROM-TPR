@@ -142,9 +142,9 @@ python3 train_masac.py \
   --output-dir runs/masac_smoke_2500
 ```
 
-正式训练默认参数为 1,000,000 个共享 SUMO 全局步、Replay 容量 1,000,000、batch 512、Learning Starts 100、学习率 3e-5、γ=0.99、`--tau=0.005`、seed 42，每 200,000 步保存 checkpoint，默认输出 `runs/masac`。两辆 Ego 的 α 独立学习。上述 2,500 步命令显式使用小参数，用于冒烟验证。训练开始的前 `learning-starts` 个全局步使用均匀随机动作，后续使用随机 Actor 策略。
+正式训练默认参数为 1,000,000 个共享 SUMO 全局步、Replay 容量 1,000,000、batch 512、Learning Starts 100、学习率 3e-5、γ=0.99、`--tau=0.005`、seed 42，每 500,000 步保存模型和 Replay Buffer，默认输出 `runs/masac`。两辆 Ego 的 α 独立学习。上述 2,500 步命令显式使用小参数，用于冒烟验证。训练开始的前 `learning-starts` 个全局步使用均匀随机动作，后续使用随机 Actor 策略。
 
-训练结束保存 `runs/masac_smoke_2500/checkpoints/masac_seed42_step_2500.pt`，其中包含 Actor、Critic、Target Critic、α 和优化器状态；**不包含 Replay Buffer、SUMO 物理状态或随机数全状态，不能精确续训**。`runs/` 由 `.gitignore` 排除，模型文件需另行归档。
+训练结束会保存模型 `masac_seed42_step_2500.pt` 和配对的 `masac_seed42_step_2500.replay.npz`。续训默认开启。重复原训练命令，沿用同一个 `--output-dir` 和原训练配置即可从最新 checkpoint 恢复。若要延长训练，把 `--total-steps` 改为新的累计目标。例如从 500,000 步续到 1,000,000 步，设置 `--total-steps 1000000`。从零训练时使用新的输出目录，可显式加 `--no-resume`。`runs/` 由 `.gitignore` 排除，归档续训文件时需保留模型、对应 Replay 和索引。
 
 ## 6. 独立评估
 
@@ -197,13 +197,14 @@ python3 evaluate_masac.py \
 
 省略 `--device` 时使用 `auto`。PyTorch 检测到 CUDA 时选择 `cuda:0` 并用 2 个 PyTorch CPU 算子线程，否则回退到 CPU，线程数为 PyTorch 当前默认值与 8 的较小者。可用 `--device cpu`、`--device cuda:N` 或 `--torch-threads N` 显式覆盖。SUMO 与 Replay 存储在 CPU。训练启动时打印请求设备、实际设备和线程数，并将其写入配置。评估器可在 CPU 读取 CUDA 训练生成的 checkpoint。
 
-训练参数 `--checkpoint-every 200000`；默认每 200,000 个共享 SUMO 控制步保存一次，结束时保存最终状态，恰逢节点只保存一次。`--tensorboard` 默认开启，可用 `--no-tensorboard` 关闭；JSONL 始终开启。动作窗口复用 `--log-every`（默认 40 步），最后不足窗口仍写实际长度。实验目录不可重复写入已有 `train/metrics.jsonl`，避免混合两次训练。
+默认每 500,000 个共享 SUMO 全局步及训练结束时保存模型和 Replay Buffer，恰逢保存节点只写一次。可用 `--checkpoint-every N` 覆盖。若目录中的最新 checkpoint 已达到目标步数，命令直接退出。`--tensorboard` 默认开启，可用 `--no-tensorboard` 关闭，JSONL 始终开启。动作窗口复用 `--log-every`（默认 40 步），最后不足窗口仍写实际长度。
 
 ```text
 runs/<experiment_id>/
   train/metrics.jsonl
   train/tb/
   checkpoints/masac_seed42_step_500000.pt
+  checkpoints/masac_seed42_step_500000.replay.npz
   checkpoints/index.json
   eval/step_500000/summary.json
   eval/step_500000/episodes.csv
@@ -213,7 +214,8 @@ runs/<experiment_id>/
 
 JSONL 以 `event` 区分：
 
-- `config`：完整 CLI、Git 提交及工作树是否有修改；`global_step=0`。
+- `config`：完整 CLI、Git 提交及工作树是否有修改，`global_step=0`。
+- `resume`：恢复步数、Replay 大小和哈希、累计更新数、下一回合的 SUMO 种子及配置。崩溃后超过恢复点的日志保存在 `train/metrics.before-resume-*.jsonl`，主日志从恢复点继续。
 - `episode`：仅两车均完整终止后写入，包含 `episode_index`、`episode_global_steps`、每车终止原因/奖励/严格成功/有效控制步数、联合成功；最近 100 回合的 ego_1 / ego_2 成功、碰撞、Missed Exit、Timeout 百分率和平均奖励，以及联合成功率和两车奖励和的均值。`rolling_episodes` 是实际分母，`policy=exploration_training`，不能冒充正式评估。
 - `stalled_shadow`：用 `--stalled-shadow` 记录每辆 Ego 的步前诊断，环境在 `infos[ego]["stalled_shadow"]` 提供同一数据。每车的有效通行滑窗为 10 秒，里程进展小于 20 m 时输出 `would_stall=true`。前车约束仍使用 50 m 内前车的净间隙、最小间距和按当前车速估计的 10 秒前车位移。路口检查仍限于内部连接或距车道末端 20 m 内。
 - v4 起检测到外部阻挡时暂停窗口，持续达到 3 秒后清空一次。连续畅通达到 3 秒才确认恢复，并补计这段连续畅通的步间增量。更短的畅通闪烁并回同一阻挡段。跨阻挡边界的步间增量不计。无效里程、不连续样本、TraCI 不可用和传送信号立即清空。3 秒是未校准的初值。使用宽限规则并启用终止或影子诊断时，每回合按车输出 `stalled_diagnostics`，包括实际窗口重置数及各原因次数、暂停段数，以及原始和合并闪烁后的阻挡时长直方图，单位为 0.1 秒步数。因采样中断或离开而截尾的合并段单列，未结束段另记已观测时长。
@@ -225,7 +227,9 @@ JSONL 以 `event` 区分：
 
 TensorBoard 的标量标签统一带 `exploration_training/` 前缀，以 `global_step` 为横轴；例如 `tensorboard --logdir runs/<experiment_id>/train/tb`。更新曲线展示实际记录轮次的 minibatch 值，横轴使用真实全局步。运行窗口仍记录累计更新总数。
 
-checkpoint 保留原有模型/优化器字段，并增加 Git 和源码 SHA256；索引记录训练 seed、global_step、绝对路径、文件 SHA256、提交、源码哈希和配置。文件先写 `.partial`，flush/fsync 后原子替换，索引同样原子写入；残留 `.partial` 不参与发现。双 Ego 联合 Replay 的 float32 数组容量 1,000,000 时约 3.49 GiB/组（不含模型、Python 和采样临时张量）；同样的容量数值不代表与单 Ego 相同的内存或样本结构。checkpoint 仍缺 Replay、SUMO 状态、全部 RNG 状态，**不提供精确续训**。
+模型 checkpoint 保存 Actor、个人及团队 Critic 和目标网络、α、优化器、累计进度及训练随机状态。配对的 `.replay.npz` 保存有效样本、容量、环形写入位置和采样随机状态，评估只需模型 `.pt`。文件先写 `.partial`，flush/fsync 后原子替换，模型发布时 Replay 已写完，索引记录两者的 SHA-256。续训检查哈希和关键训练配置。旧模型没有配对 Replay 时无法完整续训，仍可评估，或在满足观测兼容条件时用 `--init-actors-from` 初始化新训练。若首次保存前中断且目录已有日志，请用新输出目录重跑。
+
+续训时 SUMO 用下一回合种子启动。中断时若有一条等待下一步事件归因的 transition，会在恢复时舍弃。恢复前已提交到 Replay 的样本和累计进度会保留。此方式支持继续学习，轨迹不会与未中断训练逐步一致。满容量的 1,000,000 条双 Ego Replay 每个保存点约 3.5 GiB，保存体积随有效样本数增长，已有保存点会保留。
 
 ### 6.2 固定种子评估与只读行为诊断
 
@@ -305,7 +309,7 @@ python3 -m pytest tests/test_full_episode_replay.py -s -v
 ## 9. 限制与后续工作
 
 1. 双 Ego 仅实现 Easy；Medium/Hard 目前只有单 Ego 路线文件。
-2. 训练入口尚无精确断点恢复或 W&B；已有周期 checkpoint、训练配置与 SHA256 索引、独立固定种子批量评估。多训练 seed 仍须分别启动和归档。
+2. 训练入口支持从模型与 Replay checkpoint 续训，SUMO 从新回合开始。训练记录使用本地结构化日志和 TensorBoard，尚未接入 W&B。多训练 seed 仍须分别启动和归档。
 3. 当前连续横向 Actor / 连续 Q 输入与 SUMO 离散换道执行之间存在潜在不匹配，需要后续实验评估。
 4. `laneChangeMode=0` 不对请求换道提供常规安全保护；高碰撞率是必须测量的任务结果，不代表策略已安全。
 5. 现有历史 E76→D3 单 Ego SAC / 奖励消融代码保留用于研究追溯及后续对照，但不作为当前双 Ego CTDE-MASAC 的运行说明。

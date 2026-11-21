@@ -1,6 +1,8 @@
 
 """CTDE-MASAC 联合经验回放。"""
 
+import json
+
 import numpy as np
 import torch
 
@@ -77,6 +79,30 @@ class JointReplayBuffer:
 
     def __len__(self):
         return self.size
+
+    def save(self, stream):
+        """Serialize only initialized slots, preserving their physical order."""
+        metadata = json.dumps(dict(version=1, capacity=self.capacity, size=self.size,
+                                   position=self.position, rng=self.rng.bit_generator.state))
+        np.savez(stream, metadata=metadata,
+                 **{name: values[:self.size] for name, values in self.data.items()})
+
+    def load(self, path):
+        with np.load(path, allow_pickle=False) as archive:
+            meta = json.loads(archive["metadata"].item())
+            size, position = meta["size"], meta["position"]
+            if (meta["version"] != 1 or meta["capacity"] != self.capacity
+                    or not 0 <= size <= self.capacity or not 0 <= position < self.capacity
+                    or (size < self.capacity and position != size)
+                    or set(archive.files) != {"metadata", *self.data}):
+                raise ValueError("Incompatible replay buffer metadata")
+            for name, target in self.data.items():
+                values = archive[name]
+                if values.shape != (size, *self.shapes[name]) or values.dtype != target.dtype:
+                    raise ValueError(f"Incompatible replay buffer field: {name}")
+                target[:size] = values
+            self.rng.bit_generator.state = meta["rng"]
+            self.size, self.position = size, position
 
     def add(self, **transition):
         """保存一条联合经验，不保存调用者数组的引用。"""

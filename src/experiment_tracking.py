@@ -61,15 +61,46 @@ def checkpoint_due(step, total, interval):
 
 
 class TrainingLog:
-    def __init__(self, directory, tensorboard=True):
+    def __init__(self, directory, tensorboard=True, *, resume_step=None):
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
-        # Never silently mix two runs in one experiment directory.
-        self.stream = (directory / 'metrics.jsonl').open('x', encoding='utf-8')
+        path = directory / 'metrics.jsonl'
+        if resume_step is not None and path.exists():
+            self._preserve_checkpoint_prefix(path, resume_step)
+        self.stream = path.open('x' if resume_step is None else 'a', encoding='utf-8')
         self.writer = None
-        if tensorboard:
-            from torch.utils.tensorboard import SummaryWriter
-            self.writer = SummaryWriter(str(directory / 'tb'))
+        try:
+            if tensorboard:
+                from torch.utils.tensorboard import SummaryWriter
+                self.writer = SummaryWriter(str(directory / 'tb'),
+                                            purge_step=None if resume_step is None else resume_step + 1)
+        except Exception:
+            self.stream.close()
+            raise
+
+    @staticmethod
+    def _preserve_checkpoint_prefix(path, step):
+        prefix_size = 0
+        with path.open('rb') as stream:
+            for line in stream:
+                if not line.endswith(b'\n') or json.loads(line)['global_step'] > step:
+                    break
+                prefix_size += len(line)
+        if prefix_size == path.stat().st_size:
+            return
+
+        archive = path.with_name(f'metrics.before-resume-{step}-{uuid.uuid4().hex}.jsonl')
+        os.link(path, archive)
+
+        def copy_prefix(target):
+            with archive.open('rb') as source:
+                remaining = prefix_size
+                while remaining:
+                    chunk = source.read(min(remaining, 1024 * 1024))
+                    target.write(chunk)
+                    remaining -= len(chunk)
+
+        atomic_write(path, copy_prefix)
 
     def write(self, event, global_step, **values):
         record = dict(event=event, global_step=int(global_step), **values)
