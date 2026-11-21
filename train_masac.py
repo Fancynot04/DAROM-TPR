@@ -19,10 +19,14 @@ import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
 from src.envs.route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES
-from src.envs.route_preparation import DEFAULT_ROUTE_PREPARATION_STAGES, DEFAULT_ROUTE_PREPARATION_WEIGHTS
+from src.envs.route_preparation import (
+    DEFAULT_REFERENCE_STEP_M, DEFAULT_ROUTE_PREPARATION_BONUS, DEFAULT_ROUTE_PREPARATION_STAGES,
+    DEFAULT_ROUTE_PREPARATION_WEIGHTS, PREPARATION_BONUS_MODES, PREPARATION_PENALTY,
+    PREPARATION_PROGRESS_BONUS, checkpoint_preparation_settings,
+)
 from src.envs.stalled import stalled_block_grace_for_version
 from src.rewards.masac import (
-    LEGACY_MASAC_ENV_VERSION, MASACRewardConfig, MASACRewardProtocol, MASAC_ENV_VERSION,
+    LEGACY_LANE_CHANGE_WEIGHT, LEGACY_MASAC_ENV_VERSION, MASACRewardConfig, MASACRewardProtocol, MASAC_ENV_VERSION,
     SUPPORTED_MASAC_ENV_VERSIONS,
     TARGET_EXIT_DIM,
 )
@@ -44,8 +48,8 @@ RESUME_CONFIG_KEYS = (
     "seed", "batch_size", "buffer_capacity", "learning_starts", "train_every",
     "gamma", "tau", "learning_rate", "initial_alpha", "team_q_weight",
     "masac_env_version", "actor_leader_features", "max_active_steps", "usp",
-    "usp_penalty", "stalled_terminate", "stalled_block_grace_s", "reward_components",
-    "safety_reward", "reward_protocol", "route_guidance_rules", "route_preparation_settings",
+    "usp_penalty", "stalled_terminate", "stalled_block_grace_s",
+    "route_guidance_rules",
 )
 
 
@@ -171,6 +175,44 @@ def checkpoint_index_row(path, state, digest):
                 replay=state["resume_state"]["replay"])
 
 
+def preparation_settings(args, saved=None, *, resuming=False):
+    stage_file = getattr(args, "route_preparation_stages", None)
+    bonus = getattr(args, "reward_route_preparation_bonus_cap", None)
+    penalty_weights = {
+        kind: getattr(args, "reward_route_preparation_" + kind + "_weight", None)
+        for kind in DEFAULT_ROUTE_PREPARATION_WEIGHTS
+    }
+    legacy_override = any(value is not None for value in penalty_weights.values())
+    mode = getattr(args, "reward_route_preparation_mode", None)
+    if mode is None:
+        if legacy_override:
+            mode = PREPARATION_PENALTY
+        elif bonus is not None and (saved is None or saved["mode"] == PREPARATION_PENALTY):
+            mode = PREPARATION_PROGRESS_BONUS
+    if resuming and saved is None and mode is None and stage_file is None:
+        return None
+    saved = saved or {}
+    mode = mode or saved.get("mode", PREPARATION_PROGRESS_BONUS)
+    stages = saved.get("stages", DEFAULT_ROUTE_PREPARATION_STAGES)
+    if stage_file:
+        stages = json.loads(Path(stage_file).read_text(encoding="utf-8"))
+    if mode in PREPARATION_BONUS_MODES:
+        if legacy_override:
+            raise ValueError("Legacy preparation weights require legacy_penalty mode")
+        if bonus is None:
+            bonus = saved.get("bonus_cap", DEFAULT_ROUTE_PREPARATION_BONUS)
+        settings = {"mode": mode, "stages": stages, "bonus_cap": bonus}
+        if mode == PREPARATION_PROGRESS_BONUS:
+            settings["reference_step_m"] = saved.get("reference_step_m", DEFAULT_REFERENCE_STEP_M)
+        return settings
+    if bonus is not None:
+        raise ValueError("Preparation bonus cap requires a bonus mode")
+    weights = saved.get("weights", DEFAULT_ROUTE_PREPARATION_WEIGHTS)
+    return {"mode": mode, "stages": stages, "weights": {
+        kind: weights[kind] if value is None else value for kind, value in penalty_weights.items()
+    }}
+
+
 def find_resume_checkpoint(directory, args):
     paths = {path.name: path for path in directory.glob("*.pt")}
     index_path = directory / "index.json"
@@ -210,6 +252,40 @@ def find_resume_checkpoint(directory, args):
             or state["global_step"] != latest["global_step"]):
         raise ValueError(f"Invalid resume metadata: {path}")
     changed = [key for key in RESUME_CONFIG_KEYS if state["config"].get(key) != getattr(args, key)]
+    saved_route_settings = checkpoint_preparation_settings(state["config"].get("route_preparation_settings"))
+    route_settings = preparation_settings(args, saved_route_settings, resuming=True)
+    if saved_route_settings != route_settings:
+        changed.append("route_preparation_settings")
+    saved_components = {"rear_following": False, **state["config"].get("reward_components", {})}
+    saved_components["route_preparation"] = (
+        saved_route_settings is not None and saved_components.get("route_preparation", False)
+    )
+    components = args.reward_components.copy()
+    if getattr(args, "reward_route_preparation", None) is None:
+        components["route_preparation"] = saved_components["route_preparation"]
+    if components != saved_components:
+        changed.append("reward_components")
+    saved_safety = {
+        "ttc_threshold": MASACRewardConfig.ttc_threshold,
+        "following_lookahead": MASACRewardConfig.following_lookahead,
+        "lane_change_weight": LEGACY_LANE_CHANGE_WEIGHT,
+        **state["config"].get("safety_reward", {}),
+    }
+    safety = args.safety_reward.copy()
+    if getattr(args, "reward_lane_change_weight", None) is None:
+        safety["lane_change_weight"] = saved_safety["lane_change_weight"]
+    if safety != saved_safety:
+        changed.append("safety_reward")
+    reward_protocol = args.reward_protocol.copy()
+    saved_settings = state["config"].get("reward_protocol")
+    if saved_settings is None:
+        changed.append("reward_protocol")
+    else:
+        saved_protocol = MASACRewardProtocol.from_checkpoint(saved_settings)
+        if getattr(args, "reward_comfort_weight", None) is None:
+            reward_protocol["comfort_weight"] = saved_protocol.comfort_weight
+        if saved_protocol != MASACRewardProtocol(**reward_protocol):
+            changed.append("reward_protocol")
     if changed:
         raise ValueError(f"Resume configuration mismatch: {', '.join(changed)}")
     replay_path = path.with_suffix(".replay.npz")
@@ -217,6 +293,10 @@ def find_resume_checkpoint(directory, args):
         raise ValueError(f"Replay Buffer missing or SHA256 mismatch: {replay_path}")
     if orphaned:
         atomic_json(index_path, index)
+    args.reward_protocol = reward_protocol
+    args.route_preparation_settings = route_settings
+    args.reward_components = components
+    args.safety_reward = safety
     return state, replay_path, index
 
 
@@ -355,37 +435,40 @@ def train_locked(args, device, output_dir):
         args, "usp_penalty", 0.02
     )
 
-    args.reward_components = {
-        field.name: getattr(args, "reward_" + field.name, field.default)
-        for field in fields(MASACRewardConfig)
-        if isinstance(field.default, bool)
-    }
-    args.safety_reward = {
-        field.name: getattr(args, "reward_" + field.name, field.default)
-        for field in fields(MASACRewardConfig)
-        if not isinstance(field.default, bool)
-    }
-    reward_config = MASACRewardConfig(**args.reward_components, **args.safety_reward)
+    args.reward_components = {}
+    args.safety_reward = {}
+    for field in fields(MASACRewardConfig):
+        value = getattr(args, "reward_" + field.name, None)
+        target = args.reward_components if isinstance(field.default, bool) else args.safety_reward
+        target[field.name] = field.default if value is None else value
+    comfort_weight = getattr(args, "reward_comfort_weight", None)
     reward_protocol = MASACRewardProtocol(
         route_guidance_weight=getattr(
             args, "reward_route_guidance_weight", MASACRewardProtocol.route_guidance_weight,
         ),
+        terminal_penalty_scale=getattr(
+            args, "terminal_penalty_scale", MASACRewardProtocol.terminal_penalty_scale,
+        ),
+        collision_penalty=getattr(args, "collision_penalty", None),
+        comfort_weight=MASACRewardProtocol.comfort_weight if comfort_weight is None else comfort_weight,
     )
     args.reward_protocol = asdict(reward_protocol)
+    if reward_protocol.collision_penalty is None:
+        del args.reward_protocol["collision_penalty"]
     args.route_guidance_rules = getattr(args, "route_guidance_rules", DEFAULT_ROUTE_GUIDANCE_RULES)
-    stage_file = getattr(args, "route_preparation_stages", None)
-    args.route_preparation_settings = {
-        "stages": json.loads(Path(stage_file).read_text(encoding="utf-8")) if stage_file else
-                  DEFAULT_ROUTE_PREPARATION_STAGES,
-        "weights": {kind: getattr(args, "reward_route_preparation_" + kind + "_weight", default)
-                    for kind, default in DEFAULT_ROUTE_PREPARATION_WEIGHTS.items()},
-    }
     args.team_q_weight = getattr(args, "team_q_weight", 1.0)
-    if reward_config.team and (not math.isfinite(args.team_q_weight) or args.team_q_weight <= 0):
-        raise ValueError("team_q_weight must be finite and positive when team reward is enabled")
 
     checkpoint_dir = output_dir / "checkpoints"
     state, replay_path, checkpoint_index = find_resume_checkpoint(checkpoint_dir, args)
+    if state is not None:
+        reward_protocol = MASACRewardProtocol(**args.reward_protocol)
+    else:
+        args.route_preparation_settings = preparation_settings(args)
+    reward_config = MASACRewardConfig(**args.reward_components, **args.safety_reward)
+    args.reward_lane_change_weight = reward_config.lane_change_weight
+    args.reward_route_preparation = reward_config.route_preparation
+    if reward_config.team and (not math.isfinite(args.team_q_weight) or args.team_q_weight <= 0):
+        raise ValueError("team_q_weight must be finite and positive when team reward is enabled")
     start_step = state["global_step"] if state is not None else 0
     if state is None and (output_dir / "train/metrics.jsonl").exists():
         raise FileExistsError("Existing training log has no resumable checkpoint; use a new --output-dir")
@@ -847,14 +930,27 @@ def build_parser():
     for field in fields(MASACRewardConfig):
         parser.add_argument(
             "--reward-" + field.name.replace("_", "-"),
-            default=field.default,
+            default=None if field.name in {"lane_change_weight", "route_preparation"} else field.default,
             **({"action": argparse.BooleanOptionalAction} if isinstance(field.default, bool)
                else {"type": float}),
         )
     parser.add_argument("--reward-route-guidance-weight", type=float,
                         default=MASACRewardProtocol().route_guidance_weight)
-    for kind, weight in DEFAULT_ROUTE_PREPARATION_WEIGHTS.items():
-        parser.add_argument(f"--reward-route-preparation-{kind}-weight", type=float, default=weight)
+    parser.add_argument("--reward-comfort-weight", type=float,
+                        help=f"Comfort weight (default: {MASACRewardProtocol.comfort_weight} for fresh training; "
+                             "saved weight when resuming)")
+    parser.add_argument("--terminal-penalty-scale", type=float,
+                        default=MASACRewardProtocol.terminal_penalty_scale,
+                        help="Multiply negative MASAC terminal task rewards by this factor")
+    parser.add_argument("--collision-penalty", type=float,
+                        help="Override the final MASAC collision penalty with this nonnegative magnitude")
+    parser.add_argument("--reward-route-preparation-mode", choices=(*PREPARATION_BONUS_MODES, PREPARATION_PENALTY),
+                        help="Default: progress_bonus for fresh training, saved mode when resuming")
+    parser.add_argument("--reward-route-preparation-bonus-cap", type=float,
+                        help=f"Per-step bonus cap (fresh training default: {DEFAULT_ROUTE_PREPARATION_BONUS})")
+    for kind in DEFAULT_ROUTE_PREPARATION_WEIGHTS:
+        parser.add_argument(f"--reward-route-preparation-{kind}-weight", type=float,
+                            help="Select legacy penalty mode and set its phase weight")
     parser.add_argument("--route-preparation-stages", help="JSON file containing route preparation stage rules")
     parser.add_argument("--init-actors-from", help="Load only Actor weights from a route-aware MASAC checkpoint")
     parser.add_argument("--init-actors-sha256", help="Expected SHA-256 of the Actor initialization checkpoint")

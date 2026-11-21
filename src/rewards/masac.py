@@ -24,6 +24,8 @@ SUPPORTED_MASAC_ENV_VERSIONS = (
 # Shared reference for gap scoring, independent of SUMO vehicle braking limits.
 LANE_CHANGE_REFERENCE_DECEL = 4.5
 FOLLOWING_WEIGHT = 0.1
+LEGACY_COMFORT_WEIGHT = 0.01
+LEGACY_LANE_CHANGE_WEIGHT = 1.0
 
 
 @dataclass(frozen=True)
@@ -38,7 +40,7 @@ class MASACRewardConfig:
     route_guidance: bool = False
     ttc_threshold: float = 3.0
     following_lookahead: float = 120.0
-    lane_change_weight: float = 1.0
+    lane_change_weight: float = 0.5
     rear_following: bool = True
     route_preparation: bool = True
 
@@ -54,16 +56,28 @@ class MASACRewardProtocol:
     merge_on_success: bool = True
     efficiency_weight: float = 0.01
     route_guidance_weight: float = 5.0
+    terminal_penalty_scale: float = 1.0
+    collision_penalty: float | None = None
+    comfort_weight: float = LEGACY_COMFORT_WEIGHT / 4
 
     def __post_init__(self):
-        for name in ("efficiency_weight", "route_guidance_weight"):
+        for name in ("efficiency_weight", "route_guidance_weight", "terminal_penalty_scale", "comfort_weight"):
             value = getattr(self, name)
             if not isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be finite and nonnegative")
+        if self.collision_penalty is not None and (
+            not isfinite(self.collision_penalty) or self.collision_penalty < 0
+        ):
+            raise ValueError("collision_penalty must be finite and nonnegative")
+
+    @classmethod
+    def from_checkpoint(cls, settings):
+        return cls(**{"comfort_weight": LEGACY_COMFORT_WEIGHT, **settings})
 
 
 LEGACY_MASAC_REWARD_PROTOCOL = MASACRewardProtocol(
     merge_on_success=False, efficiency_weight=0.05, route_guidance_weight=0.0,
+    comfort_weight=LEGACY_COMFORT_WEIGHT,
 )
 
 
@@ -145,7 +159,10 @@ class MASACRewards:
 
     def terminal(self, event):
         if self.config.task or event == STALLED_EVENT:
-            return event_reward(event, {"events": TASK_EVENTS})[1]
+            if event == "Collision" and self.protocol.collision_penalty is not None:
+                return -self.protocol.collision_penalty
+            value = event_reward(event, {"events": TASK_EVENTS})[1]
+            return value * self.protocol.terminal_penalty_scale if value < 0.0 else value
         return 0.0
 
     def settle_merge(self, ego_id, event):
@@ -166,6 +183,32 @@ class MASACRewards:
         closing_speed = behind_speed - ahead_speed
         ttc = max(gap, 0.0) / closing_speed if closing_speed > 0 else inf
         return gap_risk, gap_deficit(ttc, self.config.ttc_threshold)
+
+    def current_lane_risk(self, vehicle, ego_id, speed):
+        """Confirm front and rear safety independently of the reward switches."""
+        risk = 0.0
+        leader = vehicle.getLeader(ego_id, self.config.following_lookahead)
+        follower = vehicle.getFollower(ego_id, self.config.following_lookahead)
+        for neighbor, rear in ((leader, False), (follower, True)):
+            # Older TraCI uses None for an empty leader query only.
+            if neighbor is None and not rear:
+                continue
+            if neighbor is None:
+                raise ValueError("Missing follower measurement")
+            other, gap = neighbor
+            if not other:
+                if other != "" or gap != -1:
+                    raise ValueError("Invalid empty neighbor measurement")
+                continue
+            other_speed = vehicle.getSpeed(other)
+            min_gap = vehicle.getMinGap(other if rear else ego_id)
+            if not all(v is not None and isfinite(v) and v >= 0 for v in (other_speed, min_gap)):
+                raise ValueError("Invalid neighbor speed or minimum gap")
+            if gap is None or not isfinite(gap):
+                raise ValueError("Invalid neighbor gap")
+            behind, ahead = (other_speed, speed) if rear else (speed, other_speed)
+            risk = max(risk, *self._following_risks(gap + min_gap, behind, ahead))
+        return risk
 
     def before_step(self, conn, ego_id, control):
         vehicle = conn.vehicle
@@ -221,13 +264,13 @@ class MASACRewards:
                     )
                     self.pending_changes[ego_id] = change
             if self.config.lane_change and change and road == change.road:
-                risk = self._lane_change_risk(conn, ego_id, change, lane, speed)
+                risk = self.lane_change_risk(conn, ego_id, change, lane, speed)
 
         acceleration = vehicle.getAcceleration(ego_id) if self.config.comfort else None
         self.samples[ego_id] = values, acceleration, risk
 
     @staticmethod
-    def _lane_change_risk(conn, ego_id, change, lane, speed):
+    def lane_change_risk(conn, ego_id, change, lane, speed, *, require_valid=False):
         vehicle = conn.vehicle
         if lane == change.target_lane:
             # Left/right queries are relative to the *current* lane index.
@@ -235,13 +278,27 @@ class MASACRewards:
             position = vehicle.getLanePosition(ego_id)
             ego_length = vehicle.getLength(ego_id)
             risk = 0.0
-            for other in conn.lane.getLastStepVehicleIDs(f"{change.road}_{change.target_lane}"):
+            lane_id = vehicle.getLaneID(ego_id) if require_valid else f"{change.road}_{change.target_lane}"
+            occupants = conn.lane.getLastStepVehicleIDs(lane_id)
+            if require_valid and (
+                occupants is None or ego_id not in occupants
+                or not all(v is not None and isfinite(v) and v >= 0 for v in (position, ego_length))
+            ):
+                raise ValueError("Missing target-lane measurement")
+            for other in occupants:
                 if other == ego_id:
                     continue
-                delta = vehicle.getLanePosition(other) - position
+                other_position = vehicle.getLanePosition(other)
                 other_speed = vehicle.getSpeed(other)
+                if require_valid and not all(v is not None and isfinite(v) and v >= 0
+                                             for v in (other_position, other_speed)):
+                    raise ValueError("Invalid target-lane measurement")
+                delta = other_position - position
                 if delta >= 0:
-                    gap = delta - vehicle.getLength(other)
+                    length = vehicle.getLength(other)
+                    if require_valid and (length is None or not isfinite(length) or length <= 0):
+                        raise ValueError("Invalid target-lane vehicle length")
+                    gap = delta - length
                     required = required_gap(speed, other_speed)
                 else:
                     gap = -delta - ego_length
@@ -250,8 +307,10 @@ class MASACRewards:
             return risk
 
         if lane != change.source_lane:
+            if require_valid:
+                raise ValueError("Unverified lane-change position")
             return 0.0
-        return adjacent_lane_risk(vehicle, ego_id, change.direction, speed)
+        return adjacent_lane_risk(vehicle, ego_id, change.direction, speed, require_valid=require_valid)
 
     def _log_change(self, ego_id, change, now, event, reason=None):
         self.lane_change_events.append({
@@ -266,6 +325,15 @@ class MASACRewards:
         change = self.pending_changes.pop(ego_id, None)
         if change is not None and change.last_motion is not None:
             self._log_change(ego_id, change, now, event, reason)
+
+    @staticmethod
+    def lane_change_settled(conn, ego_id, lateral_speed=None):
+        vehicle = conn.vehicle
+        if lateral_speed is None:
+            lateral_speed = vehicle.getLateralSpeed(ego_id)
+        clearance = (conn.lane.getWidth(vehicle.getLaneID(ego_id)) - vehicle.getWidth(ego_id)) / 2
+        return (abs(lateral_speed) <= 0.05
+                and abs(vehicle.getLateralLanePosition(ego_id)) <= clearance + 1e-3)
 
     def _settle_lane_change(self, conn, ego_id, on_road, risk, terminal_event):
         change = self.pending_changes.get(ego_id)
@@ -289,18 +357,13 @@ class MASACRewards:
 
             if change.last_motion is not None:
                 if self.config.lane_change:
-                    risk = max(risk, self._lane_change_risk(
+                    risk = max(risk, self.lane_change_risk(
                         conn, ego_id, change, lane, vehicle.getSpeed(ego_id),
                     ))
                 if toward_target > 1e-6:
                     change.last_motion = now
                 if terminal_event is None:
-                    clearance = (conn.lane.getWidth(vehicle.getLaneID(ego_id))
-                                 - vehicle.getWidth(ego_id)) / 2
-                    settled = (
-                        abs(lateral_speed) <= 0.05
-                        and abs(vehicle.getLateralLanePosition(ego_id)) <= clearance + 1e-3
-                    )
+                    settled = self.lane_change_settled(conn, ego_id, lateral_speed)
                     if lane == change.target_lane and settled:
                         end_event, end_reason = "completed", "settled_in_target"
                     elif toward_target < -0.05 or (lane == change.source_lane and settled):
@@ -334,7 +397,7 @@ class MASACRewards:
         vehicle = conn.vehicle
         if self.config.comfort:
             delta = abs(vehicle.getAcceleration(ego_id) - acceleration)
-            values["comfort"] = -0.01 * min(1.0, delta)
+            values["comfort"] = -self.protocol.comfort_weight * min(1.0, delta)
 
         if self.config.merge and needs_merge and ego_id not in self.merged:
             current_road = vehicle.getRoadID(ego_id)

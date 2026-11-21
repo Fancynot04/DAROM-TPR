@@ -11,9 +11,43 @@ from src.envs.observation import RouteGoal, remaining_goal_distance
 from src.envs.route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES, RouteLaneNetwork
 from src.envs.sumo_world import SUMO_DIR
 from src.rewards.masac import (
-    LEGACY_MASAC_REWARD_PROTOCOL, MASACRewardConfig, MASACRewards, required_gap,
+    LEGACY_MASAC_REWARD_PROTOCOL, MASACRewardConfig, MASACRewardProtocol, MASACRewards, required_gap,
 )
 from train_masac import snapshot
+
+
+@pytest.mark.parametrize("delta, expected", [(0.4, -0.001), (1.5, -0.0025)])
+def test_default_comfort_penalty_scales_and_clips(delta, expected):
+    config = MASACRewardConfig(following=False, rear_following=False, lane_change=False,
+                               efficiency=False, merge=False)
+    tracker = MASACRewards(config)
+    vehicle = Mock()
+    vehicle.getAcceleration.side_effect = [0.0, delta]
+    conn = SimpleNamespace(vehicle=vehicle, simulation=Mock())
+    tracker.before_step(conn, "ego", SimpleNamespace(target_lane=None))
+    rewards = tracker.after_step(conn, "ego", on_road=True, needs_merge=False)
+    assert rewards["comfort"] == pytest.approx(expected)
+
+
+def test_terminal_penalty_scaling_preserves_success_and_team_rewards():
+    tracker = MASACRewards(MASACRewardConfig(), MASACRewardProtocol(terminal_penalty_scale=0.2))
+    assert tracker.terminal("Collision") == -100
+    for event in ("Missed Exit", "Stalled", "Timeout"):
+        assert tracker.terminal(event) == -80
+    assert tracker.terminal("Arrived") == 50
+    assert tracker.settle_team({"a": "Collision", "b": "Arrived"}) == 0
+    assert tracker.settle_team({"a": "Arrived", "b": "Arrived"}) == 100
+
+
+@pytest.mark.parametrize("scale,other_penalty", [(1.0, -400), (0.2, -80)])
+def test_collision_penalty_override_is_independent(scale, other_penalty):
+    protocol = MASACRewardProtocol(terminal_penalty_scale=scale, collision_penalty=1000)
+    tracker = MASACRewards(MASACRewardConfig(), protocol)
+    assert tracker.terminal("Collision") == -1000
+    assert tracker.terminal("Arrived") == 50
+    for event in ("Missed Exit", "Stalled", "Timeout"):
+        assert tracker.terminal(event) == other_penalty
+    assert MASACRewards(MASACRewardConfig(task=False), protocol).terminal("Collision") == 0
 
 
 def test_lane_change_plan_uses_all_natural_successors():
@@ -292,7 +326,7 @@ def test_lane_change_risk_increments_and_stable_target(lane_change):
         (None, 1, 0, 0.3, None),
     ]
     rewards = [tick({"a": step})["a"] for step in steps]
-    assert rewards == pytest.approx([-0.2, -0.2, -0.4, 0, 0])
+    assert rewards == pytest.approx([-0.1, -0.1, -0.2, 0, 0])
     started, completed = tracker.lane_change_events
     assert started["event"] == "started"
     assert completed["event"] == "completed"
@@ -306,17 +340,17 @@ def test_lane_change_collision_and_reversal_are_independent(lane_change):
     tracker, tick = lane_change
     assert tick({
         "a": (1, 0, 1, 0.2, None), "b": (1, 0, 1, 0.1, None),
-    }) == pytest.approx({"a": -0.2, "b": -0.1})
+    }) == pytest.approx({"a": -0.1, "b": -0.05})
     assert tick({
         "a": (1, 0, 0, 0.7, "Collision"), "b": (1, 0, 1, 0.4, None),
-    }) == pytest.approx({"a": -0.5, "b": -0.3})
+    }) == pytest.approx({"a": -0.25, "b": -0.15})
     assert set(tracker.pending_changes) == {"b"}
     assert tick({"b": (None, 0, -1, 0.25, None)}) == {"b": 0}
     collision, reversal = tracker.lane_change_events[-2:]
     assert collision["reason"] == "Collision"
-    assert collision["cumulative_penalty"] == pytest.approx(-0.7)
+    assert collision["cumulative_penalty"] == pytest.approx(-0.35)
     assert reversal["reason"] == "reversed_or_returned"
-    assert reversal["cumulative_penalty"] == pytest.approx(-0.4)
+    assert reversal["cumulative_penalty"] == pytest.approx(-0.2)
     assert not tracker.pending_changes
     assert tracker.terminal("Collision") == -500
 

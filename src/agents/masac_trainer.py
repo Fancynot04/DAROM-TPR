@@ -184,6 +184,7 @@ class MASACTrainer:
             "team_critic_loss": loss.item(),
             "team_valid_samples": valid,
             "team_mean_target": targets.mean().item(),
+            "team_target_std": targets.std(unbiased=False).item(),
             "team_mean_q": ((q1.detach() + q2.detach()) / 2).mean().item(),
         }
 
@@ -272,6 +273,7 @@ class MASACTrainer:
                     valid_agents=count,
                     mean_q=((((q1.detach() + q2.detach()) / 2) * acted_mask).sum().item() / count),
                     mean_target=(targets * acted_mask).sum().item() / count,
+                    target_std=targets[acted_mask.bool()].std(unbiased=False).item(),
                 )
 
         if self.team_critic is not None:

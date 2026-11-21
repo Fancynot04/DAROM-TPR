@@ -40,30 +40,34 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 | `merge` | 需要汇入的任务沿用原判定。O3 Ego 完全进入 E75 主路车道或进入 E76 时只标记完成。该车成功到达自己的出口时另付 +25 一次，碰撞、错过出口、停滞和超时均为 0。 |
 | `following` | 每个活跃控制步用步前真实状态计算净间距风险和 TTC 风险，结算 −0.1 × max(C_gap, C_TTC)。安全时距 1.5 s，TTC 阈值 3 s，前车查询前瞻 120 m。 |
 | `rear-following` | 按同样的公式和权重独立扣分。用后车速度计算 1.5 s 安全间距，用后车速度减 Ego 速度计算闭合速度。前后车可在同一步各扣最多 0.1。无后车时该项为 0，可用 `--no-reward-rear-following` 单独关闭。 |
-| `lane-change` | 实际横移开始后，每步按固定目标车道的前后净间距更新风险峰值，只对峰值的新增部分乘 −1.0 扣分。反应时间 1.5 s，最小缓冲 2 m，参考减速度 4.5 m/s²。车身完成横移前，同向重复动作不会提前发往再下一条车道。 |
+| `lane-change` | 实际横移开始后，每步按固定目标车道的前后净间距更新风险峰值，只对峰值的新增部分乘 −0.5 扣分。反应时间 1.5 s，最小缓冲 2 m，参考减速度 4.5 m/s²。车身完成横移前，同向重复动作不会提前发往再下一条车道。 |
 | `efficiency` | 每个活跃控制步按步前速度结算 +0.01 × min(1, v/20)，速度单位 m/s。 |
-| `comfort` | 有实测步前和步后加速度时，结算 −0.01 × clip(加速度差的绝对值, 0, 1)。0.01 为待测权重。 |
+| `comfort` | 有实测步前和步后加速度时，结算 −0.0025 × clip(加速度差的绝对值, 0, 1)。新训练的权重可用 `--reward-comfort-weight` 设置。 |
 | `team` | 双车均到达指定出口时，回合一次性记录 +100。环境通过 `env.team_reward` 提供本步值，日志和评估 JSON 用 `team_reward` 记录回合值。独立团队 Twin-Q 学习该回报，每辆 Actor 最大化个人 Q 加团队 Q。Actor 团队权重用 `--team-q-weight` 设置，默认 1.0。 |
 | `route-guidance` | 默认 0。加 `--reward-route-guidance` 后，每车首次实际通过任务允许的关键连接时 +5。可用 `--reward-route-guidance-weight` 设置权重。无匹配规则的任务为 0。 |
-| `route-preparation` | 独立的逐步惩罚，默认交织区 0.001，驶离准备区 0.002。按距阶段末端的紧迫度和局部必要换道数计算，仅在有安全换道机会而尚未实际执行必要换道时扣分。 |
+| `route-preparation` | 安全前进时按准备程度和首次前进距离发放，默认每步上限 +0.005。交织区和驶离区独立计算准备程度，E75 不发路线准备奖金。 |
+
+`--terminal-penalty-scale` 缩放个人任务项中的负终止奖励，默认 1.0。设为 0.2 时，碰撞为 −100，错过出口、停滞和超时均为 −80。`--collision-penalty 1000` 可将碰撞单独设为 −1000，显式指定的碰撞值优先于整体缩放。个人到达、汇入和团队奖励继续按上表结算。这些参数随 `reward_protocol` 写入 checkpoint，评估恢复其存档值。旧 checkpoint 缺少这些字段时采用缩放因子 1.0 和原碰撞值。训练更新日志中的 `target_std` 和 `team_target_std` 分别记录个人和团队 Critic 的批内 TD 目标标准差。
+
+舒适度权重也保存在 `reward_protocol` 中。评估和续训恢复存档权重，旧 checkpoint 缺少该字段时使用 0.01。
 
 Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 为 [1,0]，D3 为 [0,1]）。SUMO 启动时关闭等待、高速路错车道、断路、双向车道及等候接载的 teleport，车辆碰撞使用 `remove` 策略。Ego 无故移除时报错。个人回报包括已启用的个人模块及显式开启的旧 USP，可从 `reward_components` 和 USP 统计追溯。逐步信息、`--trace-controls` 训练明细和回合汇总分别记录 `task`、`merge`、`route_guidance`，团队回报单独记账。
 
 路线规则位于 [`DEFAULT_ROUTE_GUIDANCE_RULES`](src/envs/route_lane_plan.py)。以该 Ego 实际 SUMO 路线的完整外部 edge 序列匹配 `route`，因此同一出口的不同进场路线可各自配置。新增规则填写 `route`、关键分流的相邻上游和下游 edge `critical_connection`，以及一个或多个实际可接受的 `[上游车道 ID, 下游车道 ID]` 组成的 `accepted_connections`。现有示例匹配 `O3 → E75 → E76 → E77 → D3`，仅接受 `E76_0 → E77_0`，经 `E76_0 → E77_1` 为 0。由实际经过的 SUMO 内部车道识别连接，保持车道自然通过也计分，每辆车每回合最多一次。直接构造环境时可通过 `route_guidance_rules` 传入规则。
 
-路线准备、效率和一次性路线引导分别记账。路线准备实现
-`−weight × clip(1 − distance / preparation_distance, 0, 1) × min(local_changes / max_local_changes, 1)`。
-O3→D3 的交织区取 E76 末端 300 m，要求接入 `E77_0`。驶离准备区取 E77 的 172.35 m，要求接入 `D3_0`。两个阶段的合法车道最大局部换道数分别为 4 和 5。距离采用当前阶段上游车道到连接入口的剩余纵向米数。汇入 E75、非配置阶段、不可达车道和局部需求为零的状态都没有该项扣分。300 m 是尚未筛选的初始配置。
+新训练的路线准备奖金按首次前进距离发放，公式为 `cap × 准备程度 × min(1, 首次前进距离 / 参考步长)`。准备程度为 `clip(1 − n / N, 0, 1)`。`n` 是阶段内剩余的最少合法主动换道数，`N` 是阶段可达车道的最大需求。目标已满足时准备程度为 1，最大需求时为 0，不可达时奖金为 0。阶段内所有合法车道都满足目标时，`N=0` 按准备程度 1 结算。参考步长取 120 km/h 在 0.1 s 内行驶的距离，约 3.333 m。默认单步奖金上限 `0.005` 可用 `--reward-route-preparation-bonus-cap` 调整。一次性路线引导 `+5` 默认关闭。
 
-安全机会在提交当步动作前读取 SUMO 实时相邻车道前后车、速度和保险杠间距，使用与换道风险项相同的安全间距公式。只有合法且能减少局部换道需求的相邻车道才参与判定。无安全间隙或测量不可用时为零。通过步前和步后实测横移识别实际换道，只有请求时仍按原样结算。Actor 仍可使用自身状态、既有的路线剩余距离和换道需求、延迟邻车观测。奖励另用的实时目标车道间隙和阶段开关不直接输入 Actor。
+O3→D3 的整段 E75 是准备段，路线准备奖金为 0，沿用汇入奖励。交织区包括任务连接 J104、整段 E76（882.60 m）和任务连接 J105，目标是接入 `E77_0`，`N=4`。驶离区是整段 E77（172.35 m），目标是接入 `D3_0`，`N=5`。每步按步首实际车道归区。J104 按已选择的下游 E76 车道计算需求，J105 按实际内部车道识别的连接判定是否接入 `E77_0`。
 
-可用 `--no-reward-route-preparation` 总关，或用 `--reward-route-preparation-weaving-weight` 和 `--reward-route-preparation-exit-weight` 独立设置，权重为 0 时该阶段无扣分。用 `--route-preparation-stages FILE.json` 提供与 [默认阶段](src/envs/route_preparation.py) 同结构的完整路线列表。D2 可为对应完整路线配置 `["E82", "D2"]`，列出经核实可进入的 `D2_0`、`D2_1`、`D2_2` 和该阶段准备距离。目前默认仅配置 O3→D3。训练日志和 checkpoint 保存开关、权重和阶段列表。评估按 checkpoint 恢复，缺少路线准备配置的旧 checkpoint 关闭该项。
+发放需要步首和步末可确认的当前车道前后车安全，以及沿任务路线的前向位移。每辆车按回合记录在任务路线上的历史最远位置，越过该位置的新增距离才计奖。因风险未发奖的已行驶距离同样计入最远位置。停车、碰撞、teleport、异常位移或所需观测缺失时为 0。安全直行可按已有准备程度拿奖金。实际横移还检查实时目标车道风险，沿用源车道准备程度，稳定进入目标车道后才切换。单纯发出请求时按当前车道结算。
 
-训练回合日志和评估 JSON 的 `route_preparation_diagnostics` 按车和阶段保存开关、准备区步数、安全机会步数、扣分步数、累计扣分、不可达步数、首次扣分位置和最后一次使局部换道需求归零的稳定完成位置。后者没有观察到时保留 `null`。评估逐种子 CSV 同样保存这些记录，`--trace-controls` 可额外输出步级明细。
+用 `--no-reward-route-preparation` 可关闭该项。用 `--route-preparation-stages FILE.json` 可提供与 [默认阶段](src/envs/route_preparation.py) 同结构的完整路线列表，`include_adjacent_connections` 将相关任务连接纳入阶段。checkpoint 和评估输出保存模式、分区、奖金上限和适用的参考步长。新训练默认 `progress_bonus`。旧 checkpoint 的 `continuous_bonus` 继续按步发固定奖金，没有模式字段的旧配置按 `legacy_penalty` 复现存档分区和负惩罚。缺少路线准备配置的旧 checkpoint 关闭该项。可用 `--reward-route-preparation-mode` 显式选择模式。旧的 `--reward-route-preparation-weaving-weight` 和 `--reward-route-preparation-exit-weight` 会选择负惩罚模式，该模式以 `preparation_distance_m` 限定结算距离，缺省为阶段所在外部路段的全长。
+
+`route_preparation` 独立记账。控制 trace 和评估轨迹保存步首阶段、实际车道或连接、步末车道、`n`、`N`、准备程度、前后时点的风险、实际前进距离、首次前进距离和实发金额。回合日志和评估结果按车和阶段记录计奖距离和累计奖金。相同准备程度下安全通过同一段路，未折扣路线奖金按距离累计。低速时舒适度扣分仍可能超过速度奖和路线奖金之和。
 
 团队 Q 按共享 SUMO 步折扣。一辆 Ego 先到达时，团队价值继续沿后续状态传递，直至全员到达或任意 Ego 失败。Replay 区分已到达与尚未出发；个人奖励和团队奖励分别写入日志。
 
-例如，追加 `--no-reward-comfort --no-reward-team` 可关闭舒适度和团队奖励。前后车共用 `--reward-ttc-threshold` 和 `--reward-following-lookahead`，换道权重用 `--reward-lane-change-weight` 设置。开关与参数保存在 checkpoint，评估自动复用。旧 checkpoint 缺少 `rear_following` 开关时，评估按关闭处理。单步信息分别提供 `gap_risk`、`ttc_risk`、`following_reward` 和 `rear_gap_risk`、`rear_ttc_risk`、`rear_following_reward`，训练可用 `--trace-controls` 记录。换道事件写入回合训练日志和评估 JSON，包含开始、完成或中断时刻、目标车道、风险峰值与累计扣分。
+例如，追加 `--no-reward-comfort --no-reward-team` 可关闭舒适度和团队奖励。前后车共用 `--reward-ttc-threshold` 和 `--reward-following-lookahead`。新训练的换道风险扣分权重默认为 `0.5`，可用 `--reward-lane-change-weight` 设置。评估和续训复用存档的换道权重，缺少该字段时按历史值 `1.0`。旧 checkpoint 缺少 `rear_following` 开关时，评估按关闭处理。单步信息分别提供 `gap_risk`、`ttc_risk`、`following_reward` 和 `rear_gap_risk`、`rear_ttc_risk`、`rear_following_reward`，训练可用 `--trace-controls` 记录。换道事件写入回合训练日志和评估 JSON，包含开始、完成或中断时刻、目标车道、风险峰值与累计扣分。
 
 每辆 Actor 的首维是到该车任务终点的沿路线剩余米数，沿用编码器固定的 1000 m 缩放。环境从双 Ego 路线文件中各自的 `<trip>` 读取目标 Edge 和 `arrivalPos`，默认取末端，支持 `max`、`center` 和数值位置。可用 `MultiEgoEnv(route_file=...)` 指定同一路网的其他双 Ego 路线。活动 Ego 的无效距离会报告车辆、道路、路线和目标。Critic 仍使用实时累计行驶距离。
 

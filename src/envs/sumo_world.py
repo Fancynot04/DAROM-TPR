@@ -7,6 +7,7 @@ from sumolib import checkBinary
 
 # 项目根目录下的 SUMO 文件
 SUMO_DIR = Path(__file__).resolve().parents[2] / "sumo_new"
+STEP_LENGTH_S = 0.1
 
 
 class SumoWorld:
@@ -21,7 +22,7 @@ class SumoWorld:
         self.gui = gui
         self.warning_log = warning_log
 
-        self.step_length = 0.1
+        self.step_length = STEP_LENGTH_S
         self.label = "o3_d3_world"
 
         self.net_file = SUMO_DIR / "Antwerp.net.xml"

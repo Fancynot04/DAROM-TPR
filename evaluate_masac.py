@@ -14,8 +14,9 @@ import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
 from src.envs.stalled import stalled_block_grace_for_version
+from src.envs.route_preparation import checkpoint_preparation_settings
 from src.rewards.masac import (
-    LEGACY_MASAC_ENV_VERSION, LEGACY_MASAC_REWARD_PROTOCOL, MASACRewardConfig,
+    LEGACY_LANE_CHANGE_WEIGHT, LEGACY_MASAC_ENV_VERSION, LEGACY_MASAC_REWARD_PROTOCOL, MASACRewardConfig,
     MASACRewardProtocol, MASAC_ENV_VERSION, SUPPORTED_MASAC_ENV_VERSIONS, TARGET_EXIT_DIM,
 )
 from src.visualization.gui_camera import (
@@ -63,9 +64,10 @@ def evaluate(args):
         if components is not None:
             components = {**components, "route_guidance": False}
     else:
-        reward_protocol = MASACRewardProtocol(**protocol_settings)
+        reward_protocol = MASACRewardProtocol.from_checkpoint(protocol_settings)
         route_guidance_rules = reward_config["route_guidance_rules"]
-    preparation_settings = reward_config.get("route_preparation_settings")
+    preparation_settings = checkpoint_preparation_settings(reward_config.get("route_preparation_settings"))
+    safety_reward = {"lane_change_weight": LEGACY_LANE_CHANGE_WEIGHT, **reward_config.get("safety_reward", {})}
     if components is not None:
         components = {"rear_following": False, **components}
         components["route_preparation"] = (
@@ -103,7 +105,7 @@ def evaluate(args):
         ),
         gui=gui_enabled,
         reward_config=(
-            MASACRewardConfig(**components, **reward_config.get("safety_reward", {}))
+            MASACRewardConfig(**components, **safety_reward)
             if components is not None else None
         ),
         reward_protocol=reward_protocol,
@@ -401,6 +403,7 @@ def evaluate(args):
         "training_seed": checkpoint.get("config", {}).get("seed"),
         "training_config": checkpoint.get("config", {}),
         "reward_protocol": asdict(reward_protocol) if components is not None else None,
+        "safety_reward": safety_reward if components is not None else None,
         "route_guidance_rules": route_guidance_rules,
         "route_preparation": {
             "enabled_in_checkpoint": bool(components and components["route_preparation"]),

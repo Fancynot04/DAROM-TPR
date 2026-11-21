@@ -1,3 +1,5 @@
+import gzip
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,10 +11,12 @@ from src.agents.masac import MultiAgentGaussianActor
 from src.envs.multi_ego_env import MultiEgoEnv
 from src.envs.route_lane_plan import RouteLaneNetwork
 from src.envs.route_preparation import (
-    DEFAULT_ROUTE_PREPARATION_STAGES, DEFAULT_ROUTE_PREPARATION_WEIGHTS, RoutePreparation,
+    DEFAULT_REFERENCE_STEP_M, DEFAULT_ROUTE_PREPARATION_STAGES, DEFAULT_ROUTE_PREPARATION_WEIGHTS,
+    PREPARATION_BONUS, PREPARATION_PROGRESS_BONUS, RoutePreparation,
 )
+from src.evaluation_trajectory import EvaluationTrajectory
 from src.experiment_tracking import sha256
-from src.rewards.masac import MASACRewardConfig
+from src.rewards.masac import LaneChange, MASACRewardConfig, MASACRewards
 from train_masac import AGENT_IDS, initialize_actor_weights
 
 
@@ -49,6 +53,57 @@ def test_stage_local_demand_urgency_and_normalization():
     assert exit_phase.penalty(0, None, True, False) == 0
     assert exit_phase.penalty(0, 5, False, False) == 0
     assert exit_phase.penalty(0, 5, True, None) == 0
+
+
+def test_default_zones_cover_both_weaving_connectors_and_full_edges():
+    network = RouteLaneNetwork(NETWORK)
+    plan = network.plan(O3_D3, 'passenger')
+    tracker = setup()
+    state = SimpleNamespace()
+    vehicle = SimpleNamespace(
+        getRoadID=lambda ego: state.road, getRouteIndex=lambda ego: state.index,
+        getLaneID=lambda ego: state.lane_id, getLaneIndex=lambda ego: state.lane,
+        getLanePosition=lambda ego: state.position, getLateralSpeed=lambda ego: 0.0,
+        getSpeed=lambda ego: 10.0, getRightLeaders=lambda ego: (), getRightFollowers=lambda ego: (),
+    )
+    lengths = {lane['id']: float(lane['length']) for lanes in network.lanes.values() for lane in lanes.values()}
+    conn = SimpleNamespace(vehicle=vehicle, lane=SimpleNamespace(getLength=lengths.__getitem__),
+                           simulation=SimpleNamespace(getTime=lambda: 10.0))
+
+    def record(zone_tracker, index, road, lane, position):
+        state.index, state.road, state.lane, state.position = index, road, lane, position
+        state.lane_id = f'{road}_{lane}'
+        sample = zone_tracker.before_step(conn, 'ego_1', plan.position(vehicle, 'ego_1'), None)
+        penalty = zone_tracker.after_step(conn, 'ego_1', sample, True, None) if sample is not None else 0.0
+        return sample, penalty, zone_tracker.step_info.get('ego_1')
+
+    assert record(tracker, 1, 'E75', 2, 50)[2]['phase'] == 'preparation'
+    incoming, reward, row = record(tracker, 1, ':J104_0', 2, 1)
+    assert row['phase'] == 'weaving' and incoming.demand == 1 and reward == 0
+    weaving, reward, row = record(tracker, 2, 'E76', 1, 100)
+    assert row['phase'] == 'weaving' and weaving.phase.distance_m == pytest.approx(882.60)
+    assert weaving.distance_m > 300 and reward < 0
+    outgoing, reward, row = record(tracker, 2, ':J105_0', 0, 1)
+    assert row['phase'] == 'weaving' and outgoing.demand == 0 and reward == 0
+    wrong, reward, row = record(tracker, 2, ':J105_0', 1, 1)
+    assert row['phase'] == 'weaving' and wrong.demand is None and reward == 0
+    assert record(tracker, 3, 'E77', 1, 0)[2]['phase'] == 'exit'
+    assert record(tracker, 3, ':J106_0', 0, 1)[2] is None
+    assert tracker.diagnostics['ego_1']['preparation_edge_steps'] == 1
+    assert tracker.diagnostics['ego_1']['phases']['weaving']['preparation_zone_steps'] == 4
+
+    config = settings()
+    config['stages'] = [{'route': list(O3_D3), 'phases': [
+        {'kind': 'weaving', 'critical_connection': ['E76', 'E77'],
+         'accepted_entry_lanes': ['E77_0'], 'preparation_distance_m': 300},
+    ]}]
+    legacy = RoutePreparation(config)
+    legacy.configure('ego_1', network, plan)
+    assert record(legacy, 1, 'E75', 2, 50)[2] is None
+    assert record(legacy, 1, ':J104_0', 2, 1)[2] is None
+    assert record(legacy, 2, 'E76', 1, 100)[2] is None
+    assert record(legacy, 2, ':J105_0', 0, 1)[2] is None
+    assert record(legacy, 2, 'E76', 1, 750)[1] < 0
 
 
 def test_zero_weight_unconfigured_route_and_custom_d2_phase():
@@ -122,8 +177,187 @@ def test_pre_action_gaps_and_physical_motion_gate():
     assert not tracker.before_step(conn, 'ego_1', (3, 1), None).safe_opportunity
 
 
-@pytest.mark.parametrize('enabled,expected_penalty', [(True, True), (False, False)])
-def test_real_transition_keeps_speed_and_preparation_independent(tmp_path, enabled, expected_penalty):
+@pytest.fixture
+def bonus_step(request):
+    network = RouteLaneNetwork(NETWORK)
+    mode = getattr(request, 'param', PREPARATION_PROGRESS_BONUS)
+    tracker = RoutePreparation({'mode': mode, 'stages': DEFAULT_ROUTE_PREPARATION_STAGES})
+    tracker.configure('ego_1', network, network.plan(O3_D3, 'passenger'))
+    rewards = MASACRewards(MASACRewardConfig())
+    state = SimpleNamespace(index=2, road='E76', lane=1, along=50.0, speed=10.0, lateral=0.0,
+                            time=1.0, leader=None, follower=('', -1), adjacent=(), offset=0.0)
+    vehicle = SimpleNamespace(
+        getRoute=lambda _: O3_D3, getRouteIndex=lambda _: state.index, getRoadID=lambda _: state.road,
+        getLaneID=lambda _: f'{state.road}_{state.lane}', getLaneIndex=lambda _: state.lane,
+        getLanePosition=lambda ego: state.along if ego == 'ego_1' else state.along + 100,
+        getSpeed=lambda _: state.speed, getLateralSpeed=lambda _: state.lateral,
+        getLeader=lambda *_: state.leader, getFollower=lambda *_: state.follower,
+        getRightLeaders=lambda _: state.adjacent, getRightFollowers=lambda _: (),
+        getLateralLanePosition=lambda _: state.offset, getWidth=lambda _: 2,
+        getMinGap=lambda _: 2.5, getLength=lambda _: 4,
+    )
+    lengths = {lane['id']: float(lane['length']) for lanes in network.lanes.values() for lane in lanes.values()}
+    conn = SimpleNamespace(vehicle=vehicle, simulation=SimpleNamespace(getTime=lambda: state.time),
+                           lane=SimpleNamespace(getWidth=lambda _: 3.2, getLength=lengths.__getitem__,
+                                                getLastStepVehicleIDs=lambda _: ('ego_1',)))
+
+    def tick(change=None, complete=None, unavailable_reason=None, **updates):
+        sample = tracker.before_bonus(conn, 'ego_1', rewards)
+        candidate = tracker.bonus_change('ego_1', change)
+        target = tracker.target_risk(conn, 'ego_1', sample.motion, candidate, rewards)
+        state.time += 0.1
+        state.along += state.speed * 0.1
+        if 'started' in updates:
+            change.last_motion = state.time
+            del updates['started']
+        vars(state).update(updates)
+        reward = tracker.after_bonus(conn, 'ego_1', sample, rewards, candidate, target,
+                                     complete, unavailable_reason)
+        return reward, tracker.step_info['ego_1']
+
+    return state, tracker, tick
+
+
+@pytest.mark.parametrize('speed,position', [(1.0, 1.0), (25.0, 865.0)])
+def test_bonus_scales_with_distance_at_equal_readiness(bonus_step, speed, position):
+    state, _, tick = bonus_step
+    state.speed, state.along = speed, position
+    bonus, row = tick()
+    assert bonus == pytest.approx(0.00375 * speed * 0.1 / DEFAULT_REFERENCE_STEP_M)
+    assert (row['local_lane_changes'], row['normalization'], row['readiness']) == (1, 4, 0.75)
+    assert row['progress_m'] == pytest.approx(speed * 0.1)
+    assert row['first_progress_m'] == pytest.approx(row['progress_m'])
+
+
+@pytest.mark.parametrize('bonus_step', [PREPARATION_BONUS], indirect=True)
+def test_saved_continuous_mode_still_pays_the_fixed_bonus(bonus_step):
+    state, _, tick = bonus_step
+    state.speed = 2.0
+    reward, row = tick()
+    assert reward == pytest.approx(0.00375)
+    assert 'first_progress_m' not in row
+
+
+def test_only_first_progress_earns_bonus(bonus_step):
+    state, _, tick = bonus_step
+    state.lane = 0
+    assert tick()[0] == pytest.approx(0.0015)
+    assert tick(along=50.25)[0] == 0
+    reward, row = tick()
+    assert row['progress_m'] == pytest.approx(1.0)
+    assert row['first_progress_m'] == pytest.approx(0.25)
+    assert reward == pytest.approx(0.000375)
+    state.leader = ('leader', -2.4)
+    assert tick()[0] == 0
+    state.leader = None
+    assert tick(along=51.25)[0] == 0
+    assert tick()[0] == 0
+    assert tick()[0] == pytest.approx(0.0015)
+
+
+def test_parallel_connector_cannot_reset_progress(bonus_step):
+    state, _, tick = bonus_step
+    state.index, state.road, state.lane, state.along = 2, ':J105_0', 1, 1.0
+    assert tick()[0] == 0
+    state.lane, state.along = 0, 1.0
+    assert tick()[1]['first_progress_m'] == pytest.approx(0)
+    assert tick()[0] == pytest.approx(0.0015)
+
+
+def test_recrossing_junction_only_pays_for_new_distance(bonus_step):
+    state, _, tick = bonus_step
+    state.lane, state.along = 0, 882.1
+    assert tick(road=':J105_0', along=0.5)[0] == pytest.approx(0.0015)
+    assert tick(road='E76', along=882.1)[0] == 0
+    assert tick(road=':J105_0', along=0.25)[0] == 0
+    assert tick()[1]['first_progress_m'] == pytest.approx(0.75)
+
+
+def test_progress_bonus_respects_step_cap(bonus_step):
+    state, _, tick = bonus_step
+    state.lane, state.speed = 0, 120 / 3.6
+    reward, row = tick(along=state.along + DEFAULT_REFERENCE_STEP_M + 0.03)
+    assert row['first_progress_m'] > DEFAULT_REFERENCE_STEP_M
+    assert reward == pytest.approx(0.005)
+
+
+def test_bonus_safety_progress_and_missing_data(bonus_step):
+    state, _, tick = bonus_step
+    state.lane, state.adjacent = 0, [('neighbor', -2.4)]
+    assert tick()[0] == pytest.approx(0.0015)
+    state.lane = 4
+    bonus, row = tick()
+    assert bonus == 0 and row['readiness'] == 0
+    state.lane = 0
+    state.speed = 0
+    bonus, row = tick()
+    assert bonus == 0 and row['progress_m'] == 0 and not row['advancing']
+    state.speed = 10
+    assert tick(along=500)[1]['progress_m'] is None
+    assert tick(along=499.5)[1]['progress_m'] is None
+    bonus, row = tick(follower=None)
+    assert bonus == 0 and row['safety'] == 'unknown'
+    state.follower = ('rear', -2.4)
+    bonus, row = tick()
+    assert bonus == 0 and row['safety'] == 'unsafe'
+    state.follower = ('', -1)
+    state.leader = ('leader', -2.4)
+    assert tick()[1]['safety'] == 'unsafe'
+    state.leader = None
+    for reason in ('Collision', 'teleport'):
+        bonus, row = tick(unavailable_reason=reason)
+        assert bonus == 0 and row['unavailable_reason'] == reason
+
+
+def test_bonus_uses_source_until_stable_and_checks_live_target_risk(bonus_step):
+    state, _, tick = bonus_step
+    request = LaneChange('E76', 1, 0, -1, deadline=5, max_risk=1)
+    state.adjacent = [('neighbor', -2.4)]
+    bonus, row = tick(request)
+    assert bonus == pytest.approx(0.001125)
+    assert row['actual_lateral_motion'] is False
+    bonus, row = tick(request, lateral=-0.2, started=True)
+    assert bonus == 0 and row['target_lane_risk_after'] > 0
+    assert request.max_risk == 1
+    state.adjacent = ()
+    bonus, row = tick(request, lane=0, lateral=-0.2, offset=1.0)
+    assert bonus == pytest.approx(0.001125) and row['local_lane_changes'] == 1
+    bonus, row = tick(lateral=0.0, offset=0.8)
+    assert bonus == pytest.approx(0.001125) and row['local_lane_changes'] == 1
+    completion = {'road': 'E76', 'source_lane': 1, 'target_lane': 0, 'time': 1.5}
+    bonus, row = tick(complete=completion, offset=0.0)
+    assert bonus == pytest.approx(0.0015) and row['local_lane_changes'] == 0
+
+
+def test_bonus_connector_demand_and_all_lanes_ready(bonus_step):
+    state, tracker, tick = bonus_step
+    state.index, state.road, state.lane, state.along = 1, ':J104_0', 2, 1.0
+    bonus, row = tick()
+    assert bonus == pytest.approx(0.001125)
+    assert row['connection'] == ('E75_2', 'E76_1')
+    state.index, state.road, state.lane, state.along = 2, ':J105_0', 1, 1.0
+    bonus, row = tick()
+    assert bonus == 0 and row['readiness'] is None
+    assert row['connection'] == ('E76_0', 'E77_1')
+    state.lane, state.along = 0, 2.0
+    assert tick()[0] == pytest.approx(0.0015)
+    network = RouteLaneNetwork(NETWORK)
+    all_ready = {'route': list(O3_D3), 'phases': [
+        {'kind': 'weaving', 'critical_connection': ['E75', 'E76'],
+         'accepted_entry_lanes': [f'E76_{i}' for i in range(5)]},
+    ]}
+    tracker.reset(('ego_1',))
+    tracker.stages[O3_D3] = all_ready['phases']
+    tracker.preparation_edges.clear()
+    tracker.configure('ego_1', network, network.plan(O3_D3, 'passenger'))
+    state.index, state.road, state.lane, state.along = 1, 'E75', 2, 50
+    bonus, row = tick()
+    assert bonus == pytest.approx(0.0015)
+    assert (row['local_lane_changes'], row['normalization'], row['readiness']) == (0, 0, 1.0)
+
+
+@pytest.mark.parametrize('enabled', [True, False])
+def test_real_transition_keeps_speed_and_preparation_independent(tmp_path, enabled):
     cfg = MASACRewardConfig(route_preparation=enabled, lane_change=False)
     route_file = tmp_path / 'no-traffic.rou.xml'
     route_file.write_text("""<routes>
@@ -138,7 +372,7 @@ def test_real_transition_keeps_speed_and_preparation_independent(tmp_path, enabl
         conn.vehicle.moveTo('ego_1', lane, 100)
         _, rewards, _, _, infos = env.step({'ego_1': [0, 0]})
         step = infos['ego_1']['reward_components']
-        assert (step['route_preparation'] < 0) is expected_penalty
+        assert step['route_preparation'] == pytest.approx(0.0009 if enabled else 0)
         assert step['efficiency'] == pytest.approx(0.005)
         assert step['route_guidance'] == 0.0
         assert rewards['ego_1'] == pytest.approx(sum(step.values()))
@@ -146,8 +380,149 @@ def test_real_transition_keeps_speed_and_preparation_independent(tmp_path, enabl
         assert diagnostics['enabled'] is enabled
         if enabled:
             stats = diagnostics['phases']['exit']
-            assert stats['preparation_zone_steps'] == stats['safe_opportunity_steps'] == stats['penalty_steps'] == 1
-            assert stats['first_penalty']['distance_m'] == pytest.approx(72.35)
+            assert stats['preparation_zone_steps'] == stats['safe_progress_steps'] == stats['bonus_steps'] == 1
+            assert infos['ego_1']['route_preparation']['lane_id'] == lane
+    finally:
+        env.close()
+
+
+def test_real_weaving_boundaries_are_counted_once(tmp_path):
+    route_file = tmp_path / 'boundary.rou.xml'
+    route_file.write_text("""<routes>
+        <trip id="ego_1" from="O3" to="D3" depart="0" departLane="0" departSpeed="10"/>
+        <trip id="ego_2" from="O3" to="D3" depart="60" departLane="0" departSpeed="10"/>
+    </routes>""")
+    env = MultiEgoEnv(reward_config=MASACRewardConfig(), route_file=route_file, collect_control_trace=True)
+    trace = EvaluationTrajectory(tmp_path / 'trajectory.jsonl.gz', AGENT_IDS)
+    try:
+        env.reset(seed=42)
+        conn = env.world.conn
+        trace.reset(42, conn.getVersion()[1])
+        rows = []
+        for lane, finish in (('E75_2', 'E76'), ('E76_0', 'E77')):
+            conn.vehicle.moveTo('ego_1', lane, conn.lane.getLength(lane) - 0.5)
+            for _ in range(100):
+                lane_before = conn.vehicle.getLaneID('ego_1')
+                actions = {'ego_1': [0, 0]}
+                before = trace.positions(conn.vehicle, actions)
+                _, rewards, _, _, infos = env.step(actions)
+                trace.step(env, len(rows), actions, before, rewards, infos, {})
+                info = infos['ego_1']
+                row = info['route_preparation']
+                assert row is not None and row['lane_id'] == lane_before
+                assert info['control_trace']['route_preparation'] == row
+                assert info['reward_components']['route_preparation'] == row['reward']
+                assert row['advancing'] and row['safety'] == 'safe', row
+                rows.append(row)
+                if info['road_id'] == finish and row['road'] == finish:
+                    break
+            else:
+                pytest.fail(f'Did not complete passage to {finish}')
+        assert rows[0]['phase'] == 'preparation' and rows[0]['reward'] == 0
+        incoming = [r for r in rows if r['road'].startswith(':J104')]
+        outgoing = [r for r in rows if r['road'].startswith(':J105')]
+        assert incoming and all(r['phase'] == 'weaving' and r['connection'] == ('E75_2', 'E76_1')
+                                and r['reward'] == pytest.approx(0.001125) for r in incoming)
+        assert outgoing and all(r['phase'] == 'weaving' and r['connection'] == ('E76_0', 'E77_0')
+                                and r['reward'] == pytest.approx(0.0015) for r in outgoing)
+        assert rows[-1]['phase'] == 'exit' and rows[-1]['reward'] == pytest.approx(0.0015)
+        assert len({r['time_s'] for r in rows}) == len(rows)
+        stats = env.route_preparation.diagnostics['ego_1']
+        assert stats['preparation_edge_steps'] == sum(r['phase'] == 'preparation' for r in rows)
+        for phase in ('weaving', 'exit'):
+            region = [r['reward'] for r in rows if r['phase'] == phase]
+            assert stats['phases'][phase]['preparation_zone_steps'] == len(region)
+            assert stats['phases'][phase]['cumulative_bonus'] == pytest.approx(sum(region))
+    finally:
+        trace.close()
+        env.close()
+    with gzip.open(trace.path, 'rt') as stream:
+        recorded = [json.loads(line) for line in stream][1:]
+    assert [event['egos']['ego_1']['route_preparation'] for event in recorded] == json.loads(json.dumps(rows))
+    assert [event['egos']['ego_1']['components']['route_preparation'] for event in recorded] == [
+        row['reward'] for row in rows
+    ]
+
+
+def test_real_lane_change_updates_bonus_on_stable_completion(tmp_path):
+    route_file = tmp_path / 'lane-change.rou.xml'
+    route_file.write_text("""<routes>
+        <trip id="ego_1" from="O3" to="D3" depart="0" departLane="0" departSpeed="10"/>
+        <trip id="ego_2" from="O3" to="D3" depart="60" departLane="0" departSpeed="10"/>
+    </routes>""")
+    env = MultiEgoEnv(reward_config=MASACRewardConfig(), route_file=route_file)
+    try:
+        env.reset(seed=42)
+        env.world.conn.vehicle.moveTo('ego_1', 'E76_1', 100)
+        saw_index_flip_before_completion = False
+        for _ in range(100):
+            _, _, _, _, infos = env.step({'ego_1': [0, -5]})
+            info = infos['ego_1']
+            row = info['route_preparation']
+            if any(event['event'] == 'completed' for event in info['lane_change_events']):
+                assert row['local_lane_changes'] == 0 and row['reward'] == pytest.approx(0.0015)
+                break
+            assert row['local_lane_changes'] == 1 and row['reward'] == pytest.approx(0.001125), row
+            saw_index_flip_before_completion |= row['post_lane_id'] == 'E76_0'
+        else:
+            pytest.fail('The actual SUMO lane change did not settle')
+        assert saw_index_flip_before_completion
+    finally:
+        env.close()
+
+
+@pytest.mark.parametrize('lane,speed,accel,readiness,base_net', [
+    ('E75_2', 2, 2, 0, -0.0015),
+    ('E75_2', 2, 0, 0, 0.001),
+    ('E75_2', 10, 2, 0, 0.0025),
+    ('E76_4', 2, 2, 0, -0.0015),
+    ('E76_3', 2, 2, 0.25, -0.0015),
+    ('E76_0', 2, 2, 1.0, -0.0015),
+])
+def test_real_safe_progress_dense_net(tmp_path, lane, speed, accel, readiness, base_net):
+    route_file = tmp_path / 'dense.rou.xml'
+    route_file.write_text(f"""<routes>
+        <trip id="ego_1" from="O3" to="D3" depart="0" departLane="0" departSpeed="{speed}"/>
+        <trip id="ego_2" from="O3" to="D3" depart="60" departLane="0" departSpeed="2"/>
+    </routes>""")
+    env = MultiEgoEnv(reward_config=MASACRewardConfig(), route_file=route_file)
+    try:
+        env.reset(seed=42)
+        env.world.conn.vehicle.moveTo('ego_1', lane, 100)
+        _, _, _, _, infos = env.step({'ego_1': [accel, 0]})
+        info = infos['ego_1']
+        assert info['route_preparation']['advancing'] and info['route_preparation']['safety'] == 'safe'
+        bonus = 0.005 * readiness * info['route_preparation']['progress_m'] / DEFAULT_REFERENCE_STEP_M
+        parts = info['reward_components']
+        assert parts['route_preparation'] == pytest.approx(bonus)
+        assert parts['comfort'] == pytest.approx(-0.0025 if accel else 0)
+        assert parts['efficiency'] == pytest.approx(0.01 * speed / 20)
+        dense = ('following', 'rear_following', 'lane_change', 'comfort', 'efficiency', 'route_preparation')
+        assert sum(parts[key] for key in dense) == pytest.approx(base_net + bonus)
+    finally:
+        env.close()
+
+
+@pytest.mark.parametrize('speed,steps', [(2, 100), (10, 20)])
+def test_real_safe_twenty_meters_pays_same_route_bonus(tmp_path, speed, steps):
+    route_file = tmp_path / 'same-distance.rou.xml'
+    route_file.write_text(f"""<routes>
+        <trip id="ego_1" from="O3" to="D3" depart="0" departLane="0" departSpeed="{speed}"/>
+        <trip id="ego_2" from="O3" to="D3" depart="60" departLane="0" departSpeed="2"/>
+    </routes>""")
+    env = MultiEgoEnv(reward_config=MASACRewardConfig(), route_file=route_file)
+    try:
+        env.reset(seed=42)
+        vehicle = env.world.conn.vehicle
+        vehicle.moveTo('ego_1', 'E76_0', 100)
+        total = 0.0
+        for _ in range(steps):
+            _, _, _, _, infos = env.step({'ego_1': [0, 0]})
+            row = infos['ego_1']['route_preparation']
+            assert row['readiness'] == 1 and row['safety'] == 'safe'
+            total += row['reward']
+        assert vehicle.getLanePosition('ego_1') == pytest.approx(120)
+        assert total == pytest.approx(0.03)
     finally:
         env.close()
 

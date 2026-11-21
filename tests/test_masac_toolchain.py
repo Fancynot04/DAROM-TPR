@@ -406,6 +406,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
         device="cpu",
         gamma=0.99,
         reward_ttc_threshold=2.75,
+        reward_route_preparation_bonus_cap=0.007 if actor_leader_features else None,
         actor_leader_features=actor_leader_features,
         masac_env_version=env_version,
         learning_rate=3e-5,
@@ -437,8 +438,11 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
         assert report["trainer_config"]["gamma"] == 0.99
         assert report["training_config"]["masac_env_version"] == env_version
         assert report["training_config"]["safety_reward"] == {
-            "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 1.0,
+            "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 0.5,
         }
+        assert report["route_preparation"]["settings"]["mode"] == "progress_bonus"
+        assert report["route_preparation"]["settings"]["reference_step_m"] == pytest.approx(10 / 3)
+        assert report["route_preparation"]["settings"]["bonus_cap"] == (0.007 if actor_leader_features else 0.005)
         assert report["environment"]["requested_speed_mode"] == 96
         for key in AGENT_IDS:
             modes = report["environment"]["actual_speed_modes"][key]
@@ -478,6 +482,8 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     assert final["config"]["reward_components"]["route_guidance"] is False
     assert final["config"]["reward_protocol"] == {
         "merge_on_success": True, "efficiency_weight": 0.01, "route_guidance_weight": 5.0,
+        "terminal_penalty_scale": 1.0,
+        "comfort_weight": 0.0025,
     }
     assert final["config"]["route_guidance_rules"][0]["accepted_connections"] == [["E76_0", "E77_0"]]
     assert final["team_critic"] and final["target_team_critic"]
@@ -570,10 +576,16 @@ def test_training_cli_defaults():
     assert args.update_log_every == 40
     assert args.max_active_steps == 2500
     assert args.reward_rear_following
-    assert args.reward_route_preparation
-    assert not parser.parse_args(["--no-reward-route-preparation"]).reward_route_preparation
-    assert args.reward_route_preparation_weaving_weight == 0.001
-    assert args.reward_route_preparation_exit_weight == 0.002
+    assert args.reward_route_preparation is None
+    assert parser.parse_args(["--no-reward-route-preparation"]).reward_route_preparation is False
+    from train_masac import preparation_settings
+    assert preparation_settings(args)["mode"] == "progress_bonus"
+    assert preparation_settings(args)["bonus_cap"] == 0.005
+    fixed = {"mode": "continuous_bonus", "stages": [], "bonus_cap": 0.007}
+    fixed_args = parser.parse_args(["--reward-route-preparation-bonus-cap", "0.007"])
+    assert preparation_settings(fixed_args, fixed, resuming=True) == fixed
+    legacy = parser.parse_args(["--reward-route-preparation-exit-weight", "0.003"])
+    assert preparation_settings(legacy)["weights"] == {"weaving": 0.001, "exit": 0.003}
     assert not parser.parse_args(["--no-reward-rear-following"]).reward_rear_following
     assert not args.reward_route_guidance
     assert parser.parse_args(["--reward-route-guidance"]).reward_route_guidance
@@ -588,7 +600,7 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     flags = ["--output-dir", str(work), "--device", "cpu", "--torch-threads", "1",
              "--batch-size", "4", "--learning-starts", "4", "--buffer-capacity", "16",
              "--checkpoint-every", "12", "--log-every", "4", "--no-tensorboard"]
-    main(parser.parse_args(flags + ["--total-steps", "20"]))
+    main(parser.parse_args(flags + ["--total-steps", "20", "--reward-comfort-weight", "0.01"]))
     directory = work / "checkpoints"
     index_path = directory / "index.json"
     index = json.loads(index_path.read_text())
@@ -602,6 +614,22 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     assert metadata["position"] != 0
 
     # Simulate a published model whose index write was interrupted, with stale log tail.
+    # Omit the comfort field to exercise a checkpoint written before it was recorded.
+    del before["config"]["reward_protocol"]["comfort_weight"]
+    old_stages = [{
+        "route": ["O3", "E75", "E76", "E77", "D3"],
+        "phases": [
+            {"kind": "weaving", "critical_connection": ["E76", "E77"],
+             "accepted_entry_lanes": ["E77_0"], "preparation_distance_m": 300.0},
+            {"kind": "exit", "critical_connection": ["E77", "D3"],
+             "accepted_entry_lanes": ["D3_0"], "preparation_distance_m": 172.35},
+        ],
+    }]
+    before["config"]["route_preparation_settings"] = {
+        "stages": old_stages, "weights": {"weaving": 0.001, "exit": 0.005},
+    }
+    before["config"]["safety_reward"]["lane_change_weight"] = 1.0
+    torch.save(before, model)
     index_path.write_text(json.dumps(index[:-1]))
     metrics_path = work / "train/metrics.jsonl"
     with metrics_path.open("a") as stream:
@@ -610,6 +638,11 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     final = torch.load(directory / "masac_seed42_step_28.pt", weights_only=True, map_location="cpu")
     assert final["resume_state"]["update_count"] == before["resume_state"]["update_count"] + 8
     assert final["resume_state"]["replay"]["size"] == 16
+    assert final["config"]["reward_protocol"]["comfort_weight"] == 0.01
+    assert final["config"]["route_preparation_settings"] == {
+        "mode": "legacy_penalty", "stages": old_stages, "weights": {"weaving": 0.001, "exit": 0.005},
+    }
+    assert final["config"]["safety_reward"]["lane_change_weight"] == 1.0
     for parameter, original in before["critic_optimizer"]["state"].items():
         assert final["critic_optimizer"]["state"][parameter]["step"] == original["step"] + 8
     replay_rng = np.random.default_rng()
@@ -627,6 +660,10 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     assert resume["global_step"] == 20 and resume["replay_size"] == 16 and resume["sumo_seed"] == 43
     with pytest.raises(ValueError, match="configuration mismatch: batch_size"):
         main(parser.parse_args(flags + ["--total-steps", "32", "--batch-size", "8"]))
+    with pytest.raises(ValueError, match="configuration mismatch: reward_protocol"):
+        main(parser.parse_args(flags + ["--total-steps", "32", "--reward-comfort-weight", "0.0025"]))
+    with pytest.raises(ValueError, match="configuration mismatch: route_preparation_settings"):
+        main(parser.parse_args(flags + ["--total-steps", "32", "--reward-route-preparation-bonus-cap", "0.005"]))
 
 
 @pytest.mark.parametrize("env_version,legacy,saved_grace,effective_grace", [
@@ -651,6 +688,7 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(
     def check_env_configuration(**kwargs):
         assert kwargs["stalled_match_route_links"] is (env_version == 5)
         assert kwargs["reward_config"].route_preparation is with_preparation
+        assert kwargs["reward_config"].lane_change_weight == 1.0
         return env_class(**kwargs)
 
     monkeypatch.setattr(evaluate_masac, "MultiEgoEnv", check_env_configuration)
@@ -680,6 +718,10 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(
             "critical_connection": ["E76", "E77"],
             "accepted_connections": [["E76_0", "E77_1"]],
         }]
+        if with_preparation:
+            config["reward_protocol"]["terminal_penalty_scale"] = 0.2
+            config["reward_protocol"]["collision_penalty"] = 1000
+            config["reward_protocol"]["comfort_weight"] = 0.0025
     checkpoint = work / "untrained.pt"
     torch.save({"agent_ids": AGENT_IDS, "actors": actors.state_dict(), "config": config,
                 "global_step": 0}, checkpoint)
@@ -699,9 +741,14 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(
     assert ("stalled_diagnostics" in report["records"][0]) is bool(effective_grace)
     assert protocol["merge_on_success"] is not legacy
     assert report["route_preparation"]["enabled_in_checkpoint"] is with_preparation
-    assert report["route_preparation"]["settings"] == config.get("route_preparation_settings")
+    assert report["route_preparation"]["settings"] == (
+        {"mode": "legacy_penalty", **config["route_preparation_settings"]} if with_preparation else None
+    )
     assert report["records"][0]["per_agent"]["ego_1"]["route_preparation"]["enabled"] is with_preparation
     assert protocol["route_guidance_weight"] == (0.0 if legacy else 7.0)
+    assert protocol["terminal_penalty_scale"] == (0.2 if with_preparation else 1.0)
+    assert protocol["collision_penalty"] == (1000 if with_preparation else None)
+    assert protocol["comfort_weight"] == (0.0025 if with_preparation else 0.01)
     assert report["route_guidance_rules"] == config.get("route_guidance_rules", [])
     for values in report["records"][0]["reward_components"].values():
         assert values["rear_following"] == 0

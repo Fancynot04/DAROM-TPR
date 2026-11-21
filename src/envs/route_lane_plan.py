@@ -192,6 +192,26 @@ class RouteLanePlan:
             return index, vehicle.getLaneIndex(ego_id)
         return None
 
+    def forward_passage(self, source, destination):
+        """Return intervening internal lanes for a forward move, or None if unverified."""
+        index, lane_id = source
+        next_index, next_lane_id = destination
+        if next_index not in (index, index + 1):
+            return None
+        internal = self.internal_passage_lanes.get(source)
+        if internal:
+            if next_index == index and next_lane_id in internal[1:]:
+                return internal[1:internal.index(next_lane_id)]
+            if next_index == index + 1 and next_lane_id == self.internal_connections[source][1]:
+                return internal[1:]
+            return None
+        for (target, _), via in self.passage_links.get(source, {}).items():
+            if next_index == index and next_lane_id in via:
+                return via[:via.index(next_lane_id)]
+            if next_index == index + 1 and next_lane_id == target:
+                return via
+        return None
+
     def completed_connection(self, previous, vehicle, ego_id, critical_connection):
         """Resolve the traversed link. A missing vehicle indicates a confirmed arrival."""
         index, lane = previous

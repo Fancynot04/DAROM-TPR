@@ -13,7 +13,10 @@ from .stalled import StalledDetector
 
 from .exit_rules import missed_exit_before_step, route_missed_before_step
 from .route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES, RouteLaneNetwork, UNREACHABLE_LANE_CHANGES
-from .route_preparation import DEFAULT_ROUTE_PREPARATION_STAGES, DEFAULT_ROUTE_PREPARATION_WEIGHTS, RoutePreparation
+from .route_preparation import (
+    DEFAULT_ROUTE_PREPARATION_BONUS, DEFAULT_ROUTE_PREPARATION_STAGES,
+    PREPARATION_BONUS_MODES, PREPARATION_PROGRESS_BONUS, RoutePreparation,
+)
 from src.rewards.events import STALLED_EVENT, b0_reward
 from src.rewards.masac import MASACRewardProtocol, MASACRewards, TARGET_EXIT_DIM
 
@@ -82,7 +85,8 @@ class MultiEgoEnv:
         if reward_config is not None and reward_config.route_preparation:
             self.route_preparation = RoutePreparation(
                 route_preparation_settings if route_preparation_settings is not None else {
-                    "weights": DEFAULT_ROUTE_PREPARATION_WEIGHTS, "stages": DEFAULT_ROUTE_PREPARATION_STAGES,
+                    "mode": PREPARATION_PROGRESS_BONUS, "bonus_cap": DEFAULT_ROUTE_PREPARATION_BONUS,
+                    "stages": DEFAULT_ROUTE_PREPARATION_STAGES,
                 },
             )
         self.route_guidance_rules = {}
@@ -567,14 +571,20 @@ class MultiEgoEnv:
         # 2. 仅尚未终止的 Ego 提交动作
         acting_ids = active_ids - pre_terminated
         preparation_samples = {}
+        preparation_changes = {}
+        continuous_preparation = (self.route_preparation is not None
+                                  and self.route_preparation.mode in PREPARATION_BONUS_MODES)
         if self.route_preparation is not None:
             self.route_preparation.step_info.clear()
             for ego_id in acting_ids:
-                position = (self._route_lane_position(ego_id) if self.legacy_route_semantics
-                            else route_positions_before[ego_id])
-                sample = self.route_preparation.before_step(
-                    conn, ego_id, position, tracker.pending_changes.get(ego_id),
-                )
+                if continuous_preparation:
+                    sample = self.route_preparation.before_bonus(conn, ego_id, tracker)
+                else:
+                    position = (self._route_lane_position(ego_id) if self.legacy_route_semantics
+                                else route_positions_before[ego_id])
+                    sample = self.route_preparation.before_step(
+                        conn, ego_id, position, tracker.pending_changes.get(ego_id),
+                    )
                 if sample is not None:
                     preparation_samples[ego_id] = sample
         guidance_before = {
@@ -641,6 +651,12 @@ class MultiEgoEnv:
 
                 if tracker is not None:
                     tracker.before_step(conn, ego_id, control)
+                if continuous_preparation and ego_id in preparation_samples:
+                    change = self.route_preparation.bonus_change(ego_id, tracker.pending_changes.get(ego_id))
+                    target_risk = self.route_preparation.target_risk(
+                        conn, ego_id, preparation_samples[ego_id].motion, change, tracker,
+                    )
+                    preparation_changes[ego_id] = change, target_risk
 
                 # 仅统计真正向 SUMO 提交的换道指令
                 if self.collect_metrics and ego_id in metric_pre:
@@ -676,6 +692,10 @@ class MultiEgoEnv:
         )
 
         present = set(conn.vehicle.getIDList()) if self.collect_metrics or tracker is not None else set()
+        preparation_teleports = set()
+        if continuous_preparation and preparation_samples:
+            preparation_teleports.update(sim.getStartingTeleportIDList())
+            preparation_teleports.update(sim.getEndingTeleportIDList())
         if tracker is not None:
             for ego_id in acting_ids:
                 change_events_before = len(tracker.lane_change_events)
@@ -694,9 +714,22 @@ class MultiEgoEnv:
                         latest = tracker.lane_change_events[-1]
                         if latest["event"] == "completed":
                             completed_change = latest
-                    components[ego_id]["route_preparation"] = self.route_preparation.after_step(
-                        conn, ego_id, preparation_samples[ego_id], ego_id in present, completed_change,
-                    )
+                    sample = preparation_samples[ego_id]
+                    if continuous_preparation:
+                        change, target_risk = preparation_changes[ego_id]
+                        reason = terminal_event
+                        if ego_id in preparation_teleports:
+                            reason = reason or "teleport"
+                        if ego_id not in present:
+                            reason = reason or "position_unavailable"
+                        value = self.route_preparation.after_bonus(
+                            conn, ego_id, sample, tracker, change, target_risk, completed_change, reason,
+                        )
+                    else:
+                        value = self.route_preparation.after_step(
+                            conn, ego_id, sample, ego_id in present, completed_change,
+                        )
+                    components[ego_id]["route_preparation"] = value
 
         metric_steps = {}
         if self.collect_metrics:

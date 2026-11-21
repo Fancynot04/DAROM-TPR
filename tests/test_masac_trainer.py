@@ -159,6 +159,7 @@ def test_critic_update():
 
     assert np.isfinite(result["critic_loss"])
     assert np.isfinite(result["mean_target"])
+    assert np.isfinite(result["target_std"]) and result["target_std"] >= 0
 
     # Batch 有 4 条联合经验，每条 2 个有效 Ego
     assert result["valid_agents"] == 8
@@ -449,6 +450,7 @@ def test_team_target_bootstraps_past_early_arrival_and_waiting():
     stats = trainer.update_critic(batch)
     assert stats["team_valid_samples"] == 4
     assert abs(stats["team_mean_target"] - (2 * 0.99 * 20 + 100) / 4) < 1e-5
+    assert abs(stats["team_target_std"] - np.std([19.8, 19.8, 100, 0])) < 1e-5
     assert not torch.equal(before, team.q1[-1].bias)
 
 
