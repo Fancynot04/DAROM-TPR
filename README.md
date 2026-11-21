@@ -60,7 +60,7 @@ Actor 的第二维是沿该车指定路线到目标出口最少还需主动换�
 
 Missed Exit 使用同一张路线车道图。车辆进入无法通往目标的连接或偏离指定路线时，按错过出口结算。距必须通过的路段末端 10 m 内，若当前车道无法继续沿路线前进、车辆无法在末端前停下，且没有正在横移到可通行的相邻车道，也会触发终止。这条预判沿用制动距离近似。Ego 首次控制时在步后判定，以便 Replay 将终止归给本步动作。后续的制动预判在步前执行。
 
-新训练 checkpoint 默认标记 `masac_env_version=4`。训练配置日志和 checkpoint 保存 `reward_components`、`reward_protocol`、`route_guidance_rules` 和 `stalled_block_grace_s`，评估按 checkpoint 复现。v4 使用与 v3 相同的路线观测和错出口规则，v2 恢复旧车道编号和 D3 终止语义。v2/v3 的停滞阻挡宽限为 0 秒，即 Stalled-v1。旧 v2/v3 缺少 `reward_protocol` 时，评估使用汇入当步 +25、效率系数 0.05、路线引导 0。134 维 B0 checkpoint 沿用原评估路径。评估结果记录实际环境版本与宽限，比较指标时应使用相同终止协议。
+新训练 checkpoint 默认标记 `masac_env_version=5`。训练配置日志和 checkpoint 保存 `reward_components`、`reward_protocol`、`route_guidance_rules` 和 `stalled_block_grace_s`，评估按 checkpoint 复现。v3–v5 使用相同的路线观测和错出口规则，v2 恢复旧车道编号和 D3 终止语义。v2/v3 的停滞阻挡宽限为 0 秒。v4 已使用 3 秒宽限，v5 进一步核对实时连接是否来自 Ego 当前车道。旧 v2/v3 缺少 `reward_protocol` 时，评估使用汇入当步 +25、效率系数 0.05、路线引导 0。134 维 B0 checkpoint 沿用原评估路径。评估记录实际环境版本与宽限，比较指标时应使用相同终止协议。
 
 ## 3. 目录结构
 
@@ -205,7 +205,8 @@ JSONL 以 `event` 区分：
 - `config`：完整 CLI、Git 提交及工作树是否有修改；`global_step=0`。
 - `episode`：仅两车均完整终止后写入，包含 `episode_index`、`episode_global_steps`、每车终止原因/奖励/严格成功/有效控制步数、联合成功；最近 100 回合的 ego_1 / ego_2 成功、碰撞、Missed Exit、Timeout 百分率和平均奖励，以及联合成功率和两车奖励和的均值。`rolling_episodes` 是实际分母，`policy=exploration_training`，不能冒充正式评估。
 - `stalled_shadow`：用 `--stalled-shadow` 记录每辆 Ego 的步前诊断，环境在 `infos[ego]["stalled_shadow"]` 提供同一数据。每车的有效通行滑窗为 10 秒，里程进展小于 20 m 时输出 `would_stall=true`。前车约束仍使用 50 m 内前车的净间隙、最小间距和按当前车速估计的 10 秒前车位移。路口检查仍限于内部连接或距车道末端 20 m 内。
-- v4 在前车约束、计划停车、信号或路口冲突、无可通行连接时暂停窗口。阻挡达到 3 秒清空一次。连续畅通达到 3 秒才确认恢复，并补计这段连续畅通的步间增量。更短的畅通闪烁并回同一阻挡段。跨阻挡边界的步间增量不计。无效里程、不连续样本、TraCI 不可用和传送信号立即清空。3 秒是未校准的初值。使用宽限规则并启用终止或影子诊断时，每回合按车输出 `stalled_diagnostics`，包括实际窗口重置数及各原因次数、暂停段数，以及原始和合并闪烁后的阻挡时长直方图，单位为 0.1 秒步数。因采样中断或离开而截尾的合并段单列，未结束段另记已观测时长。
+- v4 起检测到外部阻挡时暂停窗口，持续达到 3 秒后清空一次。连续畅通达到 3 秒才确认恢复，并补计这段连续畅通的步间增量。更短的畅通闪烁并回同一阻挡段。跨阻挡边界的步间增量不计。无效里程、不连续样本、TraCI 不可用和传送信号立即清空。3 秒是未校准的初值。使用宽限规则并启用终止或影子诊断时，每回合按车输出 `stalled_diagnostics`，包括实际窗口重置数及各原因次数、暂停段数，以及原始和合并闪烁后的阻挡时长直方图，单位为 0.1 秒步数。因采样中断或离开而截尾的合并段单列，未结束段另记已观测时长。
+- v5 在路口用路线索引和实际车道查询通往任务下一路段的合法连接。只有 TraCI 的目标车道和内部连接能唯一对应当前车道时，才使用信号、开放状态、优先权和冲突信息。内部车道上的让行检查沿用路线图。存在合法连接但实时项无法确认时，记为 `route_link_unknown` 并中断窗口。当前车道缺少任务连接时，前车约束或计划停车仍算外部阻挡，否则继续按原进展阈值判定。v2–v4 保留原来的路口检查。
 - `--stalled-terminate`：新 MASAC 训练默认启用。用 `--no-stalled-terminate` 关闭，可加 `--stalled-shadow` 单独记录诊断。步前检测后，在 SUMO 步完成时按 Collision、Missed Exit、Arrived、Stalled、Timeout 的顺序结算。Stalled 仅结束触发的 Ego，单次任务分为 −400。正常步进奖励按原规则结算。团队目标在首次失败时结束。旧 USP 训练默认关闭停滞终止，显式同时开启会报错。评估默认继承 checkpoint 的开关，缺少该设置时按关闭处理。可用 `--stalled-terminate` 或 `--no-stalled-terminate` 覆盖。训练滚动指标与评估报告均含 `stalled_rate`。
 - `control_trace`：使用 `--trace-controls` 时，每个实际控制步记录前车 ID 和实际净间隙、Ego 道路和车道位置、步前和步后速度、策略请求加速度、TraCI 提交加速度、SUMO 步后实测加速度和原始到达标志。前车由 TraCI 沿当前路线搜索，搜索最短前瞻 100 m。查无前车或车辆已在步后移除时，相应字段为 `null`。
 - `update`：第一轮、每隔 `--update-log-every` 轮（默认 40）以及最后一个可执行更新步记录一次。设置为 1 可记录每轮。每条记录保留该轮的原始 `critic_loss`、双 Q 均值 `mean_q`、`mean_target`、`valid_agents`、`update_index`；各车 `actor_loss`、`alpha`、`alpha_loss`、`mean_log_prob`、`valid_samples`。log-prob 是当前 actor 更新中已有采样的实际动作 log-prob，未再额外前向；无有效样本的损失为 null、样本数为 0。

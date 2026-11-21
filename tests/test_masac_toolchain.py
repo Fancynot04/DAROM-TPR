@@ -546,7 +546,8 @@ def test_training_cli_defaults():
     parser = build_parser()
     args = parser.parse_args([])
     assert parser.parse_args(["--no-stalled-terminate"]).stalled_terminate is False
-    assert args.masac_env_version == 4
+    assert args.masac_env_version == 5
+    assert parser.parse_args(["--masac-env-version", "4"]).masac_env_version == 4
     assert parser.parse_args(["--masac-env-version", "3"]).masac_env_version == 3
     assert parser.parse_args(["--masac-env-version", "2"]).masac_env_version == 2
     assert not args.actor_leader_features
@@ -580,11 +581,21 @@ def test_training_cli_defaults():
     (4, False, None, 3.0),
     (4, False, 0.0, 0.0),
     (4, False, 2.0, 2.0),
+    (5, False, None, 3.0),
 ])
-def test_checkpoint_evaluation_uses_saved_reward_protocol(work, env_version, legacy, saved_grace, effective_grace):
-    from evaluate_masac import evaluate
+def test_checkpoint_evaluation_uses_saved_reward_protocol(
+    work, monkeypatch, env_version, legacy, saved_grace, effective_grace,
+):
+    import evaluate_masac
     from src.agents.masac import MultiAgentGaussianActor
 
+    env_class = evaluate_masac.MultiEgoEnv
+
+    def check_env_configuration(**kwargs):
+        assert kwargs["stalled_match_route_links"] is (env_version == 5)
+        return env_class(**kwargs)
+
+    monkeypatch.setattr(evaluate_masac, "MultiEgoEnv", check_env_configuration)
     actors = MultiAgentGaussianActor(ego_ids=AGENT_IDS, nav_dim=2)
     config = {
         "masac_env_version": env_version,
@@ -607,7 +618,7 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(work, env_version, leg
     checkpoint = work / "untrained.pt"
     torch.save({"agent_ids": AGENT_IDS, "actors": actors.state_dict(), "config": config,
                 "global_step": 0}, checkpoint)
-    report = evaluate(SimpleNamespace(
+    report = evaluate_masac.evaluate(SimpleNamespace(
         checkpoint=str(checkpoint), episodes=1, seed_start=200001, stochastic=False,
         max_steps=150, output=str(work / "summary.json"),
     ))

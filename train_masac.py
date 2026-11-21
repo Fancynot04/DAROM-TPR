@@ -312,6 +312,7 @@ def train(args, device):
         stalled_shadow=args.stalled_shadow,
         stalled_terminate=args.stalled_terminate,
         stalled_block_grace_s=args.stalled_block_grace_s,
+        stalled_match_route_links=args.masac_env_version == MASAC_ENV_VERSION,
         legacy_route_semantics=args.masac_env_version == LEGACY_MASAC_ENV_VERSION,
         actor_leader_features=args.actor_leader_features,
     )
@@ -704,7 +705,8 @@ def build_parser():
     parser.add_argument("--stalled-shadow", action="store_true", help="Log per-step stalled diagnostics")
     parser.add_argument("--masac-env-version", type=int,
                         choices=SUPPORTED_MASAC_ENV_VERSIONS, default=MASAC_ENV_VERSION,
-                        help="v2: legacy route rules; v3: route-aware with Stalled-v1; v4: stalled block grace")
+                        help="v2: legacy route rules; v3: route-aware with Stalled-v1; "
+                             "v4: stalled block grace; v5: match stalled links to the actual lane")
     parser.add_argument("--actor-leader-features", action="store_true",
                         help="Add delayed leader bumper gap, closing speed and TTC to each Actor")
     parser.add_argument("--trace-controls", action="store_true", help="Log per-Ego TraCI gaps, motion, and control commands")

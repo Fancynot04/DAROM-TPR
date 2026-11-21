@@ -47,6 +47,7 @@ class MultiEgoEnv:
         reward_protocol=MASACRewardProtocol(),
         route_guidance_rules=DEFAULT_ROUTE_GUIDANCE_RULES,
         stalled_block_grace_s=0.0,
+        stalled_match_route_links=False,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -66,6 +67,7 @@ class MultiEgoEnv:
         self.stalled_shadow = stalled_shadow
         self.stalled_terminate = stalled_terminate
         self.stalled_block_grace_s = stalled_block_grace_s
+        self.stalled_match_route_links = stalled_match_route_links
         self.sumo_warning_log_dir = None
         self.stall_detectors = {}
         self.route_file = (route_file if route_file is not None else
@@ -561,7 +563,8 @@ class MultiEgoEnv:
                 if ego_id in teleports:
                     stall_results[ego_id] = detector.observe(now, unavailable_reason="teleport")
                 elif ego_id in acting_ids:
-                    stall_results[ego_id] = detector.sample(conn, ego_id, now)
+                    plan = self.route_lane_plans[ego_id] if self.stalled_match_route_links else None
+                    stall_results[ego_id] = detector.sample(conn, ego_id, now, plan)
                 else:
                     stall_results[ego_id] = detector.observe(now, unavailable_reason="inactive")
 

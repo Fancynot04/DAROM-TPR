@@ -4,7 +4,7 @@ from collections import Counter, deque
 import math
 
 from traci.exceptions import TraCIException
-from src.rewards.masac import MASAC_ENV_VERSION
+from src.rewards.masac import MASAC_ENV_VERSION, STALL_GRACE_MASAC_ENV_VERSION
 
 
 STEP_SECONDS = 0.1
@@ -22,7 +22,7 @@ PASSAGE_BLOCK_REASONS = frozenset({
 
 
 def stalled_block_grace_for_version(env_version, saved_grace_s=None):
-    if env_version == MASAC_ENV_VERSION:
+    if env_version in (STALL_GRACE_MASAC_ENV_VERSION, MASAC_ENV_VERSION):
         return BLOCK_GRACE_SECONDS if saved_grace_s is None else saved_grace_s
     return 0.0
 
@@ -228,7 +228,7 @@ class StalledDetector:
             "open_block_observed_s": open_block,
         }
 
-    def sample(self, conn, ego_id, time):
+    def sample(self, conn, ego_id, time, route_plan=None):
         """Read one pre-action SUMO state. Missing information never counts as clear."""
         vehicle = conn.vehicle
         road = lane = distance = leader = None
@@ -244,7 +244,7 @@ class StalledDetector:
                 gap = found[1] + min_gap
                 if gap <= LEADER_RANGE_M:
                     leader = {"id": found[0], "gap_m": gap, "speed_mps": vehicle.getSpeed(found[0])}
-            reason = self.passage_block(conn, ego_id, road, lane, leader, min_gap)
+            reason = self.passage_block(conn, ego_id, road, lane, leader, min_gap, route_plan)
         except TraCIException:
             reason = "traci_unavailable"
 
@@ -252,7 +252,7 @@ class StalledDetector:
                             leader=leader, unavailable_reason=reason)
 
     @staticmethod
-    def passage_block(conn, ego_id, road, lane, leader, min_gap):
+    def passage_block(conn, ego_id, road, lane, leader, min_gap, route_plan=None):
         vehicle = conn.vehicle
         if vehicle.getStopState(ego_id) & 1:
             return "scheduled_stop"
@@ -268,6 +268,14 @@ class StalledDetector:
         if remaining > JUNCTION_APPROACH_M and not road.startswith(":"):
             return None
 
+        if route_plan is not None:
+            reason, internal_lanes = route_plan.junction_passage(
+                vehicle, ego_id, vehicle.getRouteIndex(ego_id), road, lane,
+            )
+            if reason is not None or not internal_lanes:
+                return reason
+            return StalledDetector.junction_foe_block(vehicle, ego_id, internal_lanes)
+
         if any(0 <= distance <= JUNCTION_APPROACH_M and state in "rRyYu"
                for _, _, distance, state in vehicle.getNextTLS(ego_id)):
             return "traffic_signal"
@@ -282,11 +290,15 @@ class StalledDetector:
             elif road != vehicle.getRoute(ego_id)[-1]:
                 return "route_link_unavailable"
 
-        # getNextLinks skips the current internal link. Look at the actual
-        # crossing vehicle and its right of way near this junction.
-        for foe_id, ego_dist, foe_dist, ego_exit, foe_exit, _, _, ego_yields, _ in (
+        return StalledDetector.junction_foe_block(vehicle, ego_id)
+
+    @staticmethod
+    def junction_foe_block(vehicle, ego_id, internal_lanes=None):
+        for foe_id, ego_dist, foe_dist, ego_exit, foe_exit, ego_lane, _, ego_yields, _ in (
             vehicle.getJunctionFoes(ego_id, JUNCTION_APPROACH_M)
         ):
+            if internal_lanes is not None and ego_lane not in internal_lanes:
+                continue
             if ego_exit <= 0 or ego_dist > JUNCTION_APPROACH_M or foe_exit <= 0:
                 continue
             if foe_dist <= 0 or (

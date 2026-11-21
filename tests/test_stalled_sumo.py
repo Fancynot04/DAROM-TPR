@@ -3,6 +3,7 @@
 import pytest
 
 import src.envs.multi_ego_env as env_module
+from src.envs.route_lane_plan import RouteLaneNetwork
 from src.envs.stalled import BLOCK_GRACE_SECONDS, StalledDetector
 from src.envs.sumo_world import SumoWorld
 from src.rewards.masac import MASACRewardConfig
@@ -117,7 +118,8 @@ def test_dual_ego_uses_independent_windows_without_changing_outcomes(tmp_path, m
             env.close()
 
 
-def test_red_wait_and_clear_passage_on_same_junction(tmp_path):
+@pytest.mark.parametrize("match_route_links", [False, True])
+def test_red_wait_and_clear_passage_on_same_junction(tmp_path, match_route_links):
     import shutil
     import subprocess
 
@@ -148,22 +150,55 @@ def test_red_wait_and_clear_passage_on_same_junction(tmp_path):
 
     world = SumoWorld(route_file=routes)
     world.net_file = network
-    detector = StalledDetector()
+    detector = StalledDetector(BLOCK_GRACE_SECONDS if match_route_links else 0)
     try:
         conn = world.start()
         world.step()
+        plan = (RouteLaneNetwork(network).plan(("west", "east"), conn.vehicle.getVehicleClass("ego_1"))
+                if match_route_links else None)
         conn.vehicle.setSpeedMode("ego_1", 0)
         conn.vehicle.setSpeed("ego_1", 0)
         count = len(conn.trafficlight.getRedYellowGreenState("center"))
         conn.trafficlight.setRedYellowGreenState("center", "r" * count)
         for _ in range(101):
-            row = detector.sample(conn, "ego_1", conn.simulation.getTime())
+            row = detector.sample(conn, "ego_1", conn.simulation.getTime(), plan)
             assert not row["would_stall"] and row["reason"] == "traffic_signal"
             world.step()
 
         conn.trafficlight.setRedYellowGreenState("center", "G" * count)
         for i in range(101):
-            row = detector.sample(conn, "ego_1", conn.simulation.getTime())
+            row = detector.sample(conn, "ego_1", conn.simulation.getTime(), plan)
+            assert row["would_stall"] is (i == 100)
+            world.step()
+        assert row["valid_window_s"] == 10
+    finally:
+        world.close()
+
+
+def test_wrong_d3_lane_with_fallback_link_can_stall_without_external_blocker(tmp_path):
+    route = tmp_path / "wrong-d3.rou.xml"
+    route.write_text(
+        f'<routes>{EGO_TYPE}<route id="d3" edges="E77 D3"/>'
+        '<vehicle id="ego_1" type="ego" route="d3" depart="0" departLane="1" departSpeed="0"/>'
+        '</routes>'
+    )
+    world = SumoWorld(route_file=route)
+    detector = StalledDetector(BLOCK_GRACE_SECONDS)
+    try:
+        conn = world.start()
+        world.step()
+        vehicle = conn.vehicle
+        vehicle.setLaneChangeMode("ego_1", 0)
+        vehicle.setSpeed("ego_1", 0)
+        lane = "E77_1"
+        vehicle.moveTo("ego_1", lane, conn.lane.getLength(lane) - 2)
+        assert vehicle.getNextLinks("ego_1")[0][0] == "D3_0"
+        assert vehicle.getNextLinks("ego_1")[0][4] == ":J106_0_0"
+        plan = RouteLaneNetwork(world.net_file).plan(("E77", "D3"), vehicle.getVehicleClass("ego_1"))
+        assert not plan.passage_links[0, lane]
+        for i in range(101):
+            row = detector.sample(conn, "ego_1", conn.simulation.getTime(), plan)
+            assert row["lane"] == lane
             assert row["would_stall"] is (i == 100)
             world.step()
         assert row["valid_window_s"] == 10
@@ -206,9 +241,16 @@ def test_sumo_disables_teleport_without_stalled_termination(stalled_terminate_ro
         env.close()
 
 
-@pytest.mark.parametrize("block_grace_s", [0, BLOCK_GRACE_SECONDS])
-def test_stalled_termination_is_independent_and_precedes_timeout(stalled_terminate_route, block_grace_s):
-    env = env_module.MultiEgoEnv(stalled_terminate=True, max_active_steps=101, stalled_block_grace_s=block_grace_s)
+@pytest.mark.parametrize("block_grace_s,match_route_links", [
+    (0, False), (BLOCK_GRACE_SECONDS, False), (BLOCK_GRACE_SECONDS, True),
+])
+def test_stalled_termination_is_independent_and_precedes_timeout(
+    stalled_terminate_route, block_grace_s, match_route_links,
+):
+    env = env_module.MultiEgoEnv(
+        stalled_terminate=True, max_active_steps=101, stalled_block_grace_s=block_grace_s,
+        stalled_match_route_links=match_route_links,
+    )
     try:
         env.reset(seed=42)
         sim = env.world.conn.simulation

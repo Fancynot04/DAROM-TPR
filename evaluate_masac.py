@@ -16,7 +16,7 @@ from src.envs.multi_ego_env import MultiEgoEnv
 from src.envs.stalled import stalled_block_grace_for_version
 from src.rewards.masac import (
     LEGACY_MASAC_ENV_VERSION, LEGACY_MASAC_REWARD_PROTOCOL, MASACRewardConfig,
-    MASACRewardProtocol, SUPPORTED_MASAC_ENV_VERSIONS, TARGET_EXIT_DIM,
+    MASACRewardProtocol, MASAC_ENV_VERSION, SUPPORTED_MASAC_ENV_VERSIONS, TARGET_EXIT_DIM,
 )
 from src.visualization.gui_camera import (
     update_gui_camera,
@@ -106,6 +106,7 @@ def evaluate(args):
         stalled_block_grace_s=stalled_block_grace_for_version(
             env_version, reward_config.get("stalled_block_grace_s"),
         ),
+        stalled_match_route_links=env_version == MASAC_ENV_VERSION,
         legacy_route_semantics=components is None or env_version == LEGACY_MASAC_ENV_VERSION,
         actor_leader_features=actor_leader_features,
     )

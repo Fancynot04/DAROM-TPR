@@ -30,6 +30,7 @@ class RouteLaneNetwork:
             for edge in root.findall("edge")
         }
         self.connections = defaultdict(list)
+        self.link_sources = defaultdict(set)
         self.internal_successor = {}
         for node in root.findall("connection"):
             link = node.attrib
@@ -40,6 +41,8 @@ class RouteLaneNetwork:
                 self.internal_successor[(self.lanes[source][source_lane]["id"], target, target_lane)] = via
             else:
                 self.connections[source, target].append((source_lane, target_lane, via))
+                pair = self.lanes[target][target_lane]["id"], via or ""
+                self.link_sources[pair].add(self.lanes[source][source_lane]["id"])
         self.permissions = {
             lane["id"]: get_allowed(
                 None if lane.get("allow") == "all" else lane.get("allow"), lane.get("disallow"),
@@ -69,6 +72,11 @@ class RouteLanePlan:
         self.internal = {}
         self.internal_connections = {}
         self.lane_connections = set()
+        self.passage_links = {
+            (index, lane["id"]): {}
+            for index, lanes in enumerate(permitted) for lane in lanes.values()
+        }
+        self.internal_passage_lanes = {}
         for index, (edge, lanes) in enumerate(zip(route, permitted)):
             if edge in LANE_CHANGE_EDGES:
                 for lane_index, lane in lanes.items():
@@ -85,6 +93,7 @@ class RouteLanePlan:
             for source, target, via in network.connections.get((edge, next_edge), ()):
                 if source not in lanes or target not in permitted[index + 1]:
                     continue
+                entry_via = via or ""
                 internal_lanes = []
                 while via:
                     internal_lanes.append(via)
@@ -96,9 +105,11 @@ class RouteLanePlan:
                 reverse[destination].append(((index, source), 0))
                 pair = lanes[source]["id"], permitted[index + 1][target]["id"]
                 self.lane_connections.add((index, pair))
-                for lane in internal_lanes:
+                self.passage_links[index, pair[0]][pair[1], entry_via] = tuple(internal_lanes)
+                for offset, lane in enumerate(internal_lanes):
                     self.internal[index, lane] = destination
                     self.internal_connections[index, lane] = pair
+                    self.internal_passage_lanes[index, lane] = tuple(internal_lanes[offset:])
 
         distance = {(len(route) - 1, lane): 0 for lane in permitted[-1]}
         queue = deque(distance)
@@ -137,6 +148,39 @@ class RouteLanePlan:
                 self.signed_changes[node] = cost if first[1] > lane else -cost
 
         self.lateral_neighbors = lateral
+        self.link_sources = network.link_sources
+
+    def junction_passage(self, vehicle, ego_id, index, road, lane):
+        """Return a confirmed blocker (if any) and the internal lanes for foe checks."""
+        if road.startswith(":"):
+            internal_lanes = self.internal_passage_lanes.get((index, lane))
+            return (None, internal_lanes) if internal_lanes else ("route_link_unknown", ())
+        if not 0 <= index < len(self.route) or self.route[index] != road:
+            return "route_link_unknown", ()
+
+        connections = self.passage_links.get((index, lane))
+        if connections is None:
+            return "route_link_unknown", ()
+        if not connections:
+            # A lane without a task connection supplies no traffic signal or foe
+            # for that movement. The independent stop and leader checks still apply.
+            return None, ()
+
+        matches = []
+        for link in vehicle.getNextLinks(ego_id):
+            target, _, _, _, via, _, _, _ = link
+            signature = target, via
+            if signature in connections and self.link_sources[signature] == {lane}:
+                matches.append(link)
+        if len(matches) != 1:
+            return "route_link_unknown", ()
+
+        target, priority, opened, foe, via, state, _, _ = matches[0]
+        if state in {"r", "R", "y", "Y", "u"}:
+            return "traffic_signal", ()
+        if not opened or (foe and not priority):
+            return "junction_conflict", ()
+        return None, connections[target, via]
 
     def position(self, vehicle, ego_id):
         """Return the graph node, mapping a committed connector downstream."""

@@ -1,7 +1,9 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from src.envs.route_lane_plan import RouteLaneNetwork
 from src.envs.stalled import BLOCK_GRACE_SECONDS, StalledDetector
 
 
@@ -209,3 +211,78 @@ def test_internal_junction_only_blocks_for_relevant_foes(other_dist, other_exit_
     )
     conn = SimpleNamespace(vehicle=vehicle, lane=SimpleNamespace(getLength=lambda key: 10))
     assert StalledDetector.passage_block(conn, "ego", ":J_0", ":J_0_0", None, 2.5) == expected
+
+
+@pytest.fixture
+def d3_lane_plan():
+    net_file = Path(__file__).resolve().parents[1] / "sumo_new/Antwerp.net.xml"
+    return RouteLaneNetwork(net_file).plan(("E77", "D3"), "passenger")
+
+
+@pytest.mark.parametrize("target,via,opened,state,foe,priority,expected", [
+    ("D3_0", ":J106_0_0", True, "M", False, True, None),
+    ("D3_0", ":J106_0_0", False, "r", False, True, "traffic_signal"),
+    ("D3_0", ":J106_0_0", False, "M", False, True, "junction_conflict"),
+    ("D3_0", ":J106_0_0", True, "m", True, False, "junction_conflict"),
+    ("D3_0", ":J106_1_0", False, "r", True, False, "route_link_unknown"),
+    ("E78_0", ":J106_1_0", True, "M", False, True, "route_link_unknown"),
+    (None, "", False, "r", True, False, "route_link_unknown"),
+])
+def test_v5_checks_realtime_status_of_matched_task_connection(
+    d3_lane_plan, target, via, opened, state, foe, priority, expected,
+):
+    links = [(target, priority, opened, foe, via, state, "s", 5)] if target else []
+    vehicle = SimpleNamespace(getNextLinks=lambda ego_id: links)
+    assert d3_lane_plan.junction_passage(vehicle, "ego_1", 0, "E77", "E77_0")[0] == expected
+
+
+def test_v5_uses_matching_connection_and_ignores_unrelated_junction_foes(d3_lane_plan):
+    links = [("E78_0", False, False, True, ":J106_1_0", "r", "s", 5),
+             ("D3_0", True, True, False, ":J106_0_0", "G", "r", 5)]
+    foes = [("foe", 2, -1, 7, 4, ":J106_1_0", ":other_0", True, False)]
+    vehicle = SimpleNamespace(
+        getStopState=lambda ego_id: 0,
+        getLanePosition=lambda ego_id: 9,
+        getRouteIndex=lambda ego_id: 0,
+        getNextLinks=lambda ego_id: links,
+        getJunctionFoes=lambda ego_id, distance: foes,
+    )
+    conn = SimpleNamespace(vehicle=vehicle, lane=SimpleNamespace(getLength=lambda lane: 10))
+    check = StalledDetector.passage_block
+    assert check(conn, "ego_1", "E77", "E77_0", None, 2.5, d3_lane_plan) is None
+    assert check(conn, "ego_1", ":J106_0", ":J106_0_0", None, 2.5, d3_lane_plan) is None
+    foes[0] = ("foe", 2, -1, 7, 4, ":J106_0_0", ":other_0", True, False)
+    assert check(conn, "ego_1", ":J106_0", ":J106_0_0", None, 2.5, d3_lane_plan) == "junction_conflict"
+
+
+def test_v5_wrong_lane_still_observes_leader_and_unknown_resets_window(d3_lane_plan):
+    vehicle = SimpleNamespace(
+        getStopState=lambda ego_id: 0, getLanePosition=lambda ego_id: 9, getRouteIndex=lambda ego_id: 0,
+        getNextLinks=lambda ego_id: (),
+    )
+    conn = SimpleNamespace(vehicle=vehicle, lane=SimpleNamespace(getLength=lambda lane: 10))
+    check = StalledDetector.passage_block
+    assert check(conn, "ego_1", "E77", "E77_1", None, 2.5, d3_lane_plan) is None
+    assert check(conn, "ego_1", "E77", "E77_1", {"gap_m": 4, "speed_mps": 0}, 2.5,
+                 d3_lane_plan) == "leader_constrained"
+    detector = StalledDetector(BLOCK_GRACE_SECONDS)
+    samples(detector, 0, stop=100)
+    unknown = check(conn, "ego_1", "E77", "E77_0", None, 2.5, d3_lane_plan)
+    row = detector.observe(10.0, distance=0, unavailable_reason=unknown)
+    assert row["reason"] == "route_link_unknown" and row["valid_window_s"] == 0
+    assert detector.summary()["pause_count"] == 0
+    assert detector.summary()["window_resets_by_reason"] == {"route_link_unknown": 1}
+
+
+def test_v5_requires_unambiguous_source_when_connections_share_a_target(tmp_path):
+    net_file = tmp_path / "shared-target.net.xml"
+    net_file.write_text("""<net>
+        <edge id="start"><lane id="start_0" index="0"/><lane id="start_1" index="1"/></edge>
+        <edge id="end"><lane id="end_0" index="0"/></edge>
+        <connection from="start" to="end" fromLane="0" toLane="0"/>
+        <connection from="start" to="end" fromLane="1" toLane="0"/>
+    </net>""")
+    plan = RouteLaneNetwork(net_file).plan(("start", "end"), "passenger")
+    vehicle = SimpleNamespace(getNextLinks=lambda ego_id: [("end_0", True, True, False, "", "G", "s", 0)])
+    assert plan.junction_passage(vehicle, "ego_1", 0, "start", "start_0") == ("route_link_unknown", ())
+    assert plan.junction_passage(vehicle, "ego_1", 1, "end", "end_0") == (None, ())
