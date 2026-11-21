@@ -29,6 +29,7 @@ from src.evaluation_metrics import (
     REFERENCE_COMMIT,
     aggregate,
     joint_record,
+    lane_end_arrival_fields,
     wilson,
 )
 from src.evaluation_results import (
@@ -157,10 +158,12 @@ def test_efficiency_and_wilson():
     assert result["first_e77_lane_distribution"]["0"]["denominator"] == 1
 
 
-def fixture_report(checkpoint, seed=42, step=100_000, episodes=100, include_stalled=True):
+def fixture_report(checkpoint, seed=42, step=100_000, episodes=100,
+                   protocol_version=EVALUATION_PROTOCOL_VERSION):
     """Synthetic but internally consistent evaluator output."""
     from scripts.evaluate_masac_checkpoints import expected_environment
 
+    include_stalled = protocol_version >= 3
     records = []
     for index in range(episodes):
         agents = {}
@@ -177,6 +180,9 @@ def fixture_report(checkpoint, seed=42, step=100_000, episodes=100, include_stal
             agents[key] = m.finish(
                 "Arrived" if index % 2 else "Collision", 50
             )
+            if protocol_version >= 4:
+                agents[key].update(lane_end_arrival_fields(agents[key]["raw_arrival"], False))
+                agents[key]["lane_end_blocks"] = []
 
         records.append(
             dict(
@@ -203,7 +209,7 @@ def fixture_report(checkpoint, seed=42, step=100_000, episodes=100, include_stal
         checkpoint_sha256=sha256(checkpoint),
         reference_commit=REFERENCE_COMMIT,
         metric_version=METRIC_VERSION,
-        evaluation_protocol_version=EVALUATION_PROTOCOL_VERSION if include_stalled else 2,
+        evaluation_protocol_version=protocol_version,
         git=git_metadata(),
         evaluation_code_sha256=evaluation_fingerprint(),
         runtime_versions=runtime_versions(),
@@ -265,12 +271,16 @@ def test_batch_fixed_protocol_skip_failure_and_recompute(work):
         run(work, evaluator=fake)
 
 
-def test_legacy_evaluation_report_remains_readable(work):
+@pytest.mark.parametrize("protocol_version", [2, 3])
+def test_legacy_evaluation_report_remains_readable(work, protocol_version):
     checkpoint = work / "model.pt"
     torch.save({"global_step": 100_000}, checkpoint)
     summary = work / "summary.json"
-    write_results(summary, fixture_report(checkpoint, episodes=2, include_stalled=False))
-    assert "stalled_rate" not in validate_results(summary)["joint"]
+    write_results(summary, fixture_report(checkpoint, episodes=2, protocol_version=protocol_version))
+    joint = validate_results(summary)["joint"]
+    assert ("stalled_rate" in joint) is (protocol_version == 3)
+    assert joint["raw_arrival_rate"] == 50
+    assert "lane_end_block_free_arrival_rate" not in joint
 
 
 def test_plot_single_multi_seed_and_algorithm(work, monkeypatch):

@@ -166,6 +166,7 @@ python3 evaluate_masac.py \
 | SUMO emergency stopping | 原始 SUMO 事件，报告步数和发生回合率 | 与旧事件统计一致；不等同于急刹 |
 | Teleport | 历史报告保留该统计字段 | 当前 SUMO 配置禁用，评估不采集该事件 |
 | 成功 / raw arrival | 均以 Arrived 为准 | 评估报表兼容历史字段 |
+| 无末端受阻到达 | 到达且该车没有 SUMO 明确报告「车道末端无下一路段连接」的急停警告 | 与普通到达率并列，补救成功仍计入普通到达 |
 
 上述一致指同一有效输入上的统计规则；双 Ego 的插入时刻、路径和现有终止实现不同，不代表跨场景的成功事件或性能可直接等同。环境终止规则不因指标适配改变。
 
@@ -228,7 +229,11 @@ checkpoint 保留原有模型/优化器字段，并增加 Git 和源码 SHA256�
 
 单模型入口新增 `--trace`，默认关闭首回合 TRACE。请求 `speed_mode=96` 保持不变，实际 `getSpeedMode()` 的所有读回值按车保留在每回合和环境元数据中。本机 SUMO 1.20.0 的短程测试读回为 32（请求为 96）；工具原样记录，不将请求值冒充实际值，也不修改控制模式。JSON 同时记录 checkpoint SHA256、训练配置、Git/源码哈希、SUMO 版本、NumPy/PyTorch 版本、路网/路线哈希及关键评估配置。
 
-核心统计仍为 `dual-ego-v1`，扩展输出协议版本为 2；旧 JSON 字段和单位保留。新增联合无碰撞率为没有任一 Ego 碰撞的完整回合比例（不代表成功）。所有回合率提供 `*_stats`，包含分子、分母和 Wilson 95% CI（单位与对应比例一致）；100 个评估回合不是 100 个独立训练重复。
+核心统计仍为 `homogeneous-dual-ego-v1`，扩展输出协议为 v4。普通到达、联合无碰撞及其他历史指标保留既有字段与单位。回合率的 `*_stats` 提供分子、分母和 Wilson 95% CI。100 个评估回合不构成 100 个独立训练重复。
+
+v4 从每回合的 SUMO 警告日志提取错车道末端受阻。仅识别 `performs emergency stop at the end of lane ... because there is no connection to the next edge`，无需速度或减速度门槛。同车同车道且相隔至多一个仿真步的警告合并为一次事件，逐种子 JSON/CSV 保留车道、首次和末次时间、原始警告数、每条的减速度与偏移。普通 `emergency braking` 警告单列，背景车事件另列在 `traffic_sumo_warnings`。
+
+每辆 Ego 和双车汇总均提供普通到达率 `raw_arrival_rate`、无末端受阻到达率 `lane_end_block_free_arrival_rate` 以及受阻后到达数 `arrivals_after_lane_end_block`。双车无末端受阻到达要求各车都到达且都无该事件。日志缺失时，已到达但无法分类的结果记为未知，汇总显示未知回合数，相关率为 `null`。旧报告的普通到达统计继续可读。
 
 制动对照通过 `--actor-leader-features` 分组。两组保持相同的环境版本、训练配置和评估种子。与 v2 历史模型做同口径对照时，用 `--masac-env-version 2` 训练新组，沿用 v2 的 Actor 车道索引和出口终止规则。评估 JSON/CSV 逐车记录首次请求制动时间、真实步前 TTC 风险首次出现时间，以及首次连续 TTC 风险窗口内从风险起点到 Actor 请求制动和 SUMO 实测制动的时间。制动阈值为加速度 ≤ −0.1 m/s²。未观察到对应事件时输出 `null`，比较时分别报告风险回合数和无制动响应的回合数。
 

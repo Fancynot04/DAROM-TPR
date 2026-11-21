@@ -7,6 +7,7 @@ import time
 from collections import Counter
 from dataclasses import asdict
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import torch
@@ -22,7 +23,10 @@ from src.visualization.gui_camera import (
 )
 from src.agents.masac import MultiAgentGaussianActor
 from train_masac import snapshot, AGENT_IDS
-from src.evaluation_metrics import AgentMetrics, BrakingResponse, aggregate, joint_record, REFERENCE_COMMIT, wilson
+from src.evaluation_metrics import (
+    AgentMetrics, BrakingResponse, aggregate, joint_record, lane_end_arrival_fields, REFERENCE_COMMIT, wilson,
+)
+from src.evaluation_warnings import read_sumo_warnings
 from src.experiment_tracking import sha256, git_metadata, evaluation_fingerprint, runtime_versions
 from src.evaluation_results import write_results, EVALUATION_PROTOCOL_VERSION
 from sumolib import checkBinary
@@ -108,6 +112,10 @@ def evaluate(args):
 
     records = []
     sumo_version = None
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    warning_logs = TemporaryDirectory(prefix="sumo-warnings-", dir=output.parent)
+    env.sumo_warning_log_dir = Path(warning_logs.name)
 
     try:
         for episode in range(args.episodes):
@@ -302,6 +310,19 @@ def evaluate(args):
                     f"Agent states: {details}"
                 )
 
+            warning_path = env.world.warning_log
+            step_length = env.world.step_length
+            env.close()  # Flush SUMO's warning log before classifying this episode.
+            warnings = read_sumo_warnings(warning_path, step_length)
+            for ego_id, agent in agent_records.items():
+                vehicle_warnings = None if warnings is None else warnings.get(ego_id, {})
+                blocks = None if vehicle_warnings is None else vehicle_warnings.get("lane_end_blocks", [])
+                agent.update(lane_end_arrival_fields(agent["raw_arrival"], None if blocks is None else bool(blocks)))
+                agent["lane_end_blocks"] = blocks
+                agent["sumo_emergency_braking_warnings"] = (
+                    None if vehicle_warnings is None else vehicle_warnings.get("emergency_braking_warnings", [])
+                )
+
             both_success = all(
                 agent_records[ego_id]["success"]
                 for ego_id in AGENT_IDS
@@ -317,6 +338,9 @@ def evaluate(args):
                 "outcomes": outcomes,
                 "rewards": rewards_total,
                 "both_success": both_success,
+                "traffic_sumo_warnings": (None if warnings is None else {
+                    vehicle_id: events for vehicle_id, events in warnings.items() if vehicle_id not in AGENT_IDS
+                }),
                 **env.reward_summary(),
             }
             records.append(record)
@@ -329,7 +353,10 @@ def evaluate(args):
             )
 
     finally:
-        env.close()
+        try:
+            env.close()
+        finally:
+            warning_logs.cleanup()
 
     per_agent = {ego_id: aggregate([r["per_agent"][ego_id] for r in records])
                  for ego_id in AGENT_IDS}
@@ -376,6 +403,10 @@ def evaluate(args):
             "jerk": "absolute measured acceleration difference / simulation dt; exclude first and terminal transitions",
             "hard_braking": "valid post-step acceleration <= -4.5 m/s^2, including terminal",
             "success": "Arrived",
+            "lane_end_block_free_arrival": (
+                "Arrived without a SUMO lane-end emergency stop reporting no connection to the next edge; "
+                "group warnings for the same vehicle and lane within one simulation step"
+            ),
             "joint_continuous": "equal agents within episode, then equal valid episodes",
             "global_steps": "env.step calls, excludes reset bootstrap simulation steps",
             "agent_steps_sum": "sum of environment active_steps (actions applied); excludes pre-step Missed Exit",
@@ -413,10 +444,6 @@ def evaluate(args):
             per_agent[ego_id]["success_rate"] / 100
         )
 
-    output = Path(args.output)
-    output.parent.mkdir(
-        parents=True, exist_ok=True
-    )
     write_results(output, summary)
 
     print("\n===== MASAC Evaluation =====")
@@ -424,6 +451,16 @@ def evaluate(args):
     print("Episodes:", len(records))
     print("Success rates:", summary["success_rates"])
     print("Joint success:", summary["joint_success_rate"])
+    for label, result in (*per_agent.items(), ("joint", summary["joint"])):
+        rate = result["lane_end_block_free_arrival_rate"]
+        clean_rate = "unknown" if rate is None else f"{rate:.2f}%"
+        episodes = result["episodes"]
+        arrivals = result["raw_arrival_rate_stats"]["numerator"]
+        clean_arrivals = result["lane_end_block_free_arrivals"]
+        print(f"{label} arrival={result['raw_arrival_rate']:.2f}% ({arrivals}/{episodes}) "
+              f"lane_end_block_free_arrival={clean_rate} ({clean_arrivals}/{episodes} verified) "
+              f"arrivals_after_lane_end_block={result['arrivals_after_lane_end_block']} "
+              f"unclassified={result['lane_end_block_free_arrival_unknown_episodes']}")
     print("Outcome counts:", summary["outcome_counts"])
     print("Report:", output)
     return summary

@@ -4,12 +4,12 @@ import io
 import json
 from pathlib import Path
 
-from src.evaluation_metrics import aggregate, joint_record
+from src.evaluation_metrics import aggregate, joint_record, lane_end_arrival_fields
 from src.experiment_tracking import atomic_write, atomic_json
 
 from src.agents.replay_buffer import JointReplayBuffer
 
-EVALUATION_PROTOCOL_VERSION = 3
+EVALUATION_PROTOCOL_VERSION = 4
 
 
 def episode_rows(records):
@@ -22,6 +22,8 @@ def episode_rows(records):
                 for key, value in record["per_agent"][ego].items()
             })
         row.update({f'joint_{key}': value for key, value in record['joint'].items()})
+        if "traffic_sumo_warnings" in record:
+            row["traffic_sumo_warnings"] = record["traffic_sumo_warnings"]
         rows.append({k: json.dumps(v, sort_keys=True) if isinstance(v, (dict, list)) else v for k, v in row.items()})
     return rows
 
@@ -42,7 +44,8 @@ def validate_results(path):
     path = Path(path)
     summary = json.loads(path.read_text())
     records = summary['records']
-    include_stalled = summary.get('evaluation_protocol_version', 2) >= 3
+    protocol_version = summary.get('evaluation_protocol_version', 2)
+    include_stalled = protocol_version >= 3
     if len(records) != summary['episodes'] or not records:
         raise ValueError('Incomplete episode records')
     with path.with_name('episodes.csv').open(newline='', encoding='utf-8') as stream:
@@ -64,6 +67,13 @@ def validate_results(path):
         for row in record['per_agent'].values():
             if not row.get('terminal_reason') or row['terminal_reason'] in ('Unknown', 'UnknownRemoval'):
                 raise ValueError('Incomplete terminal reason')
+            if protocol_version >= 4:
+                if "lane_end_blocks" not in row:
+                    raise ValueError("Missing lane-end block diagnostics")
+                blocks = row["lane_end_blocks"]
+                expected = lane_end_arrival_fields(row["raw_arrival"], None if blocks is None else bool(blocks))
+                if any(key not in row or row[key] != value for key, value in expected.items()):
+                    raise ValueError("Lane-end arrival classification mismatch")
     for key in ('global_steps', 'agent_steps_sum'):
         if key in summary and sum(r[key] for r in records) != summary[key]:
             raise ValueError('Global/agent step aggregate mismatch')

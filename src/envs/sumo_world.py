@@ -12,13 +12,14 @@ SUMO_DIR = Path(__file__).resolve().parents[2] / "sumo_new"
 class SumoWorld:
     """管理一个 SUMO 仿真世界，不负责具体 Ego 的决策。"""
 
-    def __init__(self, scenario="easy", seed=42, gui=False, route_file=None):
+    def __init__(self, scenario="easy", seed=42, gui=False, route_file=None, warning_log=None):
         if scenario not in ("easy", "medium", "hard"):
             raise ValueError(f"Unknown scenario: {scenario}")
 
         self.scenario = scenario
         self.seed = seed
         self.gui = gui
+        self.warning_log = warning_log
 
         self.step_length = 0.1
         self.label = "o3_d3_world"
@@ -68,6 +69,8 @@ class SumoWorld:
         # GUI 启动后自动运行，无需手动点击播放按钮
         if self.gui:
             command.append("--start")
+        if self.warning_log is not None:
+            command.extend(("--error-log", str(self.warning_log), "--aggregate-warnings", "-1"))
 
         traci.start(command, label=self.label)
         self.conn = traci.getConnection(self.label)

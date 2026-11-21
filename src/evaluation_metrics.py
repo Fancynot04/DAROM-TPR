@@ -191,10 +191,23 @@ class AgentMetrics:
 
 
 
+def lane_end_arrival_fields(arrived, blocked):
+    clean_arrival = None if blocked is None else not blocked
+    return {
+        "lane_end_blocked": blocked,
+        "lane_end_block_free_arrival": clean_arrival if arrived else False,
+        "arrived_after_lane_end_block": blocked if arrived else False,
+    }
+
+
 def joint_record(agents, *, include_stalled=True):
     rows = list(agents.values())
     result = dict(success=all(r['success'] for r in rows),
                   raw_arrival=all(r['raw_arrival'] for r in rows))
+    if all("lane_end_blocked" in r for r in rows):
+        blocked = [r["lane_end_blocked"] for r in rows]
+        joint_blocked = True if any(blocked) else None if None in blocked else False
+        result.update(lane_end_arrival_fields(result["raw_arrival"], joint_blocked))
     for key in ('ego_teleported', 'hard_braking_episode', 'sumo_emergency_stopping_episode'):
         result[key] = any(r[key] for r in rows)
     for key in ('event_samples', 'agent_steps', 'speed_samples', 'jerk_samples', 'hard_braking_samples',
@@ -221,6 +234,15 @@ def aggregate(rows, *, include_stalled=True):
                       ('sumo_emergency_stopping_episode', 'sumo_emergency_stopping_episode_rate')):
         result[name] = 100 * sum(r[key] for r in rows) / n
         result[name + "_stats"] = wilson(sum(r[key] for r in rows), n)
+    if "lane_end_block_free_arrival" in rows[0]:
+        clean = [row["lane_end_block_free_arrival"] for row in rows]
+        verified = clean.count(True)
+        unknown = clean.count(None)
+        result["lane_end_block_free_arrivals"] = verified
+        result["lane_end_block_free_arrival_unknown_episodes"] = unknown
+        result["lane_end_block_free_arrival_rate"] = None if unknown else 100 * verified / n
+        result["lane_end_block_free_arrival_rate_stats"] = None if unknown else wilson(verified, n)
+        result["arrivals_after_lane_end_block"] = sum(row["arrived_after_lane_end_block"] is True for row in rows)
     for key in ('mean_speed_mps', 'mean_abs_jerk_mps3'):
         result[key] = mean([r[key] for r in rows])
         result[key + '_valid_episodes'] = sum(r[key] is not None for r in rows)

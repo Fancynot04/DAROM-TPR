@@ -66,6 +66,7 @@ class MultiEgoEnv:
         self.stalled_shadow = stalled_shadow
         self.stalled_terminate = stalled_terminate
         self.stalled_block_grace_s = stalled_block_grace_s
+        self.sumo_warning_log_dir = None
         self.stall_detectors = {}
         self.route_file = (route_file if route_file is not None else
                            SUMO_DIR / "Antwerp_easy_o3_d3_homogeneous_dual.rou.xml")
@@ -384,6 +385,8 @@ class MultiEgoEnv:
             seed=seed,
             route_file=self.route_file,
             gui=self.gui,
+            warning_log=(self.sumo_warning_log_dir / f"seed-{seed}.log"
+                         if self.sumo_warning_log_dir is not None else None),
         )
         if (not self.legacy_route_semantics or self.route_guidance_rules) and self.lane_network is None:
             self.lane_network = RouteLaneNetwork(self.world.net_file)

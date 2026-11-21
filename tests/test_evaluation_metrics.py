@@ -9,8 +9,13 @@ import numpy as np
 import pytest
 import torch
 
-from src.evaluation_metrics import AgentMetrics, BrakingResponse, aggregate, joint_record, measured_jerk
+from src.evaluation_metrics import (
+    AgentMetrics, BrakingResponse, aggregate, joint_record, lane_end_arrival_fields, measured_jerk,
+)
+from src.evaluation_results import validate_results
+from src.evaluation_warnings import read_sumo_warnings
 from src.envs.multi_ego_env import MultiEgoEnv
+from src.envs.sumo_world import SumoWorld
 from src.agents.masac import MultiAgentGaussianActor
 from train_masac import snapshot, AGENT_IDS
 
@@ -129,10 +134,80 @@ def test_evaluator_files_and_incomplete_error():
     assert int(row['agent_steps_sum']) == report['agent_steps_sum']
     assert report['agent_steps_sum'] == sum(r['agent_steps'] for r in report['per_agent'].values())
     assert report['global_steps'] < report['agent_steps_sum']
+    assert 'joint_lane_end_block_free_arrival' in row
+    assert report['records'][0]['traffic_sumo_warnings'] is not None
+    assert validate_results(args.output) == report
     args.max_steps = 1
     args.output = tmp_path / 'incomplete.json'
     with pytest.raises(RuntimeError, match='incomplete episode'): evaluate(args)
     assert not args.output.exists()
+
+
+def test_lane_end_warnings_are_grouped_and_exclude_only_blocked_arrivals(tmp_path):
+    path = tmp_path / "warnings.log"
+    path.write_text("\n".join([
+        "Warning: Vehicle 'background' performs emergency braking on lane 'E77_0' "
+        "with decel=9.00, wished=4.50, severity=1.00, time=304.80.",
+        "Warning: Vehicle 'ego_2' performs emergency braking on lane ':J106_0_0' "
+        "with decel=9.00, wished=4.50, severity=1.00, time=304.80.",
+        *[
+            "Warning: Vehicle 'ego_1' performs emergency stop at the end of lane 'E77_2' "
+            f"because there is no connection to the next edge (decel=4.01, offset=0.04), time={time}."
+            for time in ("304.80", "304.90", "305.00", "305.10", "305.20", "305.40")
+        ],
+    ]), encoding="utf-8")
+    warnings = read_sumo_warnings(path, 0.1)
+    assert not warnings["background"]["lane_end_blocks"]
+    assert warnings["background"]["emergency_braking_warnings"][0]["severity"] == 1.0
+    assert not warnings["ego_2"]["lane_end_blocks"]
+    first, second = warnings["ego_1"]["lane_end_blocks"]
+    assert first["lane_id"] == "E77_2"
+    assert (first["first_time_s"], first["last_time_s"], first["warning_count"]) == (304.8, 305.2, 5)
+    assert second["warning_count"] == 1
+
+    agents = {ego_id: AgentMetrics().finish("Arrived", 0) for ego_id in AGENT_IDS}
+    for ego_id, agent in agents.items():
+        agent.update(lane_end_arrival_fields(True, bool(warnings.get(ego_id, {}).get("lane_end_blocks"))))
+    joint = joint_record(agents)
+    assert agents["ego_2"]["lane_end_block_free_arrival"]
+    assert joint["raw_arrival"]
+    assert joint["arrived_after_lane_end_block"]
+    assert not joint["lane_end_block_free_arrival"]
+    totals = aggregate([joint])
+    assert totals["raw_arrival_rate"] == 100
+    assert totals["lane_end_block_free_arrival_rate"] == 0
+    assert totals["arrivals_after_lane_end_block"] == 1
+
+    assert read_sumo_warnings(tmp_path / "missing.log", 0.1) is None
+    agents["ego_1"].update(lane_end_arrival_fields(True, None))
+    totals = aggregate([joint_record(agents)])
+    assert totals["lane_end_block_free_arrival_rate"] is None
+    assert totals["lane_end_block_free_arrival_unknown_episodes"] == 1
+
+
+def test_real_sumo_writes_wrong_lane_stop_to_warning_log(tmp_path):
+    route = tmp_path / "wrong-lane.rou.xml"
+    route.write_text("""<routes>
+        <route id="to-exit" edges="E77 D3"/>
+        <vehicle id="ego_1" route="to-exit" depart="0" departLane="2" departSpeed="0"/>
+    </routes>""", encoding="utf-8")
+    warning_log = tmp_path / "sumo.log"
+    world = SumoWorld(route_file=route, warning_log=warning_log)
+    try:
+        conn = world.start()
+        world.step()
+        vehicle = conn.vehicle
+        lane = "E77_2"
+        vehicle.setLaneChangeMode("ego_1", 0)
+        vehicle.setSpeedMode("ego_1", 96)
+        vehicle.moveTo("ego_1", lane, conn.lane.getLength(lane) - 0.04)
+        vehicle.setSpeed("ego_1", 2.0)
+        for _ in range(5):
+            world.step()
+    finally:
+        world.close()
+    blocks = read_sumo_warnings(warning_log, world.step_length)["ego_1"]["lane_end_blocks"]
+    assert blocks[0]["lane_id"] == lane
 
 
 def test_real_terminal_braking_before_removal():
