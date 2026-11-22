@@ -440,8 +440,8 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
         assert report["training_config"]["safety_reward"] == {
             "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 0.5,
         }
-        assert report["route_preparation"]["settings"]["mode"] == "progress_bonus"
-        assert report["route_preparation"]["settings"]["reference_step_m"] == pytest.approx(10 / 3)
+        assert report["route_preparation"]["settings"]["mode"] == "first_progress_staircase"
+        assert report["route_preparation"]["settings"]["reference_step_m"] == 3.333
         assert report["route_preparation"]["settings"]["bonus_cap"] == (0.007 if actor_leader_features else 0.005)
         assert report["environment"]["requested_speed_mode"] == 96
         for key in AGENT_IDS:
@@ -579,11 +579,13 @@ def test_training_cli_defaults():
     assert args.reward_route_preparation is None
     assert parser.parse_args(["--no-reward-route-preparation"]).reward_route_preparation is False
     from train_masac import preparation_settings
-    assert preparation_settings(args)["mode"] == "progress_bonus"
+    assert preparation_settings(args)["mode"] == "first_progress_staircase"
     assert preparation_settings(args)["bonus_cap"] == 0.005
     fixed = {"mode": "continuous_bonus", "stages": [], "bonus_cap": 0.007}
     fixed_args = parser.parse_args(["--reward-route-preparation-bonus-cap", "0.007"])
     assert preparation_settings(fixed_args, fixed, resuming=True) == fixed
+    progress = {"mode": "progress_bonus", "stages": [], "bonus_cap": 0.005, "reference_step_m": 10 / 3}
+    assert preparation_settings(args, progress, resuming=True) == progress
     legacy = parser.parse_args(["--reward-route-preparation-exit-weight", "0.003"])
     assert preparation_settings(legacy)["weights"] == {"weaving": 0.001, "exit": 0.003}
     assert not parser.parse_args(["--no-reward-rear-following"]).reward_rear_following

@@ -15,7 +15,7 @@ from .exit_rules import missed_exit_before_step, route_missed_before_step
 from .route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES, RouteLaneNetwork, UNREACHABLE_LANE_CHANGES
 from .route_preparation import (
     DEFAULT_ROUTE_PREPARATION_BONUS, DEFAULT_ROUTE_PREPARATION_STAGES,
-    PREPARATION_BONUS_MODES, PREPARATION_PROGRESS_BONUS, RoutePreparation,
+    PREPARATION_BONUS_MODES, PREPARATION_V1, RoutePreparation,
 )
 from src.rewards.events import STALLED_EVENT, b0_reward
 from src.rewards.masac import MASACRewardProtocol, MASACRewards, TARGET_EXIT_DIM
@@ -85,7 +85,7 @@ class MultiEgoEnv:
         if reward_config is not None and reward_config.route_preparation:
             self.route_preparation = RoutePreparation(
                 route_preparation_settings if route_preparation_settings is not None else {
-                    "mode": PREPARATION_PROGRESS_BONUS, "bonus_cap": DEFAULT_ROUTE_PREPARATION_BONUS,
+                    "mode": PREPARATION_V1, "bonus_cap": DEFAULT_ROUTE_PREPARATION_BONUS,
                     "stages": DEFAULT_ROUTE_PREPARATION_STAGES,
                 },
             )

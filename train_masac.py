@@ -22,7 +22,7 @@ from src.envs.route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES
 from src.envs.route_preparation import (
     DEFAULT_REFERENCE_STEP_M, DEFAULT_ROUTE_PREPARATION_BONUS, DEFAULT_ROUTE_PREPARATION_STAGES,
     DEFAULT_ROUTE_PREPARATION_WEIGHTS, PREPARATION_BONUS_MODES, PREPARATION_PENALTY,
-    PREPARATION_PROGRESS_BONUS, checkpoint_preparation_settings,
+    PREPARATION_DISTANCE_MODES, PREPARATION_V1, V1_REFERENCE_STEP_M, checkpoint_preparation_settings,
 )
 from src.envs.stalled import stalled_block_grace_for_version
 from src.rewards.masac import (
@@ -188,11 +188,11 @@ def preparation_settings(args, saved=None, *, resuming=False):
         if legacy_override:
             mode = PREPARATION_PENALTY
         elif bonus is not None and (saved is None or saved["mode"] == PREPARATION_PENALTY):
-            mode = PREPARATION_PROGRESS_BONUS
+            mode = PREPARATION_V1
     if resuming and saved is None and mode is None and stage_file is None:
         return None
     saved = saved or {}
-    mode = mode or saved.get("mode", PREPARATION_PROGRESS_BONUS)
+    mode = mode or saved.get("mode", PREPARATION_V1)
     stages = saved.get("stages", DEFAULT_ROUTE_PREPARATION_STAGES)
     if stage_file:
         stages = json.loads(Path(stage_file).read_text(encoding="utf-8"))
@@ -202,8 +202,11 @@ def preparation_settings(args, saved=None, *, resuming=False):
         if bonus is None:
             bonus = saved.get("bonus_cap", DEFAULT_ROUTE_PREPARATION_BONUS)
         settings = {"mode": mode, "stages": stages, "bonus_cap": bonus}
-        if mode == PREPARATION_PROGRESS_BONUS:
-            settings["reference_step_m"] = saved.get("reference_step_m", DEFAULT_REFERENCE_STEP_M)
+        if mode in PREPARATION_DISTANCE_MODES:
+            default_step = V1_REFERENCE_STEP_M if mode == PREPARATION_V1 else DEFAULT_REFERENCE_STEP_M
+            settings["reference_step_m"] = (
+                saved.get("reference_step_m", default_step) if mode == saved.get("mode") else default_step
+            )
         return settings
     if bonus is not None:
         raise ValueError("Preparation bonus cap requires a bonus mode")
@@ -945,9 +948,9 @@ def build_parser():
     parser.add_argument("--collision-penalty", type=float,
                         help="Override the final MASAC collision penalty with this nonnegative magnitude")
     parser.add_argument("--reward-route-preparation-mode", choices=(*PREPARATION_BONUS_MODES, PREPARATION_PENALTY),
-                        help="Default: progress_bonus for fresh training, saved mode when resuming")
+                        help="Default: first_progress_staircase for fresh training, saved mode when resuming")
     parser.add_argument("--reward-route-preparation-bonus-cap", type=float,
-                        help=f"Per-step bonus cap (fresh training default: {DEFAULT_ROUTE_PREPARATION_BONUS})")
+                        help=f"Per-step cruise bonus cap (fresh training default: {DEFAULT_ROUTE_PREPARATION_BONUS})")
     for kind in DEFAULT_ROUTE_PREPARATION_WEIGHTS:
         parser.add_argument(f"--reward-route-preparation-{kind}-weight", type=float,
                             help="Select legacy penalty mode and set its phase weight")

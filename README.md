@@ -45,7 +45,7 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 | `comfort` | 有实测步前和步后加速度时，结算 −0.0025 × clip(加速度差的绝对值, 0, 1)。新训练的权重可用 `--reward-comfort-weight` 设置。 |
 | `team` | 双车均到达指定出口时，回合一次性记录 +100。环境通过 `env.team_reward` 提供本步值，日志和评估 JSON 用 `team_reward` 记录回合值。独立团队 Twin-Q 学习该回报，每辆 Actor 最大化个人 Q 加团队 Q。Actor 团队权重用 `--team-q-weight` 设置，默认 1.0。 |
 | `route-guidance` | 默认 0。加 `--reward-route-guidance` 后，每车首次实际通过任务允许的关键连接时 +5。可用 `--reward-route-guidance-weight` 设置权重。无匹配规则的任务为 0。 |
-| `route-preparation` | 安全前进时按准备程度和首次前进距离发放，默认每步上限 +0.005。交织区和驶离区独立计算准备程度，E75 不发路线准备奖金。 |
+| `route-preparation` | 默认开启。稳定完成换道且阶段需求创本回合新低时，每减少一次需求奖励 +0.1。安全前进另发按距离和需求分档的巡航奖，基准上限为 +0.005。 |
 
 `--terminal-penalty-scale` 缩放个人任务项中的负终止奖励，默认 1.0。设为 0.2 时，碰撞为 −100，错过出口、停滞和超时均为 −80。`--collision-penalty 1000` 可将碰撞单独设为 −1000，显式指定的碰撞值优先于整体缩放。个人到达、汇入和团队奖励继续按上表结算。这些参数随 `reward_protocol` 写入 checkpoint，评估恢复其存档值。旧 checkpoint 缺少这些字段时采用缩放因子 1.0 和原碰撞值。训练更新日志中的 `target_std` 和 `team_target_std` 分别记录个人和团队 Critic 的批内 TD 目标标准差。
 
@@ -55,15 +55,17 @@ Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 
 
 路线规则位于 [`DEFAULT_ROUTE_GUIDANCE_RULES`](src/envs/route_lane_plan.py)。以该 Ego 实际 SUMO 路线的完整外部 edge 序列匹配 `route`，因此同一出口的不同进场路线可各自配置。新增规则填写 `route`、关键分流的相邻上游和下游 edge `critical_connection`，以及一个或多个实际可接受的 `[上游车道 ID, 下游车道 ID]` 组成的 `accepted_connections`。现有示例匹配 `O3 → E75 → E76 → E77 → D3`，仅接受 `E76_0 → E77_0`，经 `E76_0 → E77_1` 为 0。由实际经过的 SUMO 内部车道识别连接，保持车道自然通过也计分，每辆车每回合最多一次。直接构造环境时可通过 `route_guidance_rules` 传入规则。
 
-新训练的路线准备奖金按首次前进距离发放，公式为 `cap × 准备程度 × min(1, 首次前进距离 / 参考步长)`。准备程度为 `clip(1 − n / N, 0, 1)`。`n` 是阶段内剩余的最少合法主动换道数，`N` 是阶段可达车道的最大需求。目标已满足时准备程度为 1，最大需求时为 0，不可达时奖金为 0。阶段内所有合法车道都满足目标时，`N=0` 按准备程度 1 结算。参考步长取 120 km/h 在 0.1 s 内行驶的距离，约 3.333 m。默认单步奖金上限 `0.005` 可用 `--reward-route-preparation-bonus-cap` 调整。一次性路线引导 `+5` 默认关闭。
+新训练的路线准备奖励由首次推进事件奖和阶梯巡航奖组成。每辆车按回合、按阶段记录最低需求 `n_min`，以进入阶段后的首个可确认需求初始化。需求 `n` 是当前阶段还需完成的最少合法主动换道数。同一外部路段内稳定完成换道时，先发 `0.1 × max(0, n_min − n_target)`，再更新阶段最低需求。自然接道只更新状态。事件奖由稳定完成和需求变化决定，换道风险仍在对应奖励项独立结算。
 
-O3→D3 的整段 E75 是准备段，路线准备奖金为 0，沿用汇入奖励。交织区包括任务连接 J104、整段 E76（882.60 m）和任务连接 J105，目标是接入 `E77_0`，`N=4`。驶离区是整段 E77（172.35 m），目标是接入 `D3_0`，`N=5`。每步按步首实际车道归区。J104 按已选择的下游 E76 车道计算需求，J105 按实际内部车道识别的连接判定是否接入 `E77_0`。
+巡航奖为 `0.005 × 本步安全门控 × 分区权重 × g(n) × min(1, 新增距离 / 3.333 m)`。各区共用阶梯系数，`n=0、1、2` 分别取 `1.0、0.5、0.2`，其余需求及不可确认需求取零。E75 权重为 `0.4`，交织区 J104、E76、J105 和驶离区 E77 为 `1.0`，其余路段为零。每步按步首路段归区。基准巡航上限可用 `--reward-route-preparation-bonus-cap` 调整。一次性路线引导 `+5` 默认关闭。
 
-发放需要步首和步末可确认的当前车道前后车安全，以及沿任务路线的前向位移。每辆车按回合记录在任务路线上的历史最远位置，越过该位置的新增距离才计奖。因风险未发奖的已行驶距离同样计入最远位置。停车、碰撞、teleport、异常位移或所需观测缺失时为 0。安全直行可按已有准备程度拿奖金。实际横移还检查实时目标车道风险，沿用源车道准备程度，稳定进入目标车道后才切换。单纯发出请求时按当前车道结算。
+O3→D3 的 E75 需求根据到交织区目标的合法连接反推，六条车道的需求依次为 `0、0、1、2、3、4`。交织区目标为接入 `E77_0`，J104 使用已选择的下游 E76 车道需求，J105 使用实际内部连接判定目标是否达成。E77 的目标为接入 `D3_0`。
 
-用 `--no-reward-route-preparation` 可关闭该项。用 `--route-preparation-stages FILE.json` 可提供与 [默认阶段](src/envs/route_preparation.py) 同结构的完整路线列表，`include_adjacent_connections` 将相关任务连接纳入阶段。checkpoint 和评估输出保存模式、分区、奖金上限和适用的参考步长。新训练默认 `progress_bonus`。旧 checkpoint 的 `continuous_bonus` 继续按步发固定奖金，没有模式字段的旧配置按 `legacy_penalty` 复现存档分区和负惩罚。缺少路线准备配置的旧 checkpoint 关闭该项。可用 `--reward-route-preparation-mode` 显式选择模式。旧的 `--reward-route-preparation-weaving-weight` 和 `--reward-route-preparation-exit-weight` 会选择负惩罚模式，该模式以 `preparation_distance_m` 限定结算距离，缺省为阶段所在外部路段的全长。
+巡航奖需要步首和步末可确认的当前车道前后车安全，实际横移时还检查实时目标车道风险。横移期间沿用源车道需求，稳定完成后切到目标车道需求。每辆车按回合记录任务路线上的历史最远位置，因风险未发奖的已行驶距离也计入最远位置。巡航奖只结算前向位移中超过该位置的新距离。
 
-`route_preparation` 独立记账。控制 trace 和评估轨迹保存步首阶段、实际车道或连接、步末车道、`n`、`N`、准备程度、前后时点的风险、实际前进距离、首次前进距离和实发金额。回合日志和评估结果按车和阶段记录计奖距离和累计奖金。相同准备程度下安全通过同一段路，未折扣路线奖金按距离累计。低速时舒适度扣分仍可能超过速度奖和路线奖金之和。
+用 `--no-reward-route-preparation` 可关闭两项路线准备奖励。用 `--route-preparation-stages FILE.json` 可提供与 [默认阶段](src/envs/route_preparation.py) 同结构的完整路线列表，`include_adjacent_connections` 将相关任务连接纳入阶段。checkpoint 和评估输出保存模式、分区、巡航上限和适用的参考步长。新训练默认 `first_progress_staircase`。旧 checkpoint 按存档模式恢复线性距离奖 `progress_bonus`、固定步奖 `continuous_bonus` 或负惩罚 `legacy_penalty`。缺少路线准备配置的旧 checkpoint 关闭该项。可用 `--reward-route-preparation-mode` 显式选择模式。旧的 `--reward-route-preparation-weaving-weight` 和 `--reward-route-preparation-exit-weight` 会选择负惩罚模式，该模式以 `preparation_distance_m` 限定结算距离，缺省为阶段所在外部路段的全长。
+
+`route_preparation` 独立记账。控制 trace 和评估轨迹保存步首阶段、实际车道或连接、步末车道、需求、分区权重、安全观测、实际和新增前进距离、更新前后的最低需求、事件奖及巡航奖。回合日志和评估结果按车和阶段记录计奖距离和两项累计奖金。
 
 团队 Q 按共享 SUMO 步折扣。一辆 Ego 先到达时，团队价值继续沿后续状态传递，直至全员到达或任意 Ego 失败。Replay 区分已到达与尚未出发；个人奖励和团队奖励分别写入日志。
 

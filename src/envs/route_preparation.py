@@ -28,9 +28,15 @@ DEFAULT_ROUTE_PREPARATION_WEIGHTS = {"weaving": 0.001, "exit": 0.002}
 DEFAULT_ROUTE_PREPARATION_BONUS = 0.005
 PREPARATION_BONUS = "continuous_bonus"
 PREPARATION_PROGRESS_BONUS = "progress_bonus"
-PREPARATION_BONUS_MODES = (PREPARATION_PROGRESS_BONUS, PREPARATION_BONUS)
+PREPARATION_V1 = "first_progress_staircase"
+PREPARATION_DISTANCE_MODES = (PREPARATION_V1, PREPARATION_PROGRESS_BONUS)
+PREPARATION_BONUS_MODES = (*PREPARATION_DISTANCE_MODES, PREPARATION_BONUS)
 PREPARATION_PENALTY = "legacy_penalty"
 DEFAULT_REFERENCE_STEP_M = MAX_SPEED * STEP_LENGTH_S
+V1_REFERENCE_STEP_M = 3.333
+V1_DEMAND_REDUCTION_REWARD = 0.1
+V1_PREPARATION_ZONE_WEIGHT = 0.4
+V1_CRUISE_WEIGHTS = (1.0, 0.5, 0.2)
 LATERAL_MOTION_MPS = 0.05
 
 
@@ -67,36 +73,58 @@ class PreparationPhase:
             raise ValueError(f"Invalid preparation entry lanes for {next_edge}: {allowed_entry}")
         reachable_entries = {lane for lane in allowed_entry
                              if (index + 1, entry_indices[lane]) in plan.signed_changes}
-        lane_indices = network.lanes[approach]
-        distance_m = spec.get("preparation_distance_m")
-        if distance_m is None:
-            distance_m = max(float(lane["length"]) for lane in lane_indices.values())
         zero = [
-            lane_index for lane_index, lane in lane_indices.items()
+            lane_index for lane_index, lane in network.lanes[approach].items()
             if any(target in reachable_entries for target, _ in plan.passage_links.get((index, lane["id"]), {}))
         ]
         if not zero:
             raise ValueError(f"No permitted preparation connection for {plan.route} at {approach}")
+        return index, cls.from_demand(
+            spec["kind"], index, weight, network, plan, dict.fromkeys(zero, 0),
+            spec.get("preparation_distance_m"),
+        )
 
+    @classmethod
+    def from_demand(cls, kind, index, weight, network, plan, demand, distance_m=None):
+        approach, next_edge = plan.route[index:index + 2]
+        lanes = network.lanes[approach]
+        if distance_m is None:
+            distance_m = max(float(lane["length"]) for lane in lanes.values())
         reverse = defaultdict(list)
-        for lane_index in lane_indices:
+        for lane_index in lanes:
             for _, neighbor in plan.lateral_neighbors.get((index, lane_index), ()):
                 reverse[neighbor].append(lane_index)
-        demand = dict.fromkeys(zero, 0)
-        queue = deque(zero)
+        queue = deque(demand)
         while queue:
             lane_index = queue.popleft()
             for previous in reverse[lane_index]:
-                if previous not in demand:
-                    demand[previous] = demand[lane_index] + 1
+                candidate = demand[lane_index] + 1
+                if previous not in demand or candidate < demand[previous]:
+                    demand[previous] = candidate
                     queue.append(previous)
         improving = {
             lane_index: tuple(neighbor for _, neighbor in plan.lateral_neighbors.get((index, lane_index), ())
                               if neighbor in demand and demand[neighbor] < count)
             for lane_index, count in demand.items()
         }
-        return index, cls(spec["kind"], approach, next_edge, float(distance_m),
-                          weight, demand, max(demand.values()), improving)
+        return cls(kind, approach, next_edge, float(distance_m),
+                   weight, demand, max(demand.values(), default=0), improving)
+
+    @classmethod
+    def build_preparation(cls, index, weaving_index, weaving, weight, network, plan):
+        downstream = weaving.demand
+        for i in range(weaving_index - 1, index - 1, -1):
+            next_lanes = {lane["id"]: j for j, lane in network.lanes[plan.route[i + 1]].items()}
+            demand = {}
+            for lane_index, lane in network.lanes[plan.route[i]].items():
+                links = plan.passage_links.get((i, lane["id"]), {})
+                costs = [downstream[next_lanes[target]] for target, _ in links
+                         if next_lanes[target] in downstream]
+                if costs:
+                    demand[lane_index] = min(costs)
+            phase = cls.from_demand("preparation", i, weight, network, plan, demand)
+            downstream = phase.demand
+        return phase
 
     def penalty(self, distance, demand, safe_opportunity, moving):
         if not demand or not safe_opportunity or moving is not False or not self.weight:
@@ -157,7 +185,9 @@ class RoutePreparation:
         self.bonus_cap = settings.get("bonus_cap", DEFAULT_ROUTE_PREPARATION_BONUS)
         if not isfinite(self.bonus_cap) or self.bonus_cap < 0:
             raise ValueError("Preparation bonus cap must be finite and nonnegative")
-        self.reference_step_m = settings.get("reference_step_m", DEFAULT_REFERENCE_STEP_M)
+        self.v1 = self.mode == PREPARATION_V1
+        default_step = V1_REFERENCE_STEP_M if self.v1 else DEFAULT_REFERENCE_STEP_M
+        self.reference_step_m = settings.get("reference_step_m", default_step)
         if not isfinite(self.reference_step_m) or self.reference_step_m <= 0:
             raise ValueError("Preparation reference step must be finite and positive")
         self.weights = (dict.fromkeys(DEFAULT_ROUTE_PREPARATION_WEIGHTS, self.bonus_cap)
@@ -199,6 +229,7 @@ class RoutePreparation:
         self.ego_plans = {}
         self.unsettled_changes = {}
         self.progress_frontiers = {}
+        self.minimum_demands = defaultdict(dict)
         self.diagnostics = {ego: {"enabled": False, "reason": "not_departed", "phases": {}}
                             for ego in ego_ids}
         self.step_info = {}
@@ -228,8 +259,17 @@ class RoutePreparation:
                     length = float(network.lanes[phase.approach][lane]["length"])
                     connectors[destination, lane_id] = (phase, phase.demand.get(lane), length,
                                                         plan.internal_connections[source, lane_id])
+            preparation_edge = self.preparation_edges.get(plan.route)
+            if self.v1 and preparation_edge is not None:
+                prep_index = plan.route.index(preparation_edge)
+                for index, phase in tuple(phases.items()):
+                    if phase.kind == "weaving" and index > prep_index:
+                        phases[prep_index] = PreparationPhase.build_preparation(
+                            prep_index, index, phase, self.bonus_cap, network, plan,
+                        )
+                        break
             self.compiled[plan] = phases, connectors
-            if self.mode == PREPARATION_PROGRESS_BONUS:
+            if self.mode in PREPARATION_DISTANCE_MODES:
                 offsets = {}
                 for (index, _), connections in plan.passage_links.items():
                     for via in connections.values():
@@ -245,11 +285,11 @@ class RoutePreparation:
         self.ego_plans[ego_id] = plan
         preparation_edge = self.preparation_edges.get(plan.route)
         self.ego_preparation_edges[ego_id] = preparation_edge
-        enabled = any(p.weight > 0 for p in phases.values())
+        enabled = bool(phases) if self.v1 else any(p.weight > 0 for p in phases.values())
         phase_stats = {}
         for phase in phases.values():
             stats = {
-                "enabled": phase.weight > 0, "weight": phase.weight,
+                "enabled": self.v1 or phase.weight > 0, "weight": phase.weight,
                 "normalization": phase.normalization, "preparation_zone_steps": 0,
                 "unreachable_steps": 0, "last_necessary_completion": None,
             }
@@ -258,8 +298,10 @@ class RoutePreparation:
             else:
                 stats.update(safe_opportunity_steps=0, penalty_steps=0, cumulative_penalty=0.0, first_penalty=None)
             phase_stats[phase.kind] = stats
-            if self.mode == PREPARATION_PROGRESS_BONUS:
+            if self.mode in PREPARATION_DISTANCE_MODES:
                 stats["rewarded_progress_m"] = 0.0
+            if self.v1:
+                stats.update(cumulative_event_bonus=0.0, cumulative_cruise_bonus=0.0)
         self.diagnostics[ego_id] = {
             "enabled": enabled, "reason": "enabled" if enabled else "zero_weights" if phases else "unconfigured_route",
             "route": list(plan.route), "phases": phase_stats,
@@ -342,7 +384,7 @@ class RoutePreparation:
             return None
         plan = self.ego_plans[ego_id]
         index, lane_id = motion.route_index, motion.lane_id
-        if road == preparation_edge:
+        if road == preparation_edge and index not in phases:
             return BonusSample(motion, None)
         if motion.road.startswith(":"):
             position = plan.internal.get((index, lane_id))
@@ -443,6 +485,29 @@ class RoutePreparation:
                         "target_lane": change.target_lane, "time": after.time_s}
         return None
 
+    def _first_demand_reduction(self, ego_id, sample, after, change, completed):
+        phase, before = sample.phase, sample.motion
+        if phase is None:
+            return 0.0, None, None
+        minima = self.minimum_demands[ego_id]
+        observed = sample.demand
+        if change is not None and before.road == change.road and change.last_motion is not None:
+            observed = phase.demand.get(change.source_lane)
+        if observed is not None:
+            minima[phase.kind] = min(minima.get(phase.kind, observed), observed)
+        previous = minima.get(phase.kind)
+        if (completed is None or after is None or sample.connection is not None
+                or before.road != after.road or before.road != completed["road"]
+                or before.route_index != after.route_index or after.lane != completed["target_lane"]):
+            return 0.0, previous, previous
+        source = phase.demand.get(completed["source_lane"])
+        target = phase.demand.get(completed["target_lane"])
+        if source is None or target is None:
+            return 0.0, previous, previous
+        previous = source if previous is None else min(previous, source)
+        minima[phase.kind] = min(previous, target)
+        return V1_DEMAND_REDUCTION_REWARD * (previous - minima[phase.kind]), previous, minima[phase.kind]
+
     def after_bonus(self, conn, ego_id, sample, rewards, change, target_before,
                     completed_change, unavailable_reason):
         before, phase, demand, connection = sample.motion, sample.phase, sample.demand, sample.connection
@@ -476,17 +541,30 @@ class RoutePreparation:
         safety = ("unsafe" if any(risk is not None and risk > 0 for risk in risks)
                   else "unknown" if moving is None or None in risks else "safe")
         readiness = phase.readiness(demand) if phase is not None else None
-        advancing = progress is not None and progress > 1e-6 and after.speed > 1e-6
+        advancing = progress is not None and (
+            progress > 0 if self.v1 else progress > 1e-6 and after.speed > 1e-6
+        )
         distance_scale = 1.0
         first_progress = None
-        if self.mode == PREPARATION_PROGRESS_BONUS:
+        if self.mode in PREPARATION_DISTANCE_MODES:
             fresh = self._first_progress(ego_id, before, after, spans)
             if progress is not None:
                 first_progress = min(fresh, progress)
             distance_scale = min(1.0, (first_progress or 0.0) / self.reference_step_m)
-        reward = 0.0
+        event_bonus = 0.0
+        zone_weight = 1.0
+        if self.v1:
+            event_bonus, minimum_before, minimum_after = self._first_demand_reduction(
+                ego_id, sample, after, change, completed_change,
+            )
+            zone_weight = (0.0 if phase is None else V1_PREPARATION_ZONE_WEIGHT
+                           if phase.kind == "preparation" else 1.0)
+            readiness = (None if demand is None else V1_CRUISE_WEIGHTS[demand]
+                         if demand < len(V1_CRUISE_WEIGHTS) else 0.0)
+        cruise_bonus = 0.0
         if readiness is not None and advancing and safety == "safe":
-            reward = self.bonus_cap * readiness * distance_scale
+            cruise_bonus = self.bonus_cap * zone_weight * readiness * distance_scale
+        reward = event_bonus + cruise_bonus
         row = {
             "mode": self.mode, "phase": phase.kind if phase is not None else "preparation",
             "time_s": before.time_s, "road": before.road, "lane": before.lane, "lane_id": before.lane_id,
@@ -500,12 +578,15 @@ class RoutePreparation:
             "unavailable_reason": unavailable_reason or ("unverified_progress" if progress is None else None),
             "reward": reward,
         }
-        if self.mode == PREPARATION_PROGRESS_BONUS:
+        if self.mode in PREPARATION_DISTANCE_MODES:
             row["first_progress_m"] = first_progress
+        if self.v1:
+            row.update(zone_weight=zone_weight, minimum_demand_before=minimum_before,
+                       minimum_demand_after=minimum_after, event_bonus=event_bonus, cruise_bonus=cruise_bonus)
         self.step_info[ego_id] = row
-        if phase is None:
+        if phase is None or phase.kind == "preparation":
             self.diagnostics[ego_id]["preparation_edge_steps"] += 1
-        else:
+        if phase is not None:
             stats = self.diagnostics[ego_id]["phases"][phase.kind]
             self._record_completion(conn, ego_id, phase, stats, completed_change)
             stats["preparation_zone_steps"] += 1
@@ -513,8 +594,11 @@ class RoutePreparation:
             stats["safe_progress_steps"] += int(advancing and safety == "safe")
             stats["bonus_steps"] += int(reward > 0)
             stats["cumulative_bonus"] += reward
-            if self.mode == PREPARATION_PROGRESS_BONUS and reward > 0:
+            if self.mode in PREPARATION_DISTANCE_MODES and cruise_bonus > 0:
                 stats["rewarded_progress_m"] += min(first_progress, self.reference_step_m)
+            if self.v1:
+                stats["cumulative_event_bonus"] += event_bonus
+                stats["cumulative_cruise_bonus"] += cruise_bonus
         return reward
 
     def before_step(self, conn, ego_id, position, active_change):

@@ -12,7 +12,8 @@ from src.envs.multi_ego_env import MultiEgoEnv
 from src.envs.route_lane_plan import RouteLaneNetwork
 from src.envs.route_preparation import (
     DEFAULT_REFERENCE_STEP_M, DEFAULT_ROUTE_PREPARATION_STAGES, DEFAULT_ROUTE_PREPARATION_WEIGHTS,
-    PREPARATION_BONUS, PREPARATION_PROGRESS_BONUS, RoutePreparation,
+    PREPARATION_BONUS, PREPARATION_PROGRESS_BONUS, PREPARATION_V1, V1_REFERENCE_STEP_M,
+    RoutePreparation,
 )
 from src.evaluation_trajectory import EvaluationTrajectory
 from src.experiment_tracking import sha256
@@ -193,6 +194,7 @@ def bonus_step(request):
         getSpeed=lambda _: state.speed, getLateralSpeed=lambda _: state.lateral,
         getLeader=lambda *_: state.leader, getFollower=lambda *_: state.follower,
         getRightLeaders=lambda _: state.adjacent, getRightFollowers=lambda _: (),
+        getLeftLeaders=lambda _: state.adjacent, getLeftFollowers=lambda _: (),
         getLateralLanePosition=lambda _: state.offset, getWidth=lambda _: 2,
         getMinGap=lambda _: 2.5, getLength=lambda _: 4,
     )
@@ -279,6 +281,59 @@ def test_progress_bonus_respects_step_cap(bonus_step):
     reward, row = tick(along=state.along + DEFAULT_REFERENCE_STEP_M + 0.03)
     assert row['first_progress_m'] > DEFAULT_REFERENCE_STEP_M
     assert reward == pytest.approx(0.005)
+
+
+@pytest.mark.parametrize('bonus_step', [PREPARATION_V1], indirect=True)
+def test_v1_first_demand_reduction_is_independent_of_cruise_safety(bonus_step):
+    state, tracker, tick = bonus_step
+    state.index, state.road, state.lane = 1, 'E75', 5
+    phase = tracker.ego_phases['ego_1'][1]
+    assert list(phase.demand[i] for i in range(6)) == [0, 0, 1, 2, 3, 4]
+    assert phase.normalization == 4
+    state.leader = ('leader', -2.4)
+    for source, target, expected in ((5, 4, 0.1), (4, 5, 0), (5, 4, 0), (4, 3, 0.1)):
+        change = LaneChange('E75', source, target, target - source, deadline=5)
+        completion = dict(road='E75', source_lane=source, target_lane=target, time=state.time + 0.1)
+        reward, row = tick(change, completion, lane=target, started=True)
+        assert row['safety'] == 'unsafe'
+        assert row['cruise_bonus'] == 0
+        assert row['event_bonus'] == pytest.approx(expected)
+        assert reward == pytest.approx(expected)
+    stats = tracker.diagnostics['ego_1']['phases']['preparation']
+    assert stats['cumulative_event_bonus'] == pytest.approx(0.2)
+    assert stats['rewarded_progress_m'] == 0
+
+
+@pytest.mark.parametrize('bonus_step', [PREPARATION_V1], indirect=True)
+def test_v1_reset_and_stage_transition_do_not_carry_minimum_demand(bonus_step):
+    state, tracker, tick = bonus_step
+    state.index, state.road, state.lane, state.along = 2, ':J105_0', 0, 1.0
+    assert tick()[1]['minimum_demand_after'] == 0
+    state.index, state.road, state.lane, state.along = 3, 'E77', 1, 10.0
+    _, row = tick()
+    assert row['minimum_demand_before'] == 1
+    assert row['event_bonus'] == 0
+    change = LaneChange('E77', 1, 0, -1, deadline=5)
+    complete = dict(road='E77', source_lane=1, target_lane=0, time=state.time + 0.1)
+    _, row = tick(change, complete, lane=0, started=True)
+    assert row['event_bonus'] == pytest.approx(0.1)
+    assert row['cruise_bonus'] == pytest.approx(0.005 / V1_REFERENCE_STEP_M)
+    tracker.reset(('ego_1',))
+    assert not tracker.minimum_demands
+
+
+@pytest.mark.parametrize('bonus_step', [PREPARATION_V1], indirect=True)
+def test_v1_cruise_caps_new_distance_and_does_not_reward_repeated_distance(bonus_step):
+    state, _, tick = bonus_step
+    state.lane, state.speed = 0, 120 / 3.6
+    start = state.along
+    _, row = tick(along=start + 3.35)
+    assert row['first_progress_m'] > V1_REFERENCE_STEP_M
+    assert row['cruise_bonus'] == pytest.approx(0.005)
+    tick(along=start)
+    _, row = tick(along=start + 3.2)
+    assert row['first_progress_m'] == 0
+    assert row['cruise_bonus'] == 0
 
 
 def test_bonus_safety_progress_and_missing_data(bonus_step):
@@ -372,7 +427,7 @@ def test_real_transition_keeps_speed_and_preparation_independent(tmp_path, enabl
         conn.vehicle.moveTo('ego_1', lane, 100)
         _, rewards, _, _, infos = env.step({'ego_1': [0, 0]})
         step = infos['ego_1']['reward_components']
-        assert step['route_preparation'] == pytest.approx(0.0009 if enabled else 0)
+        assert step['route_preparation'] == pytest.approx(0.005 * 0.2 / V1_REFERENCE_STEP_M if enabled else 0)
         assert step['efficiency'] == pytest.approx(0.005)
         assert step['route_guidance'] == 0.0
         assert rewards['ego_1'] == pytest.approx(sum(step.values()))
@@ -418,14 +473,16 @@ def test_real_weaving_boundaries_are_counted_once(tmp_path):
                     break
             else:
                 pytest.fail(f'Did not complete passage to {finish}')
-        assert rows[0]['phase'] == 'preparation' and rows[0]['reward'] == 0
+        assert rows[0]['phase'] == 'preparation'
+        assert rows[0]['reward'] == pytest.approx(0.005 * 0.4 * 0.5 / V1_REFERENCE_STEP_M)
         incoming = [r for r in rows if r['road'].startswith(':J104')]
         outgoing = [r for r in rows if r['road'].startswith(':J105')]
         assert incoming and all(r['phase'] == 'weaving' and r['connection'] == ('E75_2', 'E76_1')
-                                and r['reward'] == pytest.approx(0.001125) for r in incoming)
+                                and r['reward'] == pytest.approx(0.005 * 0.5 / V1_REFERENCE_STEP_M) for r in incoming)
         assert outgoing and all(r['phase'] == 'weaving' and r['connection'] == ('E76_0', 'E77_0')
-                                and r['reward'] == pytest.approx(0.0015) for r in outgoing)
-        assert rows[-1]['phase'] == 'exit' and rows[-1]['reward'] == pytest.approx(0.0015)
+                                and r['reward'] == pytest.approx(0.005 / V1_REFERENCE_STEP_M) for r in outgoing)
+        assert rows[-1]['phase'] == 'exit' and rows[-1]['reward'] == pytest.approx(0.005 / V1_REFERENCE_STEP_M)
+        assert all(r['event_bonus'] == 0 for r in rows)
         assert len({r['time_s'] for r in rows}) == len(rows)
         stats = env.route_preparation.diagnostics['ego_1']
         assert stats['preparation_edge_steps'] == sum(r['phase'] == 'preparation' for r in rows)
@@ -460,9 +517,12 @@ def test_real_lane_change_updates_bonus_on_stable_completion(tmp_path):
             info = infos['ego_1']
             row = info['route_preparation']
             if any(event['event'] == 'completed' for event in info['lane_change_events']):
-                assert row['local_lane_changes'] == 0 and row['reward'] == pytest.approx(0.0015)
+                assert row['local_lane_changes'] == 0
+                assert row['event_bonus'] == pytest.approx(0.1)
+                assert row['reward'] == pytest.approx(0.1 + 0.005 / V1_REFERENCE_STEP_M)
                 break
-            assert row['local_lane_changes'] == 1 and row['reward'] == pytest.approx(0.001125), row
+            assert row['local_lane_changes'] == 1
+            assert row['event_bonus'] == 0 and row['reward'] == pytest.approx(0.005 * 0.5 / V1_REFERENCE_STEP_M), row
             saw_index_flip_before_completion |= row['post_lane_id'] == 'E76_0'
         else:
             pytest.fail('The actual SUMO lane change did not settle')
@@ -471,15 +531,15 @@ def test_real_lane_change_updates_bonus_on_stable_completion(tmp_path):
         env.close()
 
 
-@pytest.mark.parametrize('lane,speed,accel,readiness,base_net', [
-    ('E75_2', 2, 2, 0, -0.0015),
-    ('E75_2', 2, 0, 0, 0.001),
-    ('E75_2', 10, 2, 0, 0.0025),
+@pytest.mark.parametrize('lane,speed,accel,weighted_readiness,base_net', [
+    ('E75_2', 2, 2, 0.2, -0.0015),
+    ('E75_2', 2, 0, 0.2, 0.001),
+    ('E75_2', 10, 2, 0.2, 0.0025),
     ('E76_4', 2, 2, 0, -0.0015),
-    ('E76_3', 2, 2, 0.25, -0.0015),
+    ('E76_3', 2, 2, 0, -0.0015),
     ('E76_0', 2, 2, 1.0, -0.0015),
 ])
-def test_real_safe_progress_dense_net(tmp_path, lane, speed, accel, readiness, base_net):
+def test_real_safe_progress_dense_net(tmp_path, lane, speed, accel, weighted_readiness, base_net):
     route_file = tmp_path / 'dense.rou.xml'
     route_file.write_text(f"""<routes>
         <trip id="ego_1" from="O3" to="D3" depart="0" departLane="0" departSpeed="{speed}"/>
@@ -492,7 +552,7 @@ def test_real_safe_progress_dense_net(tmp_path, lane, speed, accel, readiness, b
         _, _, _, _, infos = env.step({'ego_1': [accel, 0]})
         info = infos['ego_1']
         assert info['route_preparation']['advancing'] and info['route_preparation']['safety'] == 'safe'
-        bonus = 0.005 * readiness * info['route_preparation']['progress_m'] / DEFAULT_REFERENCE_STEP_M
+        bonus = 0.005 * weighted_readiness * info['route_preparation']['progress_m'] / V1_REFERENCE_STEP_M
         parts = info['reward_components']
         assert parts['route_preparation'] == pytest.approx(bonus)
         assert parts['comfort'] == pytest.approx(-0.0025 if accel else 0)
@@ -522,7 +582,7 @@ def test_real_safe_twenty_meters_pays_same_route_bonus(tmp_path, speed, steps):
             assert row['readiness'] == 1 and row['safety'] == 'safe'
             total += row['reward']
         assert vehicle.getLanePosition('ego_1') == pytest.approx(120)
-        assert total == pytest.approx(0.03)
+        assert total == pytest.approx(0.005 * 20 / V1_REFERENCE_STEP_M)
     finally:
         env.close()
 
