@@ -413,6 +413,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
         initial_alpha=0.01,
         output_dir=str(work),
         checkpoint_every=100,
+        replay_final_only=actor_leader_features,
         tensorboard=False,
     )
 
@@ -468,6 +469,14 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     assert len(checkpoints) == 3
     index = json.loads((work / "checkpoints/index.json").read_text())
     assert [r["global_step"] for r in index] == [100, 200, 220]
+    for row in index:
+        path = Path(row["path"])
+        saved = torch.load(path, map_location="cpu", weights_only=True)
+        resumable = not actor_leader_features or row["global_step"] == 220
+        assert (saved["resume_state"] is not None) == resumable
+        assert ("critic_optimizer" in saved) == resumable
+        assert (row["replay"] is not None) == resumable
+        assert path.with_suffix(".replay.npz").exists() == resumable
 
     final = torch.load(
         work / "checkpoints/masac_seed42_step_220.pt",

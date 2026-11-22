@@ -235,7 +235,7 @@ TensorBoard 的标量标签统一带 `exploration_training/` 前缀，以 `globa
 
 模型 checkpoint 保存 Actor、个人及团队 Critic 和目标网络、α、优化器、累计进度及训练随机状态。配对的 `.replay.npz` 保存有效样本、容量、环形写入位置和采样随机状态，评估只需模型 `.pt`。文件先写 `.partial`，flush/fsync 后原子替换，模型发布时 Replay 已写完，索引记录两者的 SHA-256。续训检查哈希和关键训练配置。旧模型没有配对 Replay 时无法完整续训，仍可评估，或在满足观测兼容条件时用 `--init-actors-from` 初始化新训练。若首次保存前中断且目录已有日志，请用新输出目录重跑。
 
-续训时 SUMO 用下一回合种子启动。中断时若有一条等待下一步事件归因的 transition，会在恢复时舍弃。恢复前已提交到 Replay 的样本和累计进度会保留。此方式支持继续学习，轨迹不会与未中断训练逐步一致。满容量的 1,000,000 条双 Ego Replay 每个保存点约 3.5 GiB，保存体积随有效样本数增长，已有保存点会保留。
+续训时 SUMO 用下一回合种子启动。中断时若有一条等待下一步事件归因的 transition，会在恢复时舍弃。恢复前已提交到 Replay 的样本和累计进度会保留。此方式支持继续学习，轨迹不会与未中断训练逐步一致。满容量的 1,000,000 条双 Ego Replay 每个保存点约 3.5 GiB，保存体积随有效样本数增长，已有保存点会保留。使用 `--replay-final-only` 时，中间节点只保存可评估的模型权重。最后一个节点保存模型、优化器和 Replay，中间节点无法完整续训。
 
 ### 6.2 固定种子评估与只读行为诊断
 
@@ -250,6 +250,8 @@ TensorBoard 的标量标签统一带 `exploration_training/` 前缀，以 `globa
 复用结果前核对 JSON/CSV 所有回合字段、分组汇总重算、checkpoint SHA256、种子序列、协议版本、Git 提交、源码哈希、路网/路线和 SUMO 二进制哈希、环境配置及实际 speed mode 读回记录。任何失败记录到 `eval/index.json` 后报错，后续项保留 pending，不能当作已评估；索引缺少模型文件也报错。
 
 单模型和批量评估默认保存 `eval_trajectory.jsonl.gz`。逐种子、逐步记录两辆 Ego 的位置、车道与横移、动作、间距、奖励分项、路线准备和停滞诊断，以及终止事件。完整评估结束后发布文件，`summary.json` 记录轨迹 SHA-256 和步数，可用 `--no-trajectory` 在单模型评估中关闭采集。`--trace` 独立控制首回合的控制台打印。请求 `speed_mode=96`，实际 `getSpeedMode()` 的所有读回值按车保留在每回合和环境元数据中。本机 SUMO 1.20.0 的短程测试读回为 32。JSON 同时记录 checkpoint SHA256、训练配置、Git/源码哈希、SUMO 版本、NumPy/PyTorch 版本、路网/路线哈希及关键评估配置。
+
+已发布的评估轨迹可通过[交互式轨迹诊断工具](scripts/trajectory_dashboard/README.md)按 seed 和 Ego 浏览。页面用同一仿真步联动车道、速度与动作、奖励三张图，并校验轨迹与评估报告。
 
 核心统计仍为 `homogeneous-dual-ego-v1`，扩展输出协议为 v4。普通到达、联合无碰撞及其他历史指标保留既有字段与单位。回合率的 `*_stats` 提供分子、分母和 Wilson 95% CI。100 个评估回合不构成 100 个独立训练重复。
 

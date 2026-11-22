@@ -129,14 +129,13 @@ def save_checkpoint(
     config,
     resume_state,
 ):
-    """保存模型和优化器状态。"""
+    """Save model weights, with optimizer and replay metadata for resumable checkpoints."""
 
     team_state = {}
     if trainer.team_critic is not None:
         team_state = {
             "team_critic": trainer.team_critic.state_dict(),
             "target_team_critic": trainer.target_team_critic.state_dict(),
-            "team_critic_optimizer": trainer.team_critic_optimizer.state_dict(),
         }
     state = {
         **team_state,
@@ -153,17 +152,15 @@ def save_checkpoint(
         "target_critic":
             trainer.target_critic.state_dict(),
         "log_alpha": trainer.log_alpha.state_dict(),
-        "critic_optimizer":
-            trainer.critic_optimizer.state_dict(),
-        "actor_optimizers": {
-            k: v.state_dict()
-            for k, v in trainer.actor_optimizers.items()
-        },
-        "alpha_optimizers": {
-            k: v.state_dict()
-            for k, v in trainer.alpha_optimizers.items()
-        },
     }
+    if resume_state is not None:
+        state.update(
+            critic_optimizer=trainer.critic_optimizer.state_dict(),
+            actor_optimizers={k: v.state_dict() for k, v in trainer.actor_optimizers.items()},
+            alpha_optimizers={k: v.state_dict() for k, v in trainer.alpha_optimizers.items()},
+        )
+        if trainer.team_critic is not None:
+            state["team_critic_optimizer"] = trainer.team_critic_optimizer.state_dict()
     atomic_write(path, lambda stream: torch.save(state, stream))
     return checkpoint_index_row(path, state, sha256(path))
 
@@ -172,7 +169,7 @@ def checkpoint_index_row(path, state, digest):
     return dict(training_seed=state["config"]["seed"], global_step=state["global_step"],
                 path=str(path.resolve()), sha256=digest, git=state["git"],
                 source_sha256=state["source_sha256"], config=state["config"],
-                replay=state["resume_state"]["replay"])
+                replay=state["resume_state"]["replay"] if state["resume_state"] is not None else None)
 
 
 def preparation_settings(args, saved=None, *, resuming=False):
@@ -427,6 +424,7 @@ def train_locked(args, device, output_dir):
     args.tau = getattr(args, "tau", 0.005)
     args.checkpoint_every = getattr(args, "checkpoint_every", DEFAULT_CHECKPOINT_EVERY)
     args.resume = getattr(args, "resume", True)
+    args.replay_final_only = getattr(args, "replay_final_only", False)
     args.tensorboard = getattr(args, "tensorboard", True)
     if args.checkpoint_every <= 0:
         raise ValueError("checkpoint_every must be positive")
@@ -829,21 +827,23 @@ def train_locked(args, device, output_dir):
 
             if checkpoint_due(global_step, args.total_steps, args.checkpoint_every):
                 checkpoint = checkpoint_dir / f"masac_seed{args.seed}_step_{global_step}.pt"
-                replay = checkpoint.with_suffix(".replay.npz")
-                atomic_write(replay, buffer.save)
-                resume_state = dict(
-                    version=1,
-                    replay=dict(path=replay.name, sha256=sha256(replay), size=len(buffer)),
-                    update_count=update_count,
-                    next_episode_seed_index=episode_seed_index + 1,
-                    pending_transition=collector.pending is not None,
-                    last_losses=last_losses,
-                    episode_window=list(episode_window.rows),
-                    python_rng=random.getstate(),
-                    exploration_rng=rng.bit_generator.state,
-                    torch_rng=torch.get_rng_state(),
-                    cuda_rng=torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
-                )
+                resume_state = None
+                if not args.replay_final_only or global_step == args.total_steps:
+                    replay = checkpoint.with_suffix(".replay.npz")
+                    atomic_write(replay, buffer.save)
+                    resume_state = dict(
+                        version=1,
+                        replay=dict(path=replay.name, sha256=sha256(replay), size=len(buffer)),
+                        update_count=update_count,
+                        next_episode_seed_index=episode_seed_index + 1,
+                        pending_transition=collector.pending is not None,
+                        last_losses=last_losses,
+                        episode_window=list(episode_window.rows),
+                        python_rng=random.getstate(),
+                        exploration_rng=rng.bit_generator.state,
+                        torch_rng=torch.get_rng_state(),
+                        cuda_rng=torch.cuda.get_rng_state(device) if device.type == "cuda" else None,
+                    )
                 checkpoint_index.append(save_checkpoint(
                     checkpoint, actors, critic, trainer, global_step, completed_episodes,
                     args, resume_state,
@@ -981,6 +981,8 @@ def build_parser():
                         help="Per-Ego timeout in active control steps")
     parser.add_argument("--checkpoint-every", type=int, default=DEFAULT_CHECKPOINT_EVERY,
                         help="Save model and replay every N global steps (default: 500000)")
+    parser.add_argument("--replay-final-only", action="store_true",
+                        help="Save model weights only at intermediate checkpoints and save Replay at the final step")
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True,
                         help="Continue from the latest checkpoint in --output-dir (default: enabled)")
     parser.add_argument("--tau", type=float, default=0.005)
