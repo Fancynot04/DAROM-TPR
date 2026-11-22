@@ -113,17 +113,19 @@ class GaussianActor(nn.Module):
 
 
 class MultiAgentGaussianActor(nn.Module):
-    """两个独立 Actor，分别使用自己的局部观测。"""
+    """每辆 Ego 用自身局部观测决策，策略参数可共享。"""
 
     def __init__(
         self,
         ego_ids=("ego_1", "ego_2"),
         nav_dim=0,
         actor_leader_features=False,
+        shared=False,
     ):
         super().__init__()
 
         self.ego_ids = tuple(ego_ids)
+        self.shared = shared
         self.obs_dim = 134 + nav_dim + len(LEADER_FEATURE_SCALE) * int(actor_leader_features)
 
         if len(set(self.ego_ids)) != len(self.ego_ids):
@@ -132,10 +134,11 @@ class MultiAgentGaussianActor(nn.Module):
         if not self.ego_ids:
             raise ValueError("No Ego IDs")
 
+        actor_keys = ("shared",) if shared else self.ego_ids
         self.actors = nn.ModuleDict({
             ego_id: GaussianActor(obs_dim=self.obs_dim, nav_dim=nav_dim,
                                   actor_leader_features=actor_leader_features)
-            for ego_id in self.ego_ids
+            for ego_id in actor_keys
         })
 
     def forward(
@@ -169,6 +172,14 @@ class MultiAgentGaussianActor(nn.Module):
             device=observations.device,
             dtype=observations.dtype,
         )
+
+        if self.shared:
+            actions, log_probs = self.actors["shared"](
+                observations.reshape(batch * n, self.obs_dim),
+                deterministic=deterministic,
+            )
+            actions = actions.reshape(batch, n, actions.shape[-1])
+            return actions * mask.unsqueeze(-1), log_probs.reshape(batch, n) * mask
 
         actions = []
         log_probs = []

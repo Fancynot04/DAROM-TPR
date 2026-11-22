@@ -23,6 +23,18 @@ def test_critic_output_shape():
     assert not torch.allclose(q1, q2)
 
 
+def test_self_first_critic_exchanges_values_with_agent_slots():
+    critic = CentralizedTwinQ(nav_dim=2, self_first=True)
+    obs = torch.randn(3, 2, 95)
+    actions = torch.randn(3, 2, 2)
+    mask = torch.tensor([[1., 1.], [1., 0.], [0., 1.]])
+    q = critic(obs, actions, mask)
+    swapped = critic(obs.flip((1,)), actions.flip((1,)), mask.flip((1,)))
+    for values, swapped_values in zip(q, swapped):
+        torch.testing.assert_close(values, swapped_values.flip((1,)))
+        assert (values[mask == 0] == 0).all()
+
+
 def test_inactive_agent_mask():
     torch.manual_seed(42)
 

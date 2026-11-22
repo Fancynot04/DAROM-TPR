@@ -68,6 +68,7 @@ class MASACTrainer:
 
         self.actors = actors
         self.critic = critic
+        self.shared = actors.shared
 
         self.target_critic = deepcopy(critic)
         self.target_critic.eval()
@@ -87,8 +88,11 @@ class MASACTrainer:
         self.tau = tau
 
         
-        # 每辆 Ego 独立学习 log(alpha)，确保 alpha 始终为正
+        # 共享策略学习一个温度，独立策略各自学习温度。
         device = next(self.critic.parameters()).device
+        actor_keys = tuple(actors.actors)
+        if self.shared and any(value != alpha[0] for value in alpha):
+            raise ValueError("Shared alpha requires the same initial value for both egos")
 
         self.log_alpha = nn.ParameterDict({
             ego_id: nn.Parameter(
@@ -98,7 +102,7 @@ class MASACTrainer:
                     device=device,
                 )
             )
-            for i, ego_id in enumerate(self.actors.ego_ids)
+            for i, ego_id in enumerate(actor_keys)
         })
 
         self.alpha_optimizers = {
@@ -106,7 +110,7 @@ class MASACTrainer:
                 [self.log_alpha[ego_id]],
                 lr=learning_rate,
             )
-            for ego_id in self.actors.ego_ids
+            for ego_id in actor_keys
         }
 
         self.target_entropy = -float(self.critic.action_dim)
@@ -131,7 +135,7 @@ class MASACTrainer:
                 actors.actors[ego_id].parameters(),
                 lr=learning_rate,
             )
-            for ego_id in actors.ego_ids
+            for ego_id in actor_keys
         }
 
     @torch.no_grad()
@@ -282,7 +286,7 @@ class MASACTrainer:
         return stats
 
     def update_actors(self, batch, *, collect_stats=True):
-        """逐个更新 Actor，阻止跨 Agent 梯度传播。"""
+        """隔离队友动作的梯度，共享模式按全部有效动作更新一次。"""
 
         policy_obs = batch["policy_obs"]
         critic_obs = batch["critic_obs"]
@@ -292,15 +296,19 @@ class MASACTrainer:
         # 只有真正执行过动作的 Ego 参与 Actor 更新
         valid_mask = active_mask * acted_mask
 
-        # 其他 Actor 的动作不参与当前 Actor 的梯度
-        with torch.no_grad():
-            base_actions, _ = self.actors(
-                policy_obs,
-                active_mask,
-                deterministic=False,
-            )
+        if self.shared:
+            if not valid_mask.any().item():
+                if not collect_stats:
+                    return {}
+                return {"shared_actor_updates": 0, **{f"{ego}_actor_updates": 0 for ego in self.actors.ego_ids}}
+            actions, joint_log_probs = self.actors(policy_obs, active_mask)
+            base_actions = actions.detach()
+        else:
+            with torch.no_grad():
+                base_actions, _ = self.actors(policy_obs, active_mask)
 
         results = {}
+        shared_objectives = []
 
         # Actor 更新时不修改 Critic 参数，
         # 但必须保留 Q 对当前 Actor 动作的梯度。
@@ -324,13 +332,13 @@ class MASACTrainer:
                         results[f"{ego_id}_actor_updates"] = 0
                     continue
 
-                actor = self.actors.actors[ego_id]
-
-                # 只重新计算当前 Ego 的动作，保留其梯度
-                action_i, log_prob_i = actor(
-                    policy_obs[:, i, :],
-                    deterministic=False,
-                )
+                actor_key = "shared" if self.shared else ego_id
+                actor = self.actors.actors[actor_key]
+                if self.shared:
+                    action_i = actions[:, i]
+                    log_prob_i = joint_log_probs[:, i]
+                else:
+                    action_i, log_prob_i = actor(policy_obs[:, i, :])
 
                 # 其他 Ego 的动作来自无梯度采样
                 joint_actions = base_actions.clone()
@@ -368,33 +376,25 @@ class MASACTrainer:
                     * math.log(self.critic.action_scale)
                 )
                 
-                alpha_i = self.log_alpha[ego_id].detach().exp()
+                alpha_i = self.log_alpha[actor_key].detach().exp()
 
                 # SAC Actor Loss
                 objective = (
                     alpha_i * log_prob_norm - q_i
                 )
 
-                actor_loss = (
-                    objective * valid
-                ).sum() / count
+                objective_sum = (objective * valid).sum()
+                actor_loss = objective_sum / count
 
                 if not torch.isfinite(actor_loss):
                     raise RuntimeError(
                         f"Non-finite Actor loss: {ego_id}"
                     )
 
-                optimizer = self.actor_optimizers[ego_id]
-                optimizer.zero_grad(set_to_none=True)
-
-                actor_loss.backward()
-
-                torch.nn.utils.clip_grad_norm_(
-                    actor.parameters(),
-                    max_norm=10.0,
-                )
-
-                optimizer.step()
+                if self.shared:
+                    shared_objectives.append(objective_sum)
+                else:
+                    self._step_actor(ego_id, actor_loss)
 
                 if collect_stats:
                     results[f"{ego_id}_mean_log_prob"] = float(
@@ -403,6 +403,14 @@ class MASACTrainer:
                     results[f"{ego_id}_actor_loss"] = float(actor_loss.item())
                     results[f"{ego_id}_actor_updates"] = 1
                     results[f"{ego_id}_valid_samples"] = count
+
+            if self.shared:
+                loss = torch.stack(shared_objectives).sum() / valid_mask.sum()
+                if not torch.isfinite(loss):
+                    raise RuntimeError("Non-finite shared Actor loss")
+                self._step_actor("shared", loss)
+                if collect_stats:
+                    results.update(shared_actor_loss=loss.item(), shared_actor_updates=1)
 
         finally:
             # 恢复 Critic 原本的梯度开关
@@ -413,8 +421,17 @@ class MASACTrainer:
 
         return results
 
+    def _step_actor(self, actor_key, loss):
+        optimizer = self.actor_optimizers[actor_key]
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.actors.actors[actor_key].parameters(), max_norm=10.0)
+        optimizer.step()
+
     @torch.no_grad()
     def alpha_values(self):
+        if self.shared:
+            return self.log_alpha["shared"].exp().expand(len(self.actors.ego_ids))
         return torch.stack([
             self.log_alpha[ego_id].exp()
             for ego_id in self.actors.ego_ids
@@ -428,7 +445,7 @@ class MASACTrainer:
         *,
         collect_stats=True,
     ):
-        """使用归一化动作概率密度更新各自的 alpha。"""
+        """使用归一化动作概率密度更新温度。"""
 
         n = len(self.actors.ego_ids)
 
@@ -452,23 +469,25 @@ class MASACTrainer:
 
         results = {}
 
-        for i, ego_id in enumerate(self.actors.ego_ids):
-            valid = valid_mask[:, i]
+        for i, (actor_key, optimizer) in enumerate(self.alpha_optimizers.items()):
+            valid = valid_mask if self.shared else valid_mask[:, i]
+            samples = log_probs if self.shared else log_probs[:, i]
+            ego_ids = self.actors.ego_ids if self.shared else (actor_key,)
             count = valid.sum()
 
             if count.item() == 0:
                 if collect_stats:
-                    results[f"{ego_id}_alpha_updates"] = 0
+                    results[f"{actor_key}_alpha_updates"] = 0
                 continue
 
             # SAC 自动熵系数损失
             entropy_error = (
-                log_probs[:, i].detach()
+                samples.detach()
                 + self.target_entropy
             )
 
             loss = -(
-                self.log_alpha[ego_id]
+                self.log_alpha[actor_key]
                 * entropy_error
                 * valid
             ).sum() / count
@@ -476,15 +495,16 @@ class MASACTrainer:
             if not torch.isfinite(loss):
                 raise RuntimeError("Non-finite alpha loss")
 
-            optimizer = self.alpha_optimizers[ego_id]
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
 
             if collect_stats:
-                results[f"{ego_id}_alpha_loss"] = float(loss.item())
-                results[f"{ego_id}_alpha"] = float(self.log_alpha[ego_id].detach().exp().item())
-                results[f"{ego_id}_alpha_updates"] = 1
+                alpha_value = self.log_alpha[actor_key].detach().exp().item()
+                for ego_id in ego_ids:
+                    results[f"{ego_id}_alpha_loss"] = loss.item()
+                    results[f"{ego_id}_alpha"] = alpha_value
+                results[f"{actor_key}_alpha_updates"] = 1
 
         return results
 

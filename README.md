@@ -1,6 +1,6 @@
 # DAROM-TPR — Dual-Ego CTDE-MASAC for Highway D3 Exit
 
-> **状态：研究原型 / v0.1 训练管线基线（尚未证明策略收敛）。** 适用分支：`exp/o3-d3-homogeneous-masac-v1`。本分支的主要任务是让两辆独立决策的 Ego 在同一个 SUMO 仿真中驶离 D3，而不是人为制造车辆冲突或同步出发时差。
+> **状态：研究原型 / v0.1 训练管线基线（尚未证明策略收敛）。** 两辆 Ego 在同一个 SUMO 仿真中独立决策并驶离 D3。
 
 ## 1. 研究任务
 
@@ -17,16 +17,24 @@
 | Ego 控制  | 纵向加速度 + 横向换道请求；`laneChangeMode=0`、无自定义安全拦截 |
 | 奖励      | 模块化奖励，具体配置见下文 |
 
-**训练目标**：分别提高两辆 Ego 的安全抵达率，最终提高**同一回合两车同时抵达 D3 的联合成功率**。两车均由各自的 Actor 决策，计划出发间隔为 3 s，实际插入时刻由 SUMO 决定。
+**训练目标**：分别提高两辆 Ego 的安全抵达率，最终提高**同一回合两车同时抵达 D3 的联合成功率**。两车根据各自的局部观测决策，计划出发间隔为 3 s，实际插入时刻由 SUMO 决定。
 
 ## 2. CTDE-MASAC 结构
 
-- **分散 Actor**：每辆 Ego 使用独立的 `GaussianActor`（DAROM `DelayAwareGRUEncoder` + tanh-Gaussian 策略）；仅使用本车观测，默认 136 维。
+- **分散 Actor**：默认每辆 Ego 使用独立的 `GaussianActor`（DAROM `DelayAwareGRUEncoder` + tanh-Gaussian 策略）。策略使用本车观测，默认 136 维。
 - **Actor 输入（136）**：当前 Ego 状态及最多 30 辆邻车的 31×3 基础观测（93）＋目标出口编码（2）＋20×2 自身动作历史（40）＋观测年龄（1）。邻车状态带通信延迟；Ego 自身状态实时更新。新动作位于历史开头，按实际观测年龄决定保留数量。
 - **前车特征消融（139 维）**：训练时加 `--actor-leader-features`。从 TraCI 采集 120 m 范围内的前车净间距、带符号的闭合速度（Ego 速度减前车速度）和 TTC。TTC 封顶 10 s，无前车时使用 `[120 m, 0 m/s, 10 s]`，有前车但未逼近时 TTC 同样取 10 s。三个量与邻车共用同一数据包、延迟和观测年龄。Critic 和奖励输入沿用原定义。checkpoint 保存该开关，评估自动继承，旧 checkpoint 缺少该字段时为关闭。
 - **集中 Critic**：`CentralizedTwinQ` 接收两辆 Ego 的当前真实交通观测与目标出口（每车 95 维）、联合请求动作及 active mask，拼接为 196 维输入；两套 Q 网络分别对两辆车输出 Q 值。**Critic 不使用 Actor 的 256 维 GRU 特征。**
 - **联合 Replay**：每个 SUMO 全局步对应一条双 Ego 联合经验，分别保存奖励、done、active/acted/next-active mask。`JointTransitionCollector` 延迟一个全局步提交，以正确归因 pre-step Missed Exit。
 - **优化**：SAC Twin-Q 目标、Polyak 目标网络、分 Ego Actor 优化器和独立自动熵系数 α；Critic 使用真实联合状态，执行时只需各自 Actor。
+
+### 共享策略基线
+
+训练时加 `--shared-actor`，并指定独立的 `--output-dir`。两辆 Ego 共用一个 DAROM-GRU Actor 和一个自动熵系数 α。使用默认 136 维局部观测，无新增队友特征或角色 ID。个人 Twin-Q 共享参数，分别以「自身、队友」顺序读取联合状态，使用各车奖励和终止状态构造目标。
+
+每次 Actor 更新批量采样两车动作。每车的个人 Q 和团队 Q 只对自身动作传播梯度。Actor 和 α 的 loss 分别按整个 batch 的有效动作数归一化，每批各执行一次优化器更新。环境、奖励、团队 Critic 和联合 Replay 沿用原配置。
+
+checkpoint 保存 `shared_actor`。评估自动选用对应的策略结构，缺少该字段的旧 checkpoint 按独立策略加载。恢复共享训练时仍使用 `--shared-actor`，恢复训练和 Actor 权重初始化均要求模式与来源 checkpoint 一致。
 
 Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度（m/s²）；横向值经阈值离散化：小于 `−5/3` 请求朝车道 0 换道，在 `[-5/3, 5/3)` 保持，大于等于 `5/3` 请求反方向换道。当前训练中的 Critic 看到**连续请求动作**，而 SUMO 执行的是离散换道命令；这是后续需要检验的建模限制。
 
@@ -85,7 +93,7 @@ Missed Exit 使用同一张路线车道图。车辆进入无法通往目标的�
 train_masac.py                     双 Ego CTDE-MASAC 训练（当前为基础训练入口）
 evaluate_masac.py                  双 Ego 独立评估（deterministic / --stochastic）
 src/agents/
-  masac.py                         两个独立 DAROM-GRU Gaussian Actor
+  masac.py                         独立或共享的 DAROM-GRU Gaussian Actor
   centralized_critic.py            集中式 Twin-Q，当前输入 196 维
   replay_buffer.py                 联合经验回放
   transition_collector.py          pre-step 终止奖励归因

@@ -254,6 +254,8 @@ def find_resume_checkpoint(directory, args):
             or state["global_step"] != latest["global_step"]):
         raise ValueError(f"Invalid resume metadata: {path}")
     changed = [key for key in RESUME_CONFIG_KEYS if state["config"].get(key) != getattr(args, key)]
+    if state["config"].get("shared_actor", False) != args.shared_actor:
+        changed.append("shared_actor")
     saved_route_settings = checkpoint_preparation_settings(state["config"].get("route_preparation_settings"))
     route_settings = preparation_settings(args, saved_route_settings, resuming=True)
     if saved_route_settings != route_settings:
@@ -314,7 +316,7 @@ def restore_training_state(state, trainer):
 
 
 def initialize_actor_weights(actors, path, expected_sha256, actor_leader_features):
-    """Start an independent reward run with only the verified source Actor weights."""
+    """Start a fresh run with only the verified source Actor weights."""
     with Path(path).open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
         if expected_sha256 is not None and digest != expected_sha256.lower():
@@ -322,6 +324,8 @@ def initialize_actor_weights(actors, path, expected_sha256, actor_leader_feature
         stream.seek(0)
         state = torch.load(stream, map_location="cpu", weights_only=True)
     config = state.get("config", {})
+    if config.get("shared_actor", False) != actors.shared:
+        raise ValueError("Actor initialization requires matching shared_actor configuration")
     if (
         tuple(state.get("agent_ids", ())) != AGENT_IDS
         or config.get("masac_env_version") not in SUPPORTED_MASAC_ENV_VERSIONS[1:]
@@ -423,6 +427,7 @@ def train_locked(args, device, output_dir):
         raise ValueError(f"Unsupported MASAC environment version: {args.masac_env_version}")
     args.stalled_block_grace_s = stalled_block_grace_for_version(args.masac_env_version)
     args.actor_leader_features = getattr(args, "actor_leader_features", False)
+    args.shared_actor = getattr(args, "shared_actor", False)
     args.tau = getattr(args, "tau", 0.005)
     args.checkpoint_every = getattr(args, "checkpoint_every", DEFAULT_CHECKPOINT_EVERY)
     args.resume = getattr(args, "resume", True)
@@ -485,6 +490,7 @@ def train_locked(args, device, output_dir):
     actors = MultiAgentGaussianActor(
         ego_ids=AGENT_IDS, nav_dim=TARGET_EXIT_DIM,
         actor_leader_features=args.actor_leader_features,
+        shared=args.shared_actor,
     ).to(device)
     init_checkpoint = getattr(args, "init_actors_from", None)
     init_sha = getattr(args, "init_actors_sha256", None)
@@ -499,6 +505,7 @@ def train_locked(args, device, output_dir):
         )
     critic = CentralizedTwinQ(
         num_agents=len(AGENT_IDS), nav_dim=TARGET_EXIT_DIM,
+        self_first=args.shared_actor,
     ).to(device)
 
     team_critic = CentralizedTwinQ(nav_dim=TARGET_EXIT_DIM, team=True).to(device) if reward_config.team else None
@@ -976,6 +983,8 @@ def build_parser():
                         choices=SUPPORTED_MASAC_ENV_VERSIONS, default=MASAC_ENV_VERSION,
                         help="v2: legacy route rules; v3: route-aware with Stalled-v1; "
                              "v4: stalled block grace; v5: match stalled links to the actual lane")
+    parser.add_argument("--shared-actor", action="store_true",
+                        help="Share the actor and alpha, and evaluate personal Q with a self-first critic")
     parser.add_argument("--actor-leader-features", action="store_true",
                         help="Add delayed leader bumper gap, closing speed and TTC to each Actor")
     parser.add_argument("--trace-controls", action="store_true", help="Log per-Ego TraCI gaps, motion, and control commands")

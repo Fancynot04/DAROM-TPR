@@ -489,3 +489,61 @@ def test_team_q_changes_both_actor_updates():
         )
     assert team.scale.grad is None
     assert team.scale.requires_grad
+
+
+def test_shared_actor_and_alpha_average_executed_actions(monkeypatch):
+    actors = MultiAgentGaussianActor(shared=True)
+    critic = CentralizedTwinQ(self_first=True)
+    team = CentralizedTwinQ(team=True)
+    trainer = MASACTrainer(actors, critic, team_critic=team)
+    batch = make_batch()
+    batch["active_mask"][0, 1] = 0  # Waiting.
+    batch["acted_mask"] = torch.tensor([[1., 0.], [1., 1.], [0., 1.], [0., 1.]])
+    batch.update(team_active=torch.tensor([1., 1., 0., 1.]), success_mask=torch.zeros(4, 2))
+
+    def personal_q(_observations, actions, _active_mask):
+        forward = actions[:, :, 0]
+        q = forward + 9 * forward.flip(dims=(1,))
+        return q, q
+
+    def team_q(_observations, actions, _active_mask, *, success_mask):
+        q = 3 * actions[:, :, 0].sum(dim=1)
+        return q, q
+
+    sampled = []
+
+    def record_actions(_module, _inputs, output):
+        actions, _ = output
+        actions.retain_grad()
+        sampled.append(actions)
+
+    monkeypatch.setattr(critic, "forward", personal_q)
+    monkeypatch.setattr(team, "forward", team_q)
+    hook = actors.register_forward_hook(record_actions)
+    stats = trainer.update_actors(batch)
+    hook.remove()
+
+    assert len(sampled) == 1
+    assert stats["shared_actor_updates"] == 1
+    assert stats["ego_1_valid_samples"] == 2
+    assert stats["ego_2_valid_samples"] == 3
+    torch.testing.assert_close(
+        sampled[0].grad[:, :, 0],
+        -(1 + 3 * batch["team_active"][:, None]) * batch["acted_mask"] / 5,
+    )
+    assert set(trainer.actor_optimizers) == {"shared"}
+    actor_steps = trainer.actor_optimizers["shared"].state.values()
+    assert actor_steps and all(state["step"] == 1 for state in actor_steps)
+
+    log_probs = torch.tensor([[0., 1.], [2., 3.], [4., 5.], [6., 7.]])
+    expected_alpha_loss = -trainer.log_alpha["shared"].item() * ((0 + 2 + 3 + 5 + 7) / 5 - 2)
+    alpha_stats = trainer.update_alpha_from_log_probs(log_probs, batch["acted_mask"])
+    assert abs(alpha_stats["ego_1_alpha_loss"] - expected_alpha_loss) < 1e-6
+    assert alpha_stats["ego_1_alpha"] == alpha_stats["ego_2_alpha"]
+    assert trainer.alpha_optimizers["shared"].state[trainer.log_alpha["shared"]]["step"] == 1
+
+    batch["acted_mask"].zero_()
+    assert trainer.update_actors(batch)["shared_actor_updates"] == 0
+    assert trainer.update_alpha_from_log_probs(log_probs, batch["acted_mask"])["shared_alpha_updates"] == 0
+    assert all(state["step"] == 1 for state in actor_steps)
+    assert trainer.alpha_optimizers["shared"].state[trainer.log_alpha["shared"]]["step"] == 1

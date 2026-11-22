@@ -78,6 +78,7 @@ def evaluate(args):
         ego_ids=AGENT_IDS,
         nav_dim=TARGET_EXIT_DIM if components is not None else 0,
         actor_leader_features=actor_leader_features,
+        shared=reward_config.get("shared_actor", False),
     )
     actors.load_state_dict(
         checkpoint["actors"],

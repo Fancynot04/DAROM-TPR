@@ -18,11 +18,14 @@ class CentralizedTwinQ(nn.Module):
         action_scale=5.0,
         nav_dim=0,
         team=False,
+        self_first=False,
     ):
         super().__init__()
 
         if num_agents < 1:
             raise ValueError("Invalid num_agents")
+        if self_first and (num_agents != 2 or team):
+            raise ValueError("Self-first Q requires two agents and individual targets")
 
         if obs_dim < 3 or obs_dim % 3 != 0:
             raise ValueError("Invalid obs_dim")
@@ -35,6 +38,7 @@ class CentralizedTwinQ(nn.Module):
 
         self.num_agents = num_agents
         self.team = team
+        self.self_first = self_first
         self.obs_dim = obs_dim + nav_dim
         self.action_dim = action_dim
         self.action_scale = float(action_scale)
@@ -62,7 +66,7 @@ class CentralizedTwinQ(nn.Module):
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
-                nn.Linear(hidden_dim, 1 if team else num_agents),
+                nn.Linear(hidden_dim, 1 if team or self_first else num_agents),
             )
 
         self.q1 = make_network()
@@ -131,6 +135,11 @@ class CentralizedTwinQ(nn.Module):
         normalized_actions = (
             actions / self.action_scale
         ) * mask.unsqueeze(-1)
+
+        if self.self_first:
+            per_agent = torch.cat((normalized_obs, normalized_actions, mask.unsqueeze(-1)), dim=-1)
+            views = torch.cat((per_agent, per_agent.flip(dims=(1,))), dim=-1)
+            return self.q1(views).squeeze(-1) * mask, self.q2(views).squeeze(-1) * mask
 
         features = [
             normalized_obs.reshape(batch, -1),

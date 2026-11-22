@@ -351,8 +351,12 @@ def test_plot_single_multi_seed_and_algorithm(work, monkeypatch):
     assert (work / "single/plot_source.csv").exists()
 
 
-@pytest.mark.parametrize("actor_leader_features,env_version,gamma", [(False, 3, 0.99), (True, 2, 0.995)])
-def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_leader_features, env_version, gamma):
+@pytest.mark.parametrize("actor_leader_features,env_version,gamma,shared_actor", [
+    (False, 3, 0.99, False), (True, 2, 0.995, False), (False, 5, 0.99, True),
+])
+def test_short_training_and_checkpoint_loading(
+    work, monkeypatch, capsys, actor_leader_features, env_version, gamma, shared_actor,
+):
     """Exercise real SUMO->replay->SAC updates->checkpoint->evaluation."""
     import train_masac
     import evaluate_masac
@@ -408,6 +412,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
         reward_ttc_threshold=2.75,
         reward_route_preparation_bonus_cap=0.007 if actor_leader_features else None,
         actor_leader_features=actor_leader_features,
+        shared_actor=shared_actor,
         masac_env_version=env_version,
         learning_rate=3e-5,
         initial_alpha=0.01,
@@ -438,6 +443,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
         assert report["metric_version"] == METRIC_VERSION
         assert report["trainer_config"]["gamma"] == gamma
         assert report["training_config"]["masac_env_version"] == env_version
+        assert report["training_config"]["shared_actor"] is shared_actor
         assert report["training_config"]["safety_reward"] == {
             "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 0.5,
         }
@@ -499,7 +505,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     assert final["team_critic_optimizer"]["state"]
     assert final["config"]["actor_leader_features"] is actor_leader_features
     actor = MultiAgentGaussianActor(ego_ids=AGENT_IDS, nav_dim=2,
-                                    actor_leader_features=actor_leader_features)
+                                    actor_leader_features=actor_leader_features, shared=shared_actor)
     assert actor.obs_dim == (139 if actor_leader_features else 136)
     actor.load_state_dict(final["actors"], strict=True)
     assert all(sha256(r["path"]) == r["sha256"] for r in index)
@@ -604,7 +610,8 @@ def test_training_cli_defaults():
     assert args.reward_route_guidance_weight == 5.0
 
 
-def test_training_resumes_replay_and_updates_after_interruption(work):
+@pytest.mark.parametrize("shared_actor", [False, True])
+def test_training_resumes_replay_and_updates_after_interruption(work, shared_actor):
     from scripts.evaluate_masac_checkpoints import discover
     from train_masac import build_parser, main
 
@@ -612,6 +619,8 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     flags = ["--output-dir", str(work), "--device", "cpu", "--torch-threads", "1",
              "--batch-size", "4", "--learning-starts", "4", "--buffer-capacity", "16",
              "--checkpoint-every", "12", "--log-every", "4", "--no-tensorboard"]
+    if shared_actor:
+        flags.append("--shared-actor")
     main(parser.parse_args(flags + ["--total-steps", "20", "--reward-comfort-weight", "0.01"]))
     directory = work / "checkpoints"
     index_path = directory / "index.json"
@@ -628,6 +637,8 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     # Simulate a published model whose index write was interrupted, with stale log tail.
     # Omit the comfort field to exercise a checkpoint written before it was recorded.
     del before["config"]["reward_protocol"]["comfort_weight"]
+    if not shared_actor:
+        del before["config"]["shared_actor"]
     old_stages = [{
         "route": ["O3", "E75", "E76", "E77", "D3"],
         "phases": [
@@ -657,6 +668,11 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     assert final["config"]["safety_reward"]["lane_change_weight"] == 1.0
     for parameter, original in before["critic_optimizer"]["state"].items():
         assert final["critic_optimizer"]["state"][parameter]["step"] == original["step"] + 8
+    if shared_actor:
+        for key in ("actor_optimizers", "alpha_optimizers"):
+            assert set(final[key]) == {"shared"}
+            for parameter, original in before[key]["shared"]["state"].items():
+                assert final[key]["shared"]["state"][parameter]["step"] == original["step"] + 8
     replay_rng = np.random.default_rng()
     replay_rng.bit_generator.state = metadata["rng"]
     for _ in range(8):
@@ -676,6 +692,9 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
         main(parser.parse_args(flags + ["--total-steps", "32", "--reward-comfort-weight", "0.0025"]))
     with pytest.raises(ValueError, match="configuration mismatch: route_preparation_settings"):
         main(parser.parse_args(flags + ["--total-steps", "32", "--reward-route-preparation-bonus-cap", "0.005"]))
+    opposite_mode = flags[:-1] if shared_actor else flags + ["--shared-actor"]
+    with pytest.raises(ValueError, match="configuration mismatch: shared_actor"):
+        main(parser.parse_args(opposite_mode + ["--total-steps", "32"]))
 
 
 @pytest.mark.parametrize("env_version,legacy,saved_grace,effective_grace", [
