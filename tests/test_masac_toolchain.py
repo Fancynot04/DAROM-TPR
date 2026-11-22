@@ -351,8 +351,8 @@ def test_plot_single_multi_seed_and_algorithm(work, monkeypatch):
     assert (work / "single/plot_source.csv").exists()
 
 
-@pytest.mark.parametrize("actor_leader_features,env_version", [(False, 3), (True, 2)])
-def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_leader_features, env_version):
+@pytest.mark.parametrize("actor_leader_features,env_version,gamma", [(False, 3, 0.99), (True, 2, 0.995)])
+def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_leader_features, env_version, gamma):
     """Exercise real SUMO->replay->SAC updates->checkpoint->evaluation."""
     import train_masac
     import evaluate_masac
@@ -404,7 +404,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
         stalled_terminate=False,
         torch_threads=1,
         device="cpu",
-        gamma=0.99,
+        gamma=gamma,
         reward_ttc_threshold=2.75,
         reward_route_preparation_bonus_cap=0.007 if actor_leader_features else None,
         actor_leader_features=actor_leader_features,
@@ -436,7 +436,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
             )
         )
         assert report["metric_version"] == METRIC_VERSION
-        assert report["trainer_config"]["gamma"] == 0.99
+        assert report["trainer_config"]["gamma"] == gamma
         assert report["training_config"]["masac_env_version"] == env_version
         assert report["training_config"]["safety_reward"] == {
             "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 0.5,
@@ -575,6 +575,7 @@ def test_training_cli_defaults():
     ) == (1_000_000, 1_000_000, 512, 100)
     assert args.learning_rate == 3e-5
     assert args.gamma == 0.99
+    assert parser.parse_args(["--gamma", "0.995"]).gamma == 0.995
     assert args.tau == 0.005
     assert args.train_every == 1
     assert args.checkpoint_every == 500_000

@@ -43,6 +43,8 @@ from src.evaluation_metrics import AgentMetrics
 
 AGENT_IDS = JointReplayBuffer.AGENT_IDS
 DEFAULT_CHECKPOINT_EVERY = 500_000
+DEFAULT_GAMMA = 0.99
+SUPPORTED_GAMMAS = (DEFAULT_GAMMA, 0.995)
 
 RESUME_CONFIG_KEYS = (
     "seed", "batch_size", "buffer_capacity", "learning_starts", "train_every",
@@ -413,9 +415,9 @@ def train_locked(args, device, output_dir):
     if args.update_log_every <= 0:
         raise ValueError("update_log_every must be positive")
 
-    if getattr(args, "gamma", 0.99) != 0.99:
-        raise ValueError("O3-D3 MASAC requires gamma=0.99")
-    args.gamma = 0.99
+    args.gamma = getattr(args, "gamma", DEFAULT_GAMMA)
+    if args.gamma not in SUPPORTED_GAMMAS:
+        raise ValueError(f"O3-D3 MASAC gamma must be one of {SUPPORTED_GAMMAS}")
     args.masac_env_version = getattr(args, "masac_env_version", MASAC_ENV_VERSION)
     if args.masac_env_version not in SUPPORTED_MASAC_ENV_VERSIONS:
         raise ValueError(f"Unsupported MASAC environment version: {args.masac_env_version}")
@@ -905,7 +907,7 @@ def build_parser():
         "--log-every", type=int, default=40
     )
     parser.add_argument(
-        "--gamma", type=float, choices=(0.99,), default=0.99
+        "--gamma", type=float, choices=SUPPORTED_GAMMAS, default=DEFAULT_GAMMA
     )
     parser.add_argument(
         "--learning-rate", type=float, default=3e-5
