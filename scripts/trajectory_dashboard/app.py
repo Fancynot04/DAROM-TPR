@@ -7,7 +7,7 @@ import streamlit as st
 
 from scripts.trajectory_dashboard.figures import TERMS, lane_figure, reward_figure, telemetry_figure
 from scripts.trajectory_dashboard.series import cursor_point, episode_series
-from scripts.trajectory_dashboard.trace import EGO_IDS, argument_parser, build_index
+from scripts.trajectory_dashboard.trace import EGO_IDS, argument_parser, build_index, published_evaluations
 
 
 reward_legend_state = st.components.v2.component(
@@ -104,20 +104,37 @@ def show_selected(point):
 
 def main():
     st.set_page_config(page_title="DAROM-TPR 轨迹诊断", layout="wide")
-    args = argument_parser(__doc__).parse_args()
-    trace = args.trace.resolve()
-    summary = Path(args.summary or trace.with_name("summary.json")).resolve()
+    parser = argument_parser(__doc__, allow_eval_dir=True)
+    args = parser.parse_args()
+    if args.eval_dir and args.summary:
+        parser.error("--summary requires --trace")
     st.title("DAROM-TPR 轨迹诊断")
     try:
+        checkpoint = None
+        if args.eval_dir:
+            evaluations = published_evaluations(args.eval_dir)
+            checkpoints = list(evaluations)
+            checkpoint = st.selectbox("训练检查点", checkpoints, index=len(checkpoints) - 1,
+                                      format_func=lambda step: f"{step:,} 步")
+            trace, summary = evaluations[checkpoint]
+        else:
+            trace = args.trace.resolve()
+            summary = Path(args.summary or trace.with_name("summary.json")).resolve()
         with st.spinner("校验轨迹并读取 seed 索引"):
             archive = open_archive(trace, summary, args.cache_dir, (signature(trace), signature(summary)))
+        if checkpoint is not None and checkpoint != archive.metadata["checkpoint"]:
+            raise ValueError(f"检查点目录与评估报告步数不一致：{checkpoint}")
     except (OSError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
         st.error(f"无法打开轨迹：{error}")
         st.stop()
 
     meta = archive.metadata
+    episodes = meta["episodes"]
+    both_arrived = sum(all(ep["outcomes"][ego] == "Arrived" for ego in EGO_IDS) for ep in episodes)
+    mode = "共享 Actor · " if meta.get("shared_actor") else ""
+    seed_label = f"训练 Seed {meta['training_seed']} · " if meta.get("training_seed") is not None else ""
     st.caption(
-        f"Checkpoint {meta['checkpoint']:,} 步 · {len(meta['episodes'])} 个评估回合 · "
+        f"{mode}{seed_label}Checkpoint {meta['checkpoint']:,} 步 · 双车均到达 {both_arrived}/{len(episodes)} · "
         f"{meta['step_records']:,} 条步记录 · Δt {meta['step_length_s']:g} s"
     )
 
@@ -147,7 +164,8 @@ def main():
 
     revision = f"{meta['trace_sha256']}-{seed}-{ego}"
     st.subheader("车道—距离轨迹")
-    st.caption("累计位移由每步可用的首末 XY 估算。连接区单独标注，末步缺少坐标时只显示实测位置。")
+    st.caption("累计位移由每步可用的首末 XY 估算。连接区单独标注，末步缺少坐标时只显示实测位置。"
+               " 悬停菱形变道节点可查看当步个人奖励，数值最高的一项标绿。")
     st.plotly_chart(lane_figure(points, selected, x_key, revision + x_key), width="stretch", key="lane")
 
     st.subheader("速度与动作时序")

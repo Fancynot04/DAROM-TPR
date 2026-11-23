@@ -1,5 +1,7 @@
 """Plotly views linked to the same selected episode step."""
 
+from html import escape
+
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -16,6 +18,26 @@ TERMS = {
 COLORS = ["#9C6D28", "#227958", "#6152AD", "#7855A0", "#B34034", "#C0641C", "#12638D", "#6F7C89"]
 CURSOR = "#D1741F"
 TERMINAL = "#A8273D"
+
+
+def _lane_change_hover(point):
+    components = point["components"]
+    labels = {**TERMS, "task": "任务奖励"}
+    ordered = dict.fromkeys([*labels, *components])
+    rewards = [(term, components[term]) for term in ordered if components.get(term) is not None]
+    lines = [f"{escape(point['road'])} · 车道 {point['pre_lane']} → {point['lane']}",
+             f"第 {point['step']} 步 · {point['position_time']:.2f} s"]
+    if not rewards:
+        return "<br>".join([*lines, "当步无个人奖励分项记录"])
+
+    highest, _ = max(rewards, key=lambda reward: reward[1])
+    for term, value in rewards:
+        label = escape(labels.get(term, term))
+        entry = f"{label} {value:+.6g}" if value else f"{label} 0"
+        if term == highest:
+            entry = f'<span style="color:#116B45"><b>{entry}（最高）</b></span>'
+        lines.append(entry)
+    return "<br>".join(lines)
 
 
 def _layout(fig, height, revision):
@@ -62,6 +84,19 @@ def lane_figure(points, selected, x_key, revision):
         if selected["road"] and not selected["road"].startswith(":") and selected["lane"] is not None:
             fig.add_trace(go.Scatter(x=[x], y=[selected["lane"]], name="当前步", mode="markers",
                                      marker=dict(color=CURSOR, size=12, symbol="circle-open")))
+    changes = [p for p in points if p[x_key] is not None and p["position_source"] == "步末"
+               and p["position_time"] is not None and p["road"] == p["pre_road"]
+               and p["road"] and not p["road"].startswith(":")
+               and p["pre_lane"] is not None and p["lane"] is not None and p["pre_lane"] != p["lane"]]
+    if changes:
+        # Plotly favors smaller markers for close hover ties with the dense road samples.
+        fig.add_trace(go.Scatter(
+            x=[p[x_key] for p in changes], y=[p["lane"] for p in changes],
+            name="变道节点", mode="markers",
+            marker=dict(color="#203349", size=6, symbol="diamond", line=dict(color="#203349", width=1)),
+            text=[_lane_change_hover(p) for p in changes], hovertemplate="%{text}<extra></extra>",
+            hoverlabel=dict(bgcolor="white", bordercolor="#203349", font=dict(color="#203349")),
+        ))
     fig.update_xaxes(title_text="距任务终点剩余距离 (m)" if x_key == "remaining" else "累计已观测 XY 位移 (m)",
                      autorange="reversed" if x_key == "remaining" else True)
     fig.update_yaxes(title_text="SUMO 车道编号", dtick=1)

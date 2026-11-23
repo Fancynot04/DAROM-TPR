@@ -158,6 +158,8 @@ def build_index(trace, summary=None, cache_dir=DEFAULT_CACHE):
                 "checkpoint": report["training_step"], "checkpoint_sha256": report["checkpoint_sha256"],
                 "trace_sha256": trace_hash, "summary_sha256": summary_hash,
                 "step_records": step_count, "step_length_s": dt, "gamma": gamma,
+                "shared_actor": report.get("training_config", {}).get("shared_actor"),
+                "training_seed": report.get("training_seed"),
                 "episodes": [{"seed": row["seed"], "outcomes": row["outcomes"],
                               "steps": row["global_steps"]} for row in records],
             }
@@ -171,9 +173,29 @@ def build_index(trace, summary=None, cache_dir=DEFAULT_CACHE):
     return TraceIndex(target, metadata)
 
 
-def argument_parser(description):
+def published_evaluations(directory):
+    """Find complete trace/report pairs in the evaluation output layout."""
+    pairs = {}
+    for summary in Path(directory).glob("step_*/summary.json"):
+        step = summary.parent.name.removeprefix("step_")
+        trace = summary.with_name("eval_trajectory.jsonl.gz")
+        if not step.isascii() or not step.isdecimal() or not trace.is_file():
+            continue
+        checkpoint = int(step)
+        if checkpoint in pairs:
+            raise ValueError(f"Multiple evaluation directories for checkpoint {checkpoint}")
+        pairs[checkpoint] = (trace.resolve(), summary.resolve())
+    if not pairs:
+        raise ValueError(f"No complete evaluation trace/report pairs in {directory}")
+    return dict(sorted(pairs.items()))
+
+
+def argument_parser(description, *, allow_eval_dir=False):
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("--trace", type=Path, required=True, help="Published eval_trajectory.jsonl.gz")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--trace", type=Path, help="Published eval_trajectory.jsonl.gz")
+    if allow_eval_dir:
+        source.add_argument("--eval-dir", type=Path, help="Parent of step_<checkpoint> evaluation directories")
     parser.add_argument("--summary", type=Path, help="Defaults to summary.json next to the trajectory")
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE)
     return parser

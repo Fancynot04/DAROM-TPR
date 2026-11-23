@@ -4,7 +4,7 @@ import json
 import pytest
 
 from scripts.trajectory_dashboard.series import cumulative_rewards, cursor_point, episode_series, road_segments
-from scripts.trajectory_dashboard.trace import build_index, file_sha256
+from scripts.trajectory_dashboard.trace import build_index, file_sha256, published_evaluations
 
 
 def vehicle(step, road, x, reward, *, acted=True, terminal=None, post_road=None):
@@ -101,3 +101,19 @@ def test_semantic_mismatch_does_not_publish_cache(published):
     with pytest.raises(ValueError, match="efficiency"):
         build_index(trace, summary, cache)
     assert not list(cache.glob("*.sqlite3"))
+
+
+def test_find_complete_evaluations_in_checkpoint_order(tmp_path):
+    for name in ("step_1000000", "step_200000", "step_400000", "step_smoke"):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "summary.json").touch()
+        if name != "step_400000":
+            (directory / "eval_trajectory.jsonl.gz").touch()
+
+    pairs = published_evaluations(tmp_path)
+    assert list(pairs) == [200000, 1000000]
+    assert pairs[200000] == (
+        tmp_path / "step_200000/eval_trajectory.jsonl.gz",
+        tmp_path / "step_200000/summary.json",
+    )
