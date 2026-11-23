@@ -20,9 +20,11 @@ import torch
 from src.envs.multi_ego_env import MultiEgoEnv
 from src.envs.route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES
 from src.envs.route_preparation import (
-    DEFAULT_REFERENCE_STEP_M, DEFAULT_ROUTE_PREPARATION_BONUS, DEFAULT_ROUTE_PREPARATION_STAGES,
+    DEFAULT_LINEAR_PREPARATION_SETTINGS, DEFAULT_REFERENCE_STEP_M,
+    DEFAULT_ROUTE_PREPARATION_BONUS, DEFAULT_ROUTE_PREPARATION_STAGES,
     DEFAULT_ROUTE_PREPARATION_WEIGHTS, PREPARATION_BONUS_MODES, PREPARATION_PENALTY,
-    PREPARATION_DISTANCE_MODES, PREPARATION_V1, V1_REFERENCE_STEP_M, checkpoint_preparation_settings,
+    PREPARATION_DISTANCE_MODES, PREPARATION_LINEAR_V1, PREPARATION_V1, V1_REFERENCE_STEP_M,
+    checkpoint_preparation_settings,
 )
 from src.envs.stalled import stalled_block_grace_for_version
 from src.rewards.masac import (
@@ -186,12 +188,17 @@ def preparation_settings(args, saved=None, *, resuming=False):
     if mode is None:
         if legacy_override:
             mode = PREPARATION_PENALTY
-        elif bonus is not None and (saved is None or saved["mode"] == PREPARATION_PENALTY):
+        elif (bonus is not None and (saved is None or saved["mode"] == PREPARATION_PENALTY)
+              or stage_file and saved is None):
             mode = PREPARATION_V1
     if resuming and saved is None and mode is None and stage_file is None:
         return None
     saved = saved or {}
-    mode = mode or saved.get("mode", PREPARATION_V1)
+    mode = mode or saved.get("mode", PREPARATION_LINEAR_V1)
+    if mode == PREPARATION_LINEAR_V1:
+        if stage_file or bonus is not None or legacy_override:
+            raise ValueError("linear_progress_v1 uses fixed parameters and the planned E77 to D3 exit")
+        return DEFAULT_LINEAR_PREPARATION_SETTINGS.copy()
     stages = saved.get("stages", DEFAULT_ROUTE_PREPARATION_STAGES)
     if stage_file:
         stages = json.loads(Path(stage_file).read_text(encoding="utf-8"))
@@ -954,10 +961,10 @@ def build_parser():
                         help="Multiply negative MASAC terminal task rewards by this factor")
     parser.add_argument("--collision-penalty", type=float,
                         help="Override the final MASAC collision penalty with this nonnegative magnitude")
-    parser.add_argument("--reward-route-preparation-mode", choices=(*PREPARATION_BONUS_MODES, PREPARATION_PENALTY),
-                        help="Default: first_progress_staircase for fresh training, saved mode when resuming")
+    parser.add_argument("--reward-route-preparation-mode", choices=(PREPARATION_LINEAR_V1, *PREPARATION_BONUS_MODES, PREPARATION_PENALTY),
+                        help="Default: linear_progress_v1 for fresh training, saved mode when resuming")
     parser.add_argument("--reward-route-preparation-bonus-cap", type=float,
-                        help=f"Per-step cruise bonus cap (fresh training default: {DEFAULT_ROUTE_PREPARATION_BONUS})")
+                        help=f"Per-step cruise bonus cap for older bonus modes (default: {DEFAULT_ROUTE_PREPARATION_BONUS})")
     for kind in DEFAULT_ROUTE_PREPARATION_WEIGHTS:
         parser.add_argument(f"--reward-route-preparation-{kind}-weight", type=float,
                             help="Select legacy penalty mode and set its phase weight")

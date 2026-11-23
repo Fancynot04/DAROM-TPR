@@ -29,6 +29,13 @@ DEFAULT_ROUTE_PREPARATION_BONUS = 0.005
 PREPARATION_BONUS = "continuous_bonus"
 PREPARATION_PROGRESS_BONUS = "progress_bonus"
 PREPARATION_V1 = "first_progress_staircase"
+PREPARATION_LINEAR_V1 = "linear_progress_v1"
+DEFAULT_LINEAR_PREPARATION_SETTINGS = {
+    "mode": PREPARATION_LINEAR_V1,
+    "reward_scale": 0.02,
+    "distance_scale_m": 1000.0,
+    "reference_step_m": 1.0,
+}
 PREPARATION_DISTANCE_MODES = (PREPARATION_V1, PREPARATION_PROGRESS_BONUS)
 PREPARATION_BONUS_MODES = (*PREPARATION_DISTANCE_MODES, PREPARATION_BONUS)
 PREPARATION_PENALTY = "legacy_penalty"
@@ -177,9 +184,24 @@ class BonusSample:
     connection: tuple[str, str] | None = None
 
 
+@dataclass
+class LinearSample:
+    motion: PreparationMotion
+    distance_m: float
+    demand: int | None
+
+
 class RoutePreparation:
     def __init__(self, settings):
         self.mode = settings.get("mode", PREPARATION_PENALTY)
+        self.linear = self.mode == PREPARATION_LINEAR_V1
+        self.compiled = {}
+        self.internal_offsets = {}
+        self.reset(())
+        if self.linear:
+            if {**DEFAULT_LINEAR_PREPARATION_SETTINGS, **settings} != DEFAULT_LINEAR_PREPARATION_SETTINGS:
+                raise ValueError("linear_progress_v1 requires its fixed reward settings")
+            return
         if self.mode not in (*PREPARATION_BONUS_MODES, PREPARATION_PENALTY):
             raise ValueError(f"Invalid route preparation mode: {self.mode}")
         self.bonus_cap = settings.get("bonus_cap", DEFAULT_ROUTE_PREPARATION_BONUS)
@@ -218,15 +240,13 @@ class RoutePreparation:
                 ):
                     raise ValueError(f"Invalid preparation edge: {preparation_edge}")
                 self.preparation_edges[route] = preparation_edge
-        self.compiled = {}
-        self.internal_offsets = {}
-        self.reset(())
 
     def reset(self, ego_ids):
         self.ego_phases = {}
         self.ego_connectors = {}
         self.ego_preparation_edges = {}
         self.ego_plans = {}
+        self.ego_linear_distances = {}
         self.unsettled_changes = {}
         self.progress_frontiers = {}
         self.minimum_demands = defaultdict(dict)
@@ -235,6 +255,9 @@ class RoutePreparation:
         self.step_info = {}
 
     def configure(self, ego_id, network, plan):
+        if self.linear:
+            self._configure_linear(ego_id, network, plan)
+            return
         if plan not in self.compiled:
             phases = {}
             include_connections = {}
@@ -311,6 +334,74 @@ class RoutePreparation:
         if preparation_edge is not None:
             self.diagnostics[ego_id]["preparation_edge_steps"] = 0
 
+    def _configure_linear(self, ego_id, network, plan):
+        if plan not in self.compiled:
+            distances = {}
+            if plan.route[-2:] == ("E77", "D3"):
+                remaining = 0.0
+                for index in reversed(range(len(plan.route) - 1)):
+                    lanes = network.lanes[plan.route[index]]
+                    lengths = {lane["id"]: float(lane["length"]) for lane in lanes.values()}
+                    distances[index] = remaining, lengths
+                    remaining += max(lengths.values())
+            self.compiled[plan] = distances
+        distances = self.compiled[plan]
+        self.ego_plans[ego_id] = plan
+        self.ego_linear_distances[ego_id] = distances
+        self.diagnostics[ego_id] = {
+            "mode": self.mode, "route": list(plan.route), "enabled": bool(distances),
+            "reason": "enabled" if distances else "unconfigured_route",
+            "phases": {"preparation": {
+                "preparation_zone_steps": 0, "unreachable_steps": 0,
+                "bonus_steps": 0, "cumulative_bonus": 0.0,
+            }} if distances else {},
+        }
+
+    def before_linear(self, conn, ego_id):
+        distances = self.ego_linear_distances.get(ego_id)
+        if not distances:
+            return None
+        motion = self._motion(conn, ego_id)
+        if motion is None or motion.along is None or motion.route_index not in distances:
+            return None
+        plan = self.ego_plans[ego_id]
+        remaining, lengths = distances[motion.route_index]
+        if motion.road.startswith(":"):
+            position = plan.internal[motion.route_index, motion.lane_id]
+        else:
+            position = motion.route_index, motion.lane
+            remaining += max(0.0, lengths[motion.lane_id] - motion.along)
+        signed_demand = plan.signed_changes.get(position)
+        return LinearSample(motion, remaining, abs(signed_demand) if signed_demand is not None else None)
+
+    def after_linear(self, conn, ego_id, sample, unavailable_reason):
+        after = None if unavailable_reason else self._motion(conn, ego_id)
+        before = sample.motion
+        movement = self._progress(conn, self.ego_plans[ego_id], before, after) if after is not None else None
+        progress = movement[0] if movement is not None else None
+        if progress is not None and before.speed == after.speed == 0:
+            progress = 0.0
+        settings = DEFAULT_LINEAR_PREPARATION_SETTINGS
+        distance_factor = min(1.0, sample.distance_m / settings["distance_scale_m"])
+        progress_factor = min(1.0, (progress or 0.0) / settings["reference_step_m"])
+        readiness = {0: 1.0, 1: 0.5}.get(sample.demand, 0.0)
+        reward = settings["reward_scale"] * readiness * distance_factor * progress_factor
+        self.step_info[ego_id] = {
+            "mode": self.mode, "phase": "preparation", "time_s": before.time_s,
+            "road": before.road, "lane": before.lane, "lane_id": before.lane_id,
+            "post_lane_id": after.lane_id if after is not None else None,
+            "local_lane_changes": sample.demand, "remaining_distance_m": sample.distance_m,
+            "readiness": readiness, "distance_factor": distance_factor,
+            "progress_m": progress, "progress_factor": progress_factor, "reward": reward,
+            "unavailable_reason": unavailable_reason or ("unverified_progress" if progress is None else None),
+        }
+        stats = self.diagnostics[ego_id]["phases"]["preparation"]
+        stats["preparation_zone_steps"] += 1
+        stats["unreachable_steps"] += int(sample.demand is None)
+        stats["bonus_steps"] += int(reward > 0)
+        stats["cumulative_bonus"] += reward
+        return reward
+
     @staticmethod
     def _safe_opportunity(vehicle, ego_id, lane, neighbors):
         try:
@@ -338,7 +429,7 @@ class RoutePreparation:
             pass
         return None
 
-    def _motion(self, conn, ego_id, rewards, road=None):
+    def _motion(self, conn, ego_id, rewards=None, road=None):
         vehicle = conn.vehicle
         try:
             plan = self.ego_plans[ego_id]
@@ -361,9 +452,9 @@ class RoutePreparation:
             return None
         along = self._measurement(lambda: vehicle.getLanePosition(ego_id), nonnegative=True)
         speed = self._measurement(lambda: vehicle.getSpeed(ego_id), nonnegative=True)
-        lateral = self._measurement(lambda: vehicle.getLateralSpeed(ego_id))
+        lateral = self._measurement(lambda: vehicle.getLateralSpeed(ego_id)) if rewards is not None else None
         risk = (self._measurement(lambda: rewards.current_lane_risk(vehicle, ego_id, speed))
-                if speed is not None else None)
+                if rewards is not None and speed is not None else None)
         now = self._measurement(conn.simulation.getTime, nonnegative=True)
         return PreparationMotion(index, road, lane, lane_id, along, speed, lateral, now, risk)
 

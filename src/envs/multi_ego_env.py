@@ -14,8 +14,7 @@ from .stalled import StalledDetector
 from .exit_rules import missed_exit_before_step, route_missed_before_step
 from .route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES, RouteLaneNetwork, UNREACHABLE_LANE_CHANGES
 from .route_preparation import (
-    DEFAULT_ROUTE_PREPARATION_BONUS, DEFAULT_ROUTE_PREPARATION_STAGES,
-    PREPARATION_BONUS_MODES, PREPARATION_V1, RoutePreparation,
+    DEFAULT_LINEAR_PREPARATION_SETTINGS, PREPARATION_BONUS_MODES, RoutePreparation,
 )
 from src.rewards.events import EMERGENCY_BRAKING_EVENT, STALLED_EVENT, b0_reward
 from src.rewards.masac import MASACRewardProtocol, MASACRewards, TARGET_EXIT_DIM
@@ -84,10 +83,8 @@ class MultiEgoEnv:
         self.route_preparation = None
         if reward_config is not None and reward_config.route_preparation:
             self.route_preparation = RoutePreparation(
-                route_preparation_settings if route_preparation_settings is not None else {
-                    "mode": PREPARATION_V1, "bonus_cap": DEFAULT_ROUTE_PREPARATION_BONUS,
-                    "stages": DEFAULT_ROUTE_PREPARATION_STAGES,
-                },
+                route_preparation_settings if route_preparation_settings is not None
+                else DEFAULT_LINEAR_PREPARATION_SETTINGS,
             )
         self.route_guidance_rules = {}
         if reward_config is not None and reward_config.route_guidance:
@@ -572,12 +569,15 @@ class MultiEgoEnv:
         acting_ids = active_ids - pre_terminated
         preparation_samples = {}
         preparation_changes = {}
+        linear_preparation = self.route_preparation is not None and self.route_preparation.linear
         continuous_preparation = (self.route_preparation is not None
                                   and self.route_preparation.mode in PREPARATION_BONUS_MODES)
         if self.route_preparation is not None:
             self.route_preparation.step_info.clear()
             for ego_id in acting_ids:
-                if continuous_preparation:
+                if linear_preparation:
+                    sample = self.route_preparation.before_linear(conn, ego_id)
+                elif continuous_preparation:
                     sample = self.route_preparation.before_bonus(conn, ego_id, tracker)
                 else:
                     position = (self._route_lane_position(ego_id) if self.legacy_route_semantics
@@ -696,7 +696,7 @@ class MultiEgoEnv:
 
         present = set(conn.vehicle.getIDList()) if self.collect_metrics or tracker is not None else set()
         preparation_teleports = set()
-        if continuous_preparation and preparation_samples:
+        if (continuous_preparation or linear_preparation) and preparation_samples:
             preparation_teleports.update(sim.getStartingTeleportIDList())
             preparation_teleports.update(sim.getEndingTeleportIDList())
         if tracker is not None:
@@ -718,7 +718,16 @@ class MultiEgoEnv:
                         if latest["event"] == "completed":
                             completed_change = latest
                     sample = preparation_samples[ego_id]
-                    if continuous_preparation:
+                    if linear_preparation:
+                        reason = terminal_event
+                        if ego_id in emergency_stops:
+                            reason = reason or EMERGENCY_BRAKING_EVENT
+                        if ego_id in preparation_teleports:
+                            reason = reason or "teleport"
+                        if ego_id not in present:
+                            reason = reason or "position_unavailable"
+                        value = self.route_preparation.after_linear(conn, ego_id, sample, reason)
+                    elif continuous_preparation:
                         change, target_risk = preparation_changes[ego_id]
                         reason = terminal_event
                         if ego_id in preparation_teleports:

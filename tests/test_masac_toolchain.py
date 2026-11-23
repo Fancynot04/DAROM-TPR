@@ -441,9 +441,16 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
         assert report["training_config"]["safety_reward"] == {
             "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 0.5,
         }
-        assert report["route_preparation"]["settings"]["mode"] == "first_progress_staircase"
-        assert report["route_preparation"]["settings"]["reference_step_m"] == 3.333
-        assert report["route_preparation"]["settings"]["bonus_cap"] == (0.007 if actor_leader_features else 0.005)
+        preparation = report["route_preparation"]["settings"]
+        if actor_leader_features:
+            assert preparation["mode"] == "first_progress_staircase"
+            assert preparation["reference_step_m"] == 3.333
+            assert preparation["bonus_cap"] == 0.007
+        else:
+            assert preparation == {
+                "mode": "linear_progress_v1", "reward_scale": 0.02,
+                "distance_scale_m": 1000.0, "reference_step_m": 1.0,
+            }
         assert report["environment"]["requested_speed_mode"] == 96
         for key in AGENT_IDS:
             modes = report["environment"]["actual_speed_modes"][key]
@@ -590,8 +597,10 @@ def test_training_cli_defaults():
     assert args.reward_route_preparation is None
     assert parser.parse_args(["--no-reward-route-preparation"]).reward_route_preparation is False
     from train_masac import preparation_settings
-    assert preparation_settings(args)["mode"] == "first_progress_staircase"
-    assert preparation_settings(args)["bonus_cap"] == 0.005
+    linear = {"mode": "linear_progress_v1", "reward_scale": 0.02,
+              "distance_scale_m": 1000.0, "reference_step_m": 1.0}
+    assert preparation_settings(args) == linear
+    assert preparation_settings(args, linear, resuming=True) == linear
     fixed = {"mode": "continuous_bonus", "stages": [], "bonus_cap": 0.007}
     fixed_args = parser.parse_args(["--reward-route-preparation-bonus-cap", "0.007"])
     assert preparation_settings(fixed_args, fixed, resuming=True) == fixed
