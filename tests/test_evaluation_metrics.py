@@ -64,12 +64,12 @@ def test_sumo_emergency_stop_is_separate_terminal_outcome():
     assert stopped["outcome"] == "Emergency Stop"
     assert not stopped["success"]
     joint = joint_record({"ego_1": stopped, "ego_2": arrived})
-    assert joint["emergency_stop"] and not joint["success"]
+    assert not joint["success"]
     stats = aggregate([stopped, arrived])
     assert stats["emergency_stop_rate"] == 50
     assert stats["outcome_counts"]["Emergency Stop"] == 1
-    joint_stats = aggregate([joint, joint])
-    assert joint_stats["emergency_stop_rate"] == 100
+    # Joint CSV columns remain stable; the event is recorded per Ego.
+    assert "emergency_stop" not in joint
 
 
 def test_masks_counts_and_aggregation():
