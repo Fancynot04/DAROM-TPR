@@ -68,10 +68,10 @@ def lane_figure(points, selected, x_key, revision):
     return _layout(fig, 365, revision)
 
 
-def _line(fig, points, row, time_key, key, name, color, shape="linear", dash=None):
+def _line(fig, points, row, time_key, key, name, color, shape="linear", dash=None, visible=None):
     fig.add_trace(go.Scatter(
         x=[p[time_key] for p in points], y=[p[key] for p in points], name=name,
-        mode="lines", line=dict(color=color, width=1.6, shape=shape, dash=dash),
+        mode="lines", visible=visible, line=dict(color=color, width=1.6, shape=shape, dash=dash),
         customdata=[p["step"] for p in points],
         hovertemplate="%{x:.2f} s · 第 %{customdata} 步<br>%{y:.4f}<extra>%{fullData.name}</extra>",
     ), row=row, col=1)
@@ -138,7 +138,8 @@ def reward_figure(points, selected, terms, gamma, revision):
         _line(fig, values, 1, "reward_time", term, TERMS[term], COLORS[list(TERMS).index(term)])
     name = "个人累计回报" if gamma == 1 else f"个人折扣累计回报 (γ={gamma:g})"
     fig.add_trace(go.Scatter(x=[p["reward_time"] for p, _ in cum], y=[v for _, v in cum],
-                             name=name, mode="lines", line=dict(color="#203349", width=2)), row=2, col=1)
+                             name=name, meta="personal-return", visible="legendonly",
+                             mode="lines", line=dict(color="#203349", width=2)), row=2, col=1)
     endings = [(p, v) for p, v in cum if p["terminal"]]
     if endings:
         fig.add_trace(go.Scatter(
@@ -146,13 +147,16 @@ def reward_figure(points, selected, terms, gamma, revision):
             customdata=[[p["terminal"], p["components"].get("task"), p["step"]] for p, _ in endings],
             hovertemplate="%{customdata[0]} · 第 %{customdata[2]} 步<br>任务项 %{customdata[1]}"
                           "<br>累计 %{y:.3f}<extra>终止奖励</extra>",
-            name="终止奖励", mode="markers", marker=dict(size=11, color=TERMINAL, symbol="diamond"),
+            name="终止奖励", visible="legendonly",
+            mode="markers", marker=dict(size=11, color=TERMINAL, symbol="diamond"),
         ), row=2, col=1)
-    _line(fig, points, 3, "clock", "team_reward", "团队单步奖励（未折扣）", "#16806D", shape="hv")
+    _line(fig, points, 3, "clock", "team_reward", "团队单步奖励（未折扣）", "#16806D",
+          shape="hv", visible="legendonly")
     paid_team = [p for p in points if p["team_reward"]]
     if paid_team:
         fig.add_trace(go.Scatter(x=[p["clock"] for p in paid_team], y=[p["team_reward"] for p in paid_team],
-                                 mode="markers", name="团队实发", marker=dict(color="#16806D", size=9)),
+                                 mode="markers", name="团队实发", visible="legendonly",
+                                 marker=dict(color="#16806D", size=9)),
                       row=3, col=1)
     _add_cursor(fig, selected, points)
     fig.update_xaxes(title_text="SUMO 仿真时间 (s)", row=3, col=1)

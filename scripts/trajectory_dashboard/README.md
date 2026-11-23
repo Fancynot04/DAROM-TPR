@@ -32,6 +32,8 @@ python -m streamlit run scripts/trajectory_dashboard/app.py \
 
 索引建立时检查文件哈希、种子与步编号连续性、每车终止结局、每车逐步奖励与回合分项以及团队奖励。索引按轨迹和报告的 SHA-256 唯一标识，页面切换 seed 时只读取所在回合。源文件始终以只读方式打开。
 
+奖励图默认关闭汇入、个人累计回报、终止奖励、团队单步奖励和团队实发。汇入可在「单步奖励分项」中选中，其余可点击图例开启。当前页面会话内，调整检查点、Ego、结局、评估 Seed、车道图横轴、共享回合步或游标时刻时，分项选择和图例开关都会保留。某项在当前轨迹中缺少记录时仍会保留选择，有记录时按原开关状态显示。
+
 ### 轨迹归档
 
 评估发布后，将同一 checkpoint 的原始 `eval_trajectory.jsonl.gz`、`summary.json`、`episodes.csv` 和现有的分区分析一并保存到 `~/Experiments/darom/<完整实验 ID>/evidence/evaluations/step_<步数>/`。核对副本与远端的 SHA-256，在同目录的 `manifest.json` 记录来源、模型哈希与评估协议，并将清单登记到实验档案。

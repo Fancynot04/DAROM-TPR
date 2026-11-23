@@ -10,6 +10,40 @@ from scripts.trajectory_dashboard.series import cursor_point, episode_series
 from scripts.trajectory_dashboard.trace import EGO_IDS, argument_parser, build_index
 
 
+reward_legend_state = st.components.v2.component(
+    "trajectory_reward_legend",
+    css=":host { display: none; }",
+    js="""
+    export default function ({ setStateValue }) {
+        const container = document.querySelector('.st-key-reward-chart');
+        if (!container) return;
+        let graph;
+        const saveVisibility = () => {
+            setStateValue('visibility', Object.fromEntries(graph.data.map(trace => [
+                trace.meta ?? trace.name, trace.visible ?? true,
+            ])));
+        };
+        const detach = () => graph?.removeListener?.('plotly_restyle', saveVisibility);
+        const attach = () => {
+            const next = container.querySelector('.js-plotly-plot');
+            if (!next?.on || next === graph) return;
+            detach();
+            graph = next;
+            graph.on('plotly_restyle', saveVisibility);
+        };
+        // Streamlit can replace the Plotly graph when the cursor changes.
+        const observer = new MutationObserver(attach);
+        observer.observe(container, { childList: true, subtree: true });
+        attach();
+        return () => {
+            observer.disconnect();
+            detach();
+        };
+    }
+    """,
+)
+
+
 @st.cache_data(show_spinner=False, max_entries=4)
 def open_archive(trace, summary, cache_dir, signatures):
     return build_index(trace, summary, cache_dir)
@@ -122,13 +156,31 @@ def main():
 
     st.subheader("逐步与累计奖励")
     filters, discount = st.columns([3, 1])
-    available = [term for term in TERMS if any(term in p["components"] for p in points)]
-    enabled = [term for term in available if any(p["components"].get(term, 0) != 0 for p in points)]
-    terms = filters.multiselect("单步奖励分项", available, default=enabled, format_func=TERMS.get,
-                                key=f"terms-{revision}")
-    discounted = discount.checkbox(f"折扣累计 γ={meta['gamma']:g}")
+    if "reward_terms" not in st.session_state:
+        st.session_state["reward_terms"] = [
+            term for term in TERMS if term != "merge" and any(p["components"].get(term, 0) != 0 for p in points)
+        ]
+    terms = filters.multiselect("单步奖励分项", list(TERMS), format_func=TERMS.get, key="reward_terms")
+    plotted_terms = [term for term in terms if any(term in p["components"] for p in points)]
+    discounted = discount.checkbox(f"折扣累计 γ={meta['gamma']:g}", key="reward_discounted")
     gamma = meta["gamma"] if discounted else 1.0
-    st.plotly_chart(reward_figure(points, selected, terms, gamma, revision), width="stretch", key="reward")
+    with st.container(key="reward-chart", gap=None):
+        chart = st.empty()
+        legend = reward_legend_state(key="reward-legend", default={"visibility": {}},
+                                     on_visibility_change=lambda: None, height=0)
+        # A curve can disappear in one episode and reappear in another.
+        remembered = st.session_state.get("reward_visibility", {}) | legend.visibility
+        st.session_state["reward_visibility"] = remembered
+        view = (revision, step, at, tuple(terms), gamma)
+        # Keep the chart mounted on legend-only reruns so Plotly can finish handling clicks.
+        previous_view, visibility = st.session_state.get("reward_chart_view", (None, {}))
+        if view != previous_view:
+            visibility = remembered
+            st.session_state["reward_chart_view"] = (view, visibility)
+        fig = reward_figure(points, selected, plotted_terms, gamma, revision)
+        for trace in fig.data:
+            trace.visible = visibility.get(trace.meta or trace.name, trace.visible)
+        chart.plotly_chart(fig, width="stretch", key="reward")
 
 
 if __name__ == "__main__":
