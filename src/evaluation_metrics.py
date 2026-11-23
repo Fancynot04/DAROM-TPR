@@ -284,8 +284,8 @@ def aggregate(rows, *, include_stalled=True):
         result['first_e77_lane_valid_episodes'] = len(lanes)
     else:
         for _, key in failures:
-            result[key + '_rate'] = 100 * sum(r[key] for r in rows) / n
-            result[key + '_rate_stats'] = wilson(sum(r[key] for r in rows), n)
+            result[key + '_rate'] = 100 * sum(r.get(key, False) for r in rows) / n
+            result[key + '_rate_stats'] = wilson(sum(r.get(key, False) for r in rows), n)
         for key in ('mean_speed_mps', 'mean_abs_jerk_mps3'):
             result[key + '_valid_agent_episodes'] = sum(r[key + '_valid_agents'] for r in rows)
     if 'collision_free' in rows[0]:
