@@ -25,12 +25,14 @@ class GaussianActor(nn.Module):
         hidden_dim=256,
         nav_dim=0,
         actor_leader_features=False,
+        role_id=False,
     ):
         super().__init__()
 
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.action_scale = float(action_scale)
+        self.role_id = role_id
 
         if self.action_scale <= 0:
             raise ValueError("Invalid action scale")
@@ -56,7 +58,7 @@ class GaussianActor(nn.Module):
         )
 
         self.policy = nn.Sequential(
-            nn.Linear(256, hidden_dim),
+            nn.Linear(258 if role_id else 256, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -70,13 +72,17 @@ class GaussianActor(nn.Module):
             hidden_dim, action_dim
         )
 
-    def forward(self, observation, deterministic=False):
+    def forward(self, observation, deterministic=False, *, role_features=None):
         """返回动作和经过 tanh 修正的 log probability。"""
 
         if observation.ndim != 2 or observation.shape[1] != self.obs_dim:
             raise ValueError(f"Expected observation (B, {self.obs_dim})")
 
         features = self.encoder(observation)
+        if self.role_id:
+            if role_features is None or role_features.shape != (observation.shape[0], 2):
+                raise ValueError("Expected two role features for each Ego")
+            features = torch.cat((features, role_features), dim=-1)
         hidden = self.policy(features)
 
         mean = self.mean_head(hidden)
@@ -121,11 +127,13 @@ class MultiAgentGaussianActor(nn.Module):
         nav_dim=0,
         actor_leader_features=False,
         shared=False,
+        role_id=False,
     ):
         super().__init__()
 
         self.ego_ids = tuple(ego_ids)
         self.shared = shared
+        self.role_id = role_id
         self.obs_dim = 134 + nav_dim + len(LEADER_FEATURE_SCALE) * int(actor_leader_features)
 
         if len(set(self.ego_ids)) != len(self.ego_ids):
@@ -134,10 +142,16 @@ class MultiAgentGaussianActor(nn.Module):
         if not self.ego_ids:
             raise ValueError("No Ego IDs")
 
+        if role_id and (not shared or len(self.ego_ids) != 2):
+            raise ValueError("Role IDs require a shared actor with two Ego slots")
+        role_features = torch.eye(2) if role_id else None
+        self.register_buffer("role_features", role_features, persistent=False)
+
         actor_keys = ("shared",) if shared else self.ego_ids
         self.actors = nn.ModuleDict({
             ego_id: GaussianActor(obs_dim=self.obs_dim, nav_dim=nav_dim,
-                                  actor_leader_features=actor_leader_features)
+                                  actor_leader_features=actor_leader_features,
+                                  role_id=role_id)
             for ego_id in actor_keys
         })
 
@@ -174,9 +188,13 @@ class MultiAgentGaussianActor(nn.Module):
         )
 
         if self.shared:
+            roles = None
+            if self.role_features is not None:
+                roles = self.role_features.to(observations).expand(batch, -1, -1).reshape(batch * n, 2)
             actions, log_probs = self.actors["shared"](
                 observations.reshape(batch * n, self.obs_dim),
                 deterministic=deterministic,
+                role_features=roles,
             )
             actions = actions.reshape(batch, n, actions.shape[-1])
             return actions * mask.unsqueeze(-1), log_probs.reshape(batch, n) * mask

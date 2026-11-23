@@ -36,6 +36,21 @@
 
 checkpoint 保存 `shared_actor`。评估自动选用对应的策略结构，缺少该字段的旧 checkpoint 按独立策略加载。恢复共享训练时仍使用 `--shared-actor`，恢复训练和 Actor 权重初始化均要求模式与来源 checkpoint 一致。
 
+#### 自车角色 ID 消融
+
+`--shared-actor --role-id` 为共享 Actor 加入固定角色编码。`ego_1` 和 `ego_2` 分别使用 `[1, 0]` 和 `[0, 1]`。编码追加在 DAROM-GRU 的 256 维输出之后，策略头接收 258 维。默认观测和 Replay 使用原 136 维，个人与团队 Critic、奖励和共享 α 沿用原配置。
+
+开启后使用独立输出目录。checkpoint 保存 `role_id`，评估自动恢复该配置。旧 checkpoint 缺少此字段时按关闭处理，原共享实验 `e3c73a` 可作为同协议对照。
+
+#### SUMO 紧急停车终止
+
+新训练默认开启 `--emergency-stop-terminate`。每个控制步读取 TraCI 的
+`simulation.getEmergencyStoppingVehiclesIDList()`。名单中的 Ego 在同一步结束并从路网移除，终止类型为
+`Emergency Stop`，该车本步回报固定为 −400。队友继续控制。同一步若 SUMO 也报告该车碰撞，按现有碰撞规则结算。
+
+checkpoint 记录开关，评估沿用存档配置。缺少该字段的旧 checkpoint 按关闭处理，续训此类 checkpoint 需显式加
+`--no-emergency-stop-terminate`。复现原共享实验或只测角色 ID 时也使用该参数。评估单独记录紧急停车导致的终止率，以及 SUMO 报告过紧急停车的回合率。
+
 Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度（m/s²）；横向值经阈值离散化：小于 `−5/3` 请求朝车道 0 换道，在 `[-5/3, 5/3)` 保持，大于等于 `5/3` 请求反方向换道。当前训练中的 Critic 看到**连续请求动作**，而 SUMO 执行的是离散换道命令；这是后续需要检验的建模限制。
 
 ### 模块化奖励

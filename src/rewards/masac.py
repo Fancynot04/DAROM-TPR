@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from math import inf, isfinite
 
-from .events import STALLED_EVENT, STALLED_PENALTY, event_reward
+from .events import EMERGENCY_STOP_EVENT, EMERGENCY_STOP_PENALTY, STALLED_EVENT, STALLED_PENALTY, event_reward
 
 
 TASK_EVENTS = {
@@ -158,6 +158,8 @@ class MASACRewards:
         return dict.fromkeys(self.components, 0.0)
 
     def terminal(self, event):
+        if event == EMERGENCY_STOP_EVENT:
+            return EMERGENCY_STOP_PENALTY
         if self.config.task or event == STALLED_EVENT:
             if event == "Collision" and self.protocol.collision_penalty is not None:
                 return -self.protocol.collision_penalty
@@ -388,6 +390,8 @@ class MASACRewards:
 
     def after_step(self, conn, ego_id, on_road, needs_merge, terminal_event=None):
         values, acceleration, risk = self.samples.pop(ego_id)
+        if terminal_event == EMERGENCY_STOP_EVENT:
+            return self.empty()
         values["lane_change"] = self._settle_lane_change(
             conn, ego_id, on_road, risk, terminal_event,
         )

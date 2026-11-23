@@ -79,6 +79,7 @@ def evaluate(args):
         nav_dim=TARGET_EXIT_DIM if components is not None else 0,
         actor_leader_features=actor_leader_features,
         shared=reward_config.get("shared_actor", False),
+        role_id=reward_config.get("role_id", False),
     )
     actors.load_state_dict(
         checkpoint["actors"],
@@ -91,6 +92,7 @@ def evaluate(args):
     stalled_terminate = getattr(args, "stalled_terminate", None)
     if stalled_terminate is None:
         stalled_terminate = reward_config.get("stalled_terminate", False)
+    emergency_stop_terminate = reward_config.get("emergency_stop_terminate", False)
 
     env = MultiEgoEnv(
         scenario=getattr(args, "scenario", "easy"),
@@ -115,6 +117,7 @@ def evaluate(args):
         # Checkpoints written before the timeout became configurable used 4,000 steps.
         max_active_steps=reward_config.get("max_active_steps", 4000),
         stalled_terminate=stalled_terminate,
+        emergency_stop_terminate=emergency_stop_terminate,
         stalled_block_grace_s=stalled_block_grace_for_version(
             env_version, reward_config.get("stalled_block_grace_s"),
         ),
@@ -360,7 +363,7 @@ def evaluate(args):
                 "global_steps": step + 1,
                 "agent_steps_sum": sum(r["agent_steps"] for r in agent_records.values()),
                 "per_agent": agent_records,
-                "joint": joint_record(agent_records),
+                "joint": joint_record(agent_records, include_emergency_stop=emergency_stop_terminate),
                 "steps": step + 1,
                 "outcomes": outcomes,
                 "rewards": rewards_total,
@@ -392,7 +395,8 @@ def evaluate(args):
             finally:
                 warning_logs.cleanup()
 
-    per_agent = {ego_id: aggregate([r["per_agent"][ego_id] for r in records])
+    per_agent = {ego_id: aggregate([r["per_agent"][ego_id] for r in records],
+                                   include_emergency_stop=emergency_stop_terminate)
                  for ego_id in AGENT_IDS}
     summary = {
         "metric_version": "homogeneous-dual-ego-v1",
@@ -425,6 +429,7 @@ def evaluate(args):
             "disable_teleport": True,
             "max_active_steps": env.max_active_steps,
             "stalled_terminate": stalled_terminate,
+            "emergency_stop_terminate": emergency_stop_terminate,
             "masac_env_version": env_version,
             "stalled_block_grace_s": env.stalled_block_grace_s,
         },
@@ -456,7 +461,7 @@ def evaluate(args):
         "global_steps": sum(r["global_steps"] for r in records),
         "agent_steps_sum": sum(r["agent_steps_sum"] for r in records),
         "per_agent": per_agent,
-        "joint": aggregate([r["joint"] for r in records]),
+        "joint": aggregate([r["joint"] for r in records], include_emergency_stop=emergency_stop_terminate),
         "checkpoint": str(args.checkpoint),
         "training_step": checkpoint["global_step"],
         "episodes": len(records),

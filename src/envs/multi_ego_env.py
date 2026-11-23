@@ -17,7 +17,7 @@ from .route_preparation import (
     DEFAULT_ROUTE_PREPARATION_BONUS, DEFAULT_ROUTE_PREPARATION_STAGES,
     PREPARATION_BONUS_MODES, PREPARATION_V1, RoutePreparation,
 )
-from src.rewards.events import STALLED_EVENT, b0_reward
+from src.rewards.events import EMERGENCY_STOP_EVENT, STALLED_EVENT, b0_reward
 from src.rewards.masac import MASACRewardProtocol, MASACRewards, TARGET_EXIT_DIM
 
 from .action_history import MultiEgoActionHistory
@@ -53,6 +53,7 @@ class MultiEgoEnv:
         stalled_block_grace_s=0.0,
         stalled_match_route_links=False,
         route_preparation_settings=None,
+        emergency_stop_terminate=True,
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -71,6 +72,7 @@ class MultiEgoEnv:
         self.collect_control_trace = collect_control_trace
         self.stalled_shadow = stalled_shadow
         self.stalled_terminate = stalled_terminate
+        self.emergency_stop_terminate = emergency_stop_terminate
         self.stalled_block_grace_s = stalled_block_grace_s
         self.stalled_match_route_links = stalled_match_route_links
         self.sumo_warning_log_dir = None
@@ -690,6 +692,9 @@ class MultiEgoEnv:
         arrivals = set(
             sim.getArrivedIDList()
         )
+        emergency = (set(sim.getEmergencyStoppingVehiclesIDList())
+                     if self.emergency_stop_terminate or self.collect_metrics else set())
+        emergency_terminals = emergency - collisions if self.emergency_stop_terminate else set()
 
         present = set(conn.vehicle.getIDList()) if self.collect_metrics or tracker is not None else set()
         preparation_teleports = set()
@@ -702,13 +707,15 @@ class MultiEgoEnv:
                 terminal_event = None
                 if ego_id in collisions:
                     terminal_event = "Collision"
+                elif ego_id in emergency_terminals:
+                    terminal_event = EMERGENCY_STOP_EVENT
                 elif ego_id in arrivals:
                     terminal_event = "Arrived"
                 components[ego_id] = tracker.after_step(
                     conn, ego_id, ego_id in present,
                     self.needs_merge[ego_id], terminal_event=terminal_event,
                 )
-                if ego_id in preparation_samples:
+                if ego_id in preparation_samples and terminal_event != EMERGENCY_STOP_EVENT:
                     completed_change = None
                     if len(tracker.lane_change_events) > change_events_before:
                         latest = tracker.lane_change_events[-1]
@@ -733,7 +740,6 @@ class MultiEgoEnv:
 
         metric_steps = {}
         if self.collect_metrics:
-            emergency = set(sim.getEmergencyStoppingVehiclesIDList())
             for ego_id in self.AGENTS:
                 if self.terminations[ego_id] and ego_id not in pre_terminated:
                     continue
@@ -808,6 +814,9 @@ class MultiEgoEnv:
             if ego_id in collisions:
                 event = "Collision"
 
+            elif ego_id in emergency_terminals:
+                event = EMERGENCY_STOP_EVENT
+
             elif state.terminal_reason == "UnknownRemoval":
                 raise RuntimeError(f"Unexpected removal: {ego_id}, reason={state.terminal_reason}")
 
@@ -836,7 +845,8 @@ class MultiEgoEnv:
                 if ego_id not in acting_ids or (self.legacy_route_semantics and tracker is None):
                     raise RuntimeError(f"{ego_id} arrived without reaching {target}")
 
-            if ego_id in guidance_before and (ego_id in present or event == "Arrived"):
+            if (ego_id in guidance_before and event != EMERGENCY_STOP_EVENT
+                    and (ego_id in present or event == "Arrived")):
                 plan, critical, accepted = self.ego_guidance[ego_id]
                 connection = plan.completed_connection(
                     guidance_before[ego_id], conn.vehicle if ego_id in present else None,

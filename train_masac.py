@@ -35,6 +35,7 @@ from src.agents.centralized_critic import CentralizedTwinQ
 from src.agents.replay_buffer import JointReplayBuffer
 from src.agents.transition_collector import JointTransitionCollector
 from src.agents.masac_trainer import MASACTrainer
+from src.rewards.events import EMERGENCY_STOP_EVENT
 
 
 from src.experiment_tracking import (TrainingLog, ActionWindow, EpisodeWindow,
@@ -256,6 +257,10 @@ def find_resume_checkpoint(directory, args):
     changed = [key for key in RESUME_CONFIG_KEYS if state["config"].get(key) != getattr(args, key)]
     if state["config"].get("shared_actor", False) != args.shared_actor:
         changed.append("shared_actor")
+    if state["config"].get("role_id", False) != args.role_id:
+        changed.append("role_id")
+    if state["config"].get("emergency_stop_terminate", False) != args.emergency_stop_terminate:
+        changed.append("emergency_stop_terminate")
     saved_route_settings = checkpoint_preparation_settings(state["config"].get("route_preparation_settings"))
     route_settings = preparation_settings(args, saved_route_settings, resuming=True)
     if saved_route_settings != route_settings:
@@ -326,6 +331,8 @@ def initialize_actor_weights(actors, path, expected_sha256, actor_leader_feature
     config = state.get("config", {})
     if config.get("shared_actor", False) != actors.shared:
         raise ValueError("Actor initialization requires matching shared_actor configuration")
+    if config.get("role_id", False) != actors.role_id:
+        raise ValueError("Actor initialization requires matching role_id configuration")
     if (
         tuple(state.get("agent_ids", ())) != AGENT_IDS
         or config.get("masac_env_version") not in SUPPORTED_MASAC_ENV_VERSIONS[1:]
@@ -408,6 +415,7 @@ def train_locked(args, device, output_dir):
     args.stalled_shadow = getattr(args, "stalled_shadow", False)
     args.usp = getattr(args, "usp", False)
     args.stalled_terminate = getattr(args, "stalled_terminate", None)
+    args.emergency_stop_terminate = getattr(args, "emergency_stop_terminate", True)
     if args.stalled_terminate is None:
         args.stalled_terminate = not args.usp
     if args.stalled_terminate and args.usp:
@@ -428,6 +436,9 @@ def train_locked(args, device, output_dir):
     args.stalled_block_grace_s = stalled_block_grace_for_version(args.masac_env_version)
     args.actor_leader_features = getattr(args, "actor_leader_features", False)
     args.shared_actor = getattr(args, "shared_actor", False)
+    args.role_id = getattr(args, "role_id", False)
+    if args.role_id and not args.shared_actor:
+        raise ValueError("--role-id requires --shared-actor")
     args.tau = getattr(args, "tau", 0.005)
     args.checkpoint_every = getattr(args, "checkpoint_every", DEFAULT_CHECKPOINT_EVERY)
     args.resume = getattr(args, "resume", True)
@@ -491,6 +502,7 @@ def train_locked(args, device, output_dir):
         ego_ids=AGENT_IDS, nav_dim=TARGET_EXIT_DIM,
         actor_leader_features=args.actor_leader_features,
         shared=args.shared_actor,
+        role_id=args.role_id,
     ).to(device)
     init_checkpoint = getattr(args, "init_actors_from", None)
     init_sha = getattr(args, "init_actors_sha256", None)
@@ -557,6 +569,7 @@ def train_locked(args, device, output_dir):
         collect_control_trace=args.trace_controls,
         stalled_shadow=args.stalled_shadow,
         stalled_terminate=args.stalled_terminate,
+        emergency_stop_terminate=args.emergency_stop_terminate,
         stalled_block_grace_s=args.stalled_block_grace_s,
         stalled_match_route_links=args.masac_env_version == MASAC_ENV_VERSION,
         legacy_route_semantics=args.masac_env_version == LEGACY_MASAC_ENV_VERSION,
@@ -681,6 +694,11 @@ def train_locked(args, device, output_dir):
             ], dtype=np.float32)
 
             acted_mask = active_mask * (1.0 - pre_step)
+            replay_rewards = rewards_array.copy()
+            for i, ego_id in enumerate(AGENT_IDS):
+                # A newly inserted Ego can stop before its first policy action.
+                if active_mask[i] == 0 and env.terminal_reasons[ego_id] == EMERGENCY_STOP_EVENT:
+                    replay_rewards[i] = 0.0
             action_window.observe(joint_actions, acted_mask)
             for key in AGENT_IDS:
                 if key not in outcomes:
@@ -702,7 +720,7 @@ def train_locked(args, device, output_dir):
                 "policy_obs": policy_obs,
                 "critic_obs": critic_obs,
                 "actions": joint_actions,
-                "rewards": rewards_array,
+                "rewards": replay_rewards,
                 "dones": dones,
                 "active_mask": active_mask,
                 "acted_mask": acted_mask,
@@ -978,6 +996,8 @@ def build_parser():
                         help="Positive team Q weight in each Actor objective")
     parser.add_argument("--stalled-terminate", action=argparse.BooleanOptionalAction, default=None,
                         help="End a stalled Ego episode with a -400 penalty (default: enabled unless using USP)")
+    parser.add_argument("--emergency-stop-terminate", action=argparse.BooleanOptionalAction, default=True,
+                        help="End an Ego episode at a SUMO emergency stop with a fixed -400 reward")
     parser.add_argument("--stalled-shadow", action="store_true", help="Log per-step stalled diagnostics")
     parser.add_argument("--masac-env-version", type=int,
                         choices=SUPPORTED_MASAC_ENV_VERSIONS, default=MASAC_ENV_VERSION,
@@ -985,6 +1005,8 @@ def build_parser():
                              "v4: stalled block grace; v5: match stalled links to the actual lane")
     parser.add_argument("--shared-actor", action="store_true",
                         help="Share the actor and alpha, and evaluate personal Q with a self-first critic")
+    parser.add_argument("--role-id", action="store_true",
+                        help="Append two one-hot role features to the shared actor head")
     parser.add_argument("--actor-leader-features", action="store_true",
                         help="Add delayed leader bumper gap, closing speed and TTC to each Actor")
     parser.add_argument("--trace-controls", action="store_true", help="Log per-Ego TraCI gaps, motion, and control commands")

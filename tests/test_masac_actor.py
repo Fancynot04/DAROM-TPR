@@ -26,6 +26,25 @@ def test_actor_output():
     assert torch.all(actions >= -5.0)
 
 
+def test_shared_role_ids_follow_the_original_actor_encoding():
+    legacy = MultiAgentGaussianActor(shared=True, nav_dim=2)
+    actors = MultiAgentGaussianActor(shared=True, nav_dim=2, role_id=True)
+    actor = actors.actors["shared"]
+    actor.encoder.load_state_dict(legacy.actors["shared"].encoder.state_dict(), strict=True)
+    obs = torch.randn(2, 1, 136).expand(-1, 2, -1)
+    mask = torch.tensor([[1., 1.], [1., 0.]])
+    roles = torch.eye(2).expand(2, -1, -1)
+    policy_inputs = []
+    with torch.no_grad():
+        hook = actor.policy[0].register_forward_pre_hook(lambda _, args: policy_inputs.append(args[0]))
+        actions, _ = actors(obs, mask, deterministic=True)
+        hook.remove()
+    policy = policy_inputs[0].reshape(2, 2, 258)
+    torch.testing.assert_close(policy[:, 0, :256], policy[:, 1, :256])
+    torch.testing.assert_close(policy[:, :, -2:], roles)
+    assert torch.all(actions[1, 1] == 0)
+
+
 def test_decentralized_execution():
     """改变 Ego B 观测，不得影响 Ego A 的策略输出。"""
 

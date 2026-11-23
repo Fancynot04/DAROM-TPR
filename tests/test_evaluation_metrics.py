@@ -71,6 +71,17 @@ def test_masks_counts_and_aggregation():
     for reason in (None, '', 'Unknown', 'UnknownRemoval'):
         with pytest.raises(RuntimeError): a.finish(reason, 0)
     assert a.finish('LegalNewEvent', 0)['outcome'] == 'Other'
+
+
+def test_emergency_stop_reports_terminal_and_sumo_signal_rates():
+    metrics = AgentMetrics()
+    metrics.observe({**sample(), "emergency_stopping": True}, terminal=True)
+    stopped = metrics.finish("Emergency Stop", -400)
+    arrived = AgentMetrics().finish("Arrived", 50)
+    team = joint_record({"ego_1": stopped, "ego_2": arrived}, include_emergency_stop=True)
+    assert not team["success"] and team["emergency_stop"] and team["sumo_emergency_stopping_episode"]
+    assert aggregate([stopped], include_emergency_stop=True)["outcome_counts"]["Emergency Stop"] == 1
+    assert aggregate([team], include_emergency_stop=True)["emergency_stop_rate"] == 100
     with pytest.raises(ValueError): AgentMetrics().observe(sample(float('nan')), False)
 
 

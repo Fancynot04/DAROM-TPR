@@ -46,7 +46,8 @@ def validate_results(path):
     summary = json.loads(path.read_text())
     records = summary['records']
     protocol_version = summary.get('evaluation_protocol_version', 2)
-    include_stalled = protocol_version >= 3
+    outcomes = dict(include_stalled=protocol_version >= 3,
+                    include_emergency_stop=summary.get('environment', {}).get('emergency_stop_terminate', False))
     if len(records) != summary['episodes'] or not records:
         raise ValueError('Incomplete episode records')
     trajectory = summary.get("trajectory")
@@ -69,7 +70,7 @@ def validate_results(path):
     if len({r['seed'] for r in records}) != len(records):
         raise ValueError('Duplicate evaluation seeds')
     for record in records:
-        if joint_record(record['per_agent'], include_stalled=include_stalled) != record['joint']:
+        if joint_record(record['per_agent'], **outcomes) != record['joint']:
             raise ValueError('Joint episode mismatch')
         if sum(r['agent_steps'] for r in record['per_agent'].values()) != record['agent_steps_sum']:
             raise ValueError('Agent step total mismatch')
@@ -87,8 +88,8 @@ def validate_results(path):
         if key in summary and sum(r[key] for r in records) != summary[key]:
             raise ValueError('Global/agent step aggregate mismatch')
     for ego in JointReplayBuffer.AGENT_IDS:
-        if aggregate([r['per_agent'][ego] for r in records], include_stalled=include_stalled) != summary['per_agent'][ego]:
+        if aggregate([r['per_agent'][ego] for r in records], **outcomes) != summary['per_agent'][ego]:
             raise ValueError('Per-agent aggregate mismatch')
-    if aggregate([r['joint'] for r in records], include_stalled=include_stalled) != summary['joint']:
+    if aggregate([r['joint'] for r in records], **outcomes) != summary['joint']:
         raise ValueError('Joint aggregate mismatch')
     return summary

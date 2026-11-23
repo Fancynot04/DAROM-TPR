@@ -351,11 +351,12 @@ def test_plot_single_multi_seed_and_algorithm(work, monkeypatch):
     assert (work / "single/plot_source.csv").exists()
 
 
-@pytest.mark.parametrize("actor_leader_features,env_version,gamma,shared_actor", [
-    (False, 3, 0.99, False), (True, 2, 0.995, False), (False, 5, 0.99, True),
+@pytest.mark.parametrize("actor_leader_features,env_version,gamma,shared_actor,role_id", [
+    (False, 3, 0.99, False, False), (True, 2, 0.995, False, False),
+    (False, 5, 0.99, True, False), (False, 5, 0.99, True, True),
 ])
 def test_short_training_and_checkpoint_loading(
-    work, monkeypatch, capsys, actor_leader_features, env_version, gamma, shared_actor,
+    work, monkeypatch, capsys, actor_leader_features, env_version, gamma, shared_actor, role_id,
 ):
     """Exercise real SUMO->replay->SAC updates->checkpoint->evaluation."""
     import train_masac
@@ -413,6 +414,7 @@ def test_short_training_and_checkpoint_loading(
         reward_route_preparation_bonus_cap=0.007 if actor_leader_features else None,
         actor_leader_features=actor_leader_features,
         shared_actor=shared_actor,
+        role_id=role_id,
         masac_env_version=env_version,
         learning_rate=3e-5,
         initial_alpha=0.01,
@@ -444,6 +446,9 @@ def test_short_training_and_checkpoint_loading(
         assert report["trainer_config"]["gamma"] == gamma
         assert report["training_config"]["masac_env_version"] == env_version
         assert report["training_config"]["shared_actor"] is shared_actor
+        assert report["training_config"]["role_id"] is role_id
+        assert report["environment"]["emergency_stop_terminate"] is True
+        assert "emergency_stop_rate" in report["joint"]
         assert report["training_config"]["safety_reward"] == {
             "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 0.5,
         }
@@ -504,8 +509,10 @@ def test_short_training_and_checkpoint_loading(
     assert final["team_critic"] and final["target_team_critic"]
     assert final["team_critic_optimizer"]["state"]
     assert final["config"]["actor_leader_features"] is actor_leader_features
+    assert final["critic"]["q1.0.weight"].shape[1] == 196
     actor = MultiAgentGaussianActor(ego_ids=AGENT_IDS, nav_dim=2,
-                                    actor_leader_features=actor_leader_features, shared=shared_actor)
+                                    actor_leader_features=actor_leader_features, shared=shared_actor,
+                                    role_id=role_id)
     assert actor.obs_dim == (139 if actor_leader_features else 136)
     actor.load_state_dict(final["actors"], strict=True)
     assert all(sha256(r["path"]) == r["sha256"] for r in index)
@@ -618,7 +625,8 @@ def test_training_resumes_replay_and_updates_after_interruption(work, shared_act
     parser = build_parser()
     flags = ["--output-dir", str(work), "--device", "cpu", "--torch-threads", "1",
              "--batch-size", "4", "--learning-starts", "4", "--buffer-capacity", "16",
-             "--checkpoint-every", "12", "--log-every", "4", "--no-tensorboard"]
+             "--checkpoint-every", "12", "--log-every", "4", "--no-tensorboard",
+             "--no-emergency-stop-terminate"]
     if shared_actor:
         flags.append("--shared-actor")
     main(parser.parse_args(flags + ["--total-steps", "20", "--reward-comfort-weight", "0.01"]))
@@ -639,6 +647,8 @@ def test_training_resumes_replay_and_updates_after_interruption(work, shared_act
     del before["config"]["reward_protocol"]["comfort_weight"]
     if not shared_actor:
         del before["config"]["shared_actor"]
+    del before["config"]["role_id"]
+    del before["config"]["emergency_stop_terminate"]
     old_stages = [{
         "route": ["O3", "E75", "E76", "E77", "D3"],
         "phases": [
@@ -695,6 +705,11 @@ def test_training_resumes_replay_and_updates_after_interruption(work, shared_act
     opposite_mode = flags[:-1] if shared_actor else flags + ["--shared-actor"]
     with pytest.raises(ValueError, match="configuration mismatch: shared_actor"):
         main(parser.parse_args(opposite_mode + ["--total-steps", "32"]))
+    if shared_actor:
+        with pytest.raises(ValueError, match="configuration mismatch: role_id"):
+            main(parser.parse_args(flags + ["--total-steps", "32", "--role-id"]))
+    with pytest.raises(ValueError, match="configuration mismatch: emergency_stop_terminate"):
+        main(parser.parse_args(flags + ["--total-steps", "32", "--emergency-stop-terminate"]))
 
 
 @pytest.mark.parametrize("env_version,legacy,saved_grace,effective_grace", [
@@ -769,6 +784,8 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(
     protocol = report["reward_protocol"]
     assert report["environment"]["masac_env_version"] == env_version
     assert report["environment"]["stalled_block_grace_s"] == effective_grace
+    assert report["environment"]["emergency_stop_terminate"] is False
+    assert "emergency_stop_rate" not in report["joint"]
     assert ("stalled_diagnostics" in report["records"][0]) is bool(effective_grace)
     assert protocol["merge_on_success"] is not legacy
     assert report["route_preparation"]["enabled_in_checkpoint"] is with_preparation

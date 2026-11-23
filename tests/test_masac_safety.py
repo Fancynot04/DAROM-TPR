@@ -10,6 +10,7 @@ from src.envs.multi_ego_env import MultiEgoEnv
 from src.envs.observation import RouteGoal, remaining_goal_distance
 from src.envs.route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES, RouteLaneNetwork
 from src.envs.sumo_world import SUMO_DIR
+from src.rewards.events import EMERGENCY_STOP_EVENT
 from src.rewards.masac import (
     LEGACY_MASAC_REWARD_PROTOCOL, MASACRewardConfig, MASACRewardProtocol, MASACRewards, required_gap,
 )
@@ -48,6 +49,41 @@ def test_collision_penalty_override_is_independent(scale, other_penalty):
     for event in ("Missed Exit", "Stalled", "Timeout"):
         assert tracker.terminal(event) == other_penalty
     assert MASACRewards(MASACRewardConfig(task=False), protocol).terminal("Collision") == 0
+    assert MASACRewards(MASACRewardConfig(task=False), protocol).terminal(EMERGENCY_STOP_EVENT) == -400
+
+
+@pytest.mark.parametrize("enabled, collect_metrics", [(True, False), (True, True), (False, True)])
+def test_sumo_emergency_stop_terminates_only_reported_ego(monkeypatch, enabled, collect_metrics):
+    env = MultiEgoEnv(
+        reward_config=MASACRewardConfig(), emergency_stop_terminate=enabled,
+        collect_metrics=collect_metrics,
+    )
+    try:
+        env.reset(seed=42)
+        for _ in range(200):
+            if env.egos["ego_2"].state.status == "active":
+                break
+            env.step({"ego_1": [0, 0]})
+        assert env.egos["ego_2"].state.status == "active"
+
+        signal = Mock(return_value=("ego_1", "background_vehicle"))
+        monkeypatch.setattr(env.world.conn.simulation, "getEmergencyStoppingVehiclesIDList", signal)
+        observations, rewards, terminated, _, infos = env.step({ego: [0, 0] for ego in env.AGENTS})
+        signal.assert_called_once()
+        assert terminated == {"ego_1": enabled, "ego_2": False}
+        assert infos["ego_1"]["terminal_reason"] == (EMERGENCY_STOP_EVENT if enabled else None)
+        assert not infos["ego_1"]["pre_step_terminal"]
+        if enabled:
+            assert rewards["ego_1"] == -400
+            parts = infos["ego_1"]["reward_components"]
+            assert parts["task"] == -400 and all(value == 0 for key, value in parts.items() if key != "task")
+            assert "ego_1" not in env.world.conn.vehicle.getIDList()
+            assert snapshot(env, observations)[2].tolist() == [0, 1]
+        if collect_metrics:
+            assert infos["ego_1"]["evaluation_metrics"]["emergency_stopping"]
+            assert not infos["ego_2"]["evaluation_metrics"]["emergency_stopping"]
+    finally:
+        env.close()
 
 
 def test_lane_change_plan_uses_all_natural_successors():

@@ -27,6 +27,7 @@ def discover(directory):
         env_version = config.get('masac_env_version') if config.get('reward_components') is not None else None
         rows.append(dict(path=path, global_step=int(state['global_step']), sha256=sha256(path),
                          stalled_terminate=config.get('stalled_terminate', False),
+                         emergency_stop_terminate=config.get('emergency_stop_terminate', False),
                          masac_env_version=env_version, stalled_block_grace_s=stalled_block_grace_for_version(
                              env_version, config.get('stalled_block_grace_s'),
                          )))
@@ -46,7 +47,8 @@ def discover(directory):
     return rows
 
 
-def expected_environment(max_steps, stalled_terminate=False, masac_env_version=None, stalled_block_grace_s=0.0):
+def expected_environment(max_steps, stalled_terminate=False, masac_env_version=None,
+                         stalled_block_grace_s=0.0, emergency_stop_terminate=False):
     root = Path(__file__).resolve().parents[1]
     from sumolib import checkBinary
 
@@ -60,6 +62,7 @@ def expected_environment(max_steps, stalled_terminate=False, masac_env_version=N
         stopped_speed_threshold_mps=0.5,
         disable_teleport=True,
         stalled_terminate=stalled_terminate,
+        emergency_stop_terminate=emergency_stop_terminate,
         masac_env_version=masac_env_version,
         stalled_block_grace_s=stalled_block_grace_s,
         net_sha256=sha256(
@@ -83,10 +86,12 @@ def compatible(report, checkpoint, max_steps):
             and report['git']['commit'] == git_metadata()['commit']
             and report.get('evaluation_code_sha256') == evaluation_fingerprint()
             and report.get('runtime_versions') == runtime_versions()
-            and all(report['environment'].get(k) == v for k, v in
+            and all(report['environment'].get(k, False if k == 'emergency_stop_terminate' else None) == v for k, v in
                     expected_environment(
                         max_steps, checkpoint.get('stalled_terminate', False),
                         checkpoint.get('masac_env_version'), checkpoint.get('stalled_block_grace_s', 0.0),
+                        checkpoint.get('emergency_stop_terminate',
+                                       checkpoint.get('config', {}).get('emergency_stop_terminate', False)),
                     ).items())
             and all(report['environment']['actual_speed_modes'][ego] for ego in AGENT_IDS))
 
