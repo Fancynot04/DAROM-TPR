@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
+from src.envs.sumo_world import STEP_LENGTH_S
 from src.envs.stalled import stalled_block_grace_for_version
 from src.envs.route_preparation import checkpoint_preparation_settings
 from src.rewards.masac import (
@@ -50,6 +51,13 @@ def evaluate(args):
         raise ValueError("Checkpoint agent IDs mismatch")
 
     reward_config = checkpoint.get("config", {})
+    trained_interval = reward_config.get("decision_interval_steps", 1)
+    decision_interval = getattr(args, "decision_interval_steps", None)
+    if decision_interval is None:
+        decision_interval = trained_interval
+    if decision_interval < 1:
+        raise ValueError("decision_interval_steps must be positive")
+    shared_decisions = trained_interval > 1 and decision_interval > 1
     components = reward_config.get("reward_components")
     env_version = reward_config.get("masac_env_version") if components is not None else None
     if components is not None and env_version not in SUPPORTED_MASAC_ENV_VERSIONS:
@@ -166,31 +174,55 @@ def evaluate(args):
             usp_returns = {
                 ego_id: 0.0 for ego_id in AGENT_IDS
             }
+            held_acceleration = {}
+            decision_counts = dict.fromkeys(AGENT_IDS, 0)
+            decision_age = decision_interval
+            previous_mask = np.zeros(len(AGENT_IDS), dtype=np.float32)
 
             for step in range(args.max_steps):
                 policy_obs, critic_obs, active_mask = snapshot(
                     env, observations
                 )
 
-                actions_tensor, _ = actors(
-                    torch.from_numpy(
-                        policy_obs[None]
-                    ),
-                    torch.from_numpy(
-                        active_mask[None]
-                    ),
-                    deterministic=not args.stochastic,
+                decision_ids = set()
+                shared_due = shared_decisions and (
+                    decision_age == decision_interval or np.any(active_mask > previous_mask)
                 )
-
-                joint_actions = (
-                    actions_tensor[0].cpu().numpy()
-                )
-
-                actions = {
-                    ego_id: joint_actions[i].tolist()
-                    for i, ego_id in enumerate(AGENT_IDS)
-                    if active_mask[i] == 1
-                }
+                if decision_interval == 1 or shared_due:
+                    actions_tensor, _ = actors(
+                        torch.from_numpy(policy_obs[None]),
+                        torch.from_numpy(active_mask[None]),
+                        deterministic=not args.stochastic,
+                    )
+                    joint_actions = actions_tensor[0].cpu().numpy()
+                    actions = {
+                        ego_id: joint_actions[i].tolist()
+                        for i, ego_id in enumerate(AGENT_IDS)
+                        if active_mask[i] == 1
+                    }
+                    decision_ids.update(actions)
+                    if shared_due:
+                        held_acceleration.update({key: action[0] for key, action in actions.items()})
+                        decision_age = 0
+                else:
+                    actions = {}
+                    for i, ego_id in enumerate(AGENT_IDS):
+                        if not active_mask[i]:
+                            continue
+                        if not shared_decisions and env.active_steps[ego_id] % decision_interval == 0:
+                            action, _ = actors.actors[ego_id](
+                                torch.from_numpy(policy_obs[i:i + 1]),
+                                deterministic=not args.stochastic,
+                            )
+                            actions[ego_id] = action[0].cpu().tolist()
+                            held_acceleration[ego_id] = actions[ego_id][0]
+                            decision_ids.add(ego_id)
+                        else:
+                            actions[ego_id] = [held_acceleration[ego_id], 0.0]
+                for ego_id in decision_ids:
+                    decision_counts[ego_id] += 1
+                decision_age += 1
+                previous_mask = active_mask
                 
                 
                 # 仅在第一个评估回合采样打印，避免日志过多
@@ -205,8 +237,7 @@ def evaluate(args):
                         lane = int(critic_obs[i, 1])
                         speed = float(critic_obs[i, 2])
 
-                        acc = float(joint_actions[i, 0])
-                        lateral = float(joint_actions[i, 1])
+                        acc, lateral = actions[ego_id]
 
                         print(
                             f"TRACE step={step} "
@@ -230,7 +261,8 @@ def evaluate(args):
                     infos,
                 ) = env.step(actions)
                 if trajectory is not None:
-                    trajectory.step(env, step + 1, actions, positions_before, rewards, infos, outcomes)
+                    trajectory.step(env, step + 1, actions, positions_before, rewards, infos, outcomes,
+                                    decision_ids=decision_ids)
                 if getattr(args, "trace", False) and episode == 0:
                     for ego_id, info in infos.items():
                         values = info.get("reward_components")
@@ -358,6 +390,7 @@ def evaluate(args):
                 "seed": seed,
                 "global_steps": step + 1,
                 "agent_steps_sum": sum(r["agent_steps"] for r in agent_records.values()),
+                "actor_decisions": decision_counts,
                 "per_agent": agent_records,
                 "joint": joint_record(agent_records),
                 "steps": step + 1,
@@ -417,7 +450,10 @@ def evaluate(args):
             "sumo_binary_sha256": sha256(checkBinary("sumo")),
             "scenario": "easy", "agent_ids": list(AGENT_IDS), "requested_speed_mode": 96,
             "actual_speed_modes": {key: sorted({mode for record in records for mode in record["per_agent"][key]["speed_modes"]}) for key in AGENT_IDS},
-            "step_length_s": 0.1, "max_steps": args.max_steps,
+            "step_length_s": STEP_LENGTH_S, "max_steps": args.max_steps,
+            "decision_interval_steps": decision_interval,
+            "decision_interval_s": decision_interval * STEP_LENGTH_S,
+            "decision_clock": "shared_with_activation_boundary" if shared_decisions else "per_ego",
             "net_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp.net.xml"),
             "route_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp_easy_o3_d3_homogeneous_dual.rou.xml"),
             "stopped_speed_threshold_mps": 0.5,
@@ -437,7 +473,7 @@ def evaluate(args):
                 "acceleration_threshold_mps2": BrakingResponse.BRAKE_THRESHOLD_MPS2,
                 "risk": "positive TTC risk on true pre-step state while the following module is enabled",
                 "window": "first contiguous TTC-risk encounter",
-                "time": "request at pre-step, measurement at post-step; null when unobserved",
+                "time": "applied request at pre-step (including held acceleration), measurement at post-step; null when unobserved",
             },
             "jerk": "absolute measured acceleration difference / simulation dt; exclude first and terminal transitions",
             "hard_braking": "valid post-step acceleration <= -4.5 m/s^2, including terminal",
@@ -449,12 +485,14 @@ def evaluate(args):
             "joint_continuous": "equal agents within episode, then equal valid episodes",
             "global_steps": "env.step calls, excludes reset bootstrap simulation steps",
             "agent_steps_sum": "sum of environment active_steps (actions applied); excludes pre-step Missed Exit",
+            "actor_decisions": "per-Ego decisions before env.step, including decisions invalidated by pre-step termination",
             "missing": "JSON null / CSV empty; separate speed, jerk, braking and event sample counts",
         },
         "seed_start": args.seed_start,
         "actor_sampling_order": list(AGENT_IDS),
         "global_steps": sum(r["global_steps"] for r in records),
         "agent_steps_sum": sum(r["agent_steps_sum"] for r in records),
+        "actor_decisions": {ego_id: sum(r["actor_decisions"][ego_id] for r in records) for ego_id in AGENT_IDS},
         "per_agent": per_agent,
         "joint": aggregate([r["joint"] for r in records]),
         "checkpoint": str(args.checkpoint),
@@ -522,6 +560,10 @@ if __name__ == "__main__":
         "--max-steps", type=int, default=4500
     )
     parser.add_argument(
+        "--decision-interval-steps", type=int,
+        help="SUMO steps between Actor decisions (default: the checkpoint's interval)",
+    )
+    parser.add_argument(
         "--output",
         default="runs/masac_eval/summary.json",
     )
@@ -575,6 +617,8 @@ if __name__ == "__main__":
 
     if args.max_steps <= 0:
         parser.error("--max-steps must be positive")
+    if args.decision_interval_steps is not None and args.decision_interval_steps <= 0:
+        parser.error("--decision-interval-steps must be positive")
     if args.episodes <= 0:
         parser.error("--episodes must be positive")
     if args.gui_margin <= 0:

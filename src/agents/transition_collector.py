@@ -117,7 +117,7 @@ class JointTransitionCollector:
             # 修正上一步经验：
             # 上一个动作导致的下一状态已经不可挽救。
             previous["rewards"][i] += (
-                current["rewards"][i]
+                previous.get("bootstrap_discount", 1.0) * current["rewards"][i]
             )
 
             previous["dones"][i] = 1

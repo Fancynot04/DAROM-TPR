@@ -263,6 +263,8 @@ def find_resume_checkpoint(directory, args):
     changed = [key for key in RESUME_CONFIG_KEYS
                if state["config"].get(key)
                != getattr(args, key)]
+    if state["config"].get("decision_interval_steps", 1) != getattr(args, "decision_interval_steps", 1):
+        changed.append("decision_interval_steps")
     saved_route_settings = checkpoint_preparation_settings(state["config"].get("route_preparation_settings"))
     route_settings = preparation_settings(args, saved_route_settings, resuming=True)
     if saved_route_settings != route_settings:
@@ -410,6 +412,10 @@ def train_locked(args, device, output_dir):
 
     if args.train_every <= 0 or args.log_every <= 0:
         raise ValueError("Invalid interval")
+    args.decision_interval_steps = getattr(args, "decision_interval_steps", 1)
+    if args.decision_interval_steps < 1:
+        raise ValueError("decision_interval_steps must be positive")
+    decision_transitions = args.decision_interval_steps > 1
 
     args.trace_controls = getattr(args, "trace_controls", False)
     args.stalled_shadow = getattr(args, "stalled_shadow", False)
@@ -534,6 +540,7 @@ def train_locked(args, device, output_dir):
         nav_dim=TARGET_EXIT_DIM,
         team=reward_config.team,
         policy_obs_dim=actors.obs_dim,
+        decision_transitions=decision_transitions,
     )
     resume = None if state is None else state["resume_state"]
     if state is not None:
@@ -595,6 +602,8 @@ def train_locked(args, device, output_dir):
             if device.type == "cuda" and resume["cuda_rng"] is not None:
                 torch.cuda.set_rng_state(resume["cuda_rng"], device=device)
         collector = JointTransitionCollector(buffer)
+        decision_transition = None
+        decision_age = 0
 
         episode_rewards = np.zeros(
             len(AGENT_IDS), dtype=np.float64
@@ -619,15 +628,19 @@ def train_locked(args, device, output_dir):
             )
 
             # B. 随机探索或 Actor 决策
-            joint_actions, action_dict = choose_actions(
-                actors,
-                policy_obs,
-                active_mask,
-                rng,
-                random_exploration=(
-                    global_step <= args.learning_starts
-                ),
-            )
+            if decision_transition is None:
+                joint_actions, action_dict = choose_actions(
+                    actors, policy_obs, active_mask, rng,
+                    random_exploration=global_step <= args.learning_starts,
+                )
+            else:
+                joint_actions = decision_transition["actions"].copy()
+                joint_actions[:, 1] = 0.0
+                action_dict = {
+                    ego_id: joint_actions[i]
+                    for i, ego_id in enumerate(AGENT_IDS)
+                    if active_mask[i]
+                }
 
             # C. SUMO 只推进一次
             (
@@ -729,10 +742,32 @@ def train_locked(args, device, output_dir):
                 )
 
             # E. 由采集器处理 pre-step 奖励归因
-            collector.push(
-                transition,
-                pre_step_terminal=pre_step,
-            )
+            if decision_transitions:
+                if decision_transition is None:
+                    decision_transition = transition
+                    decision_pre_step = pre_step
+                else:
+                    weight = args.gamma ** decision_age
+                    decision_transition["rewards"] += weight * transition["rewards"]
+                    np.maximum(decision_transition["dones"], dones, out=decision_transition["dones"])
+                    for key in ("next_policy_obs", "next_critic_obs", "next_active_mask"):
+                        decision_transition[key] = transition[key]
+                    if reward_config.team:
+                        decision_transition["team_reward"] += weight * transition["team_reward"]
+                        decision_transition["team_done"] = transition["team_done"]
+                        decision_transition["next_success_mask"] = transition["next_success_mask"]
+                decision_age += 1
+                # Newly active Egos need a first action immediately on the next SUMO step.
+                if (decision_age == args.decision_interval_steps
+                        or np.any(next_mask > active_mask)
+                        or all(terminations.values())
+                        or global_step == args.total_steps):
+                    decision_transition["bootstrap_discount"] = args.gamma ** decision_age
+                    collector.push(decision_transition, pre_step_terminal=decision_pre_step)
+                    decision_transition = None
+                    decision_age = 0
+            else:
+                collector.push(transition, pre_step_terminal=pre_step)
 
             episode_rewards += rewards_array
 
@@ -914,6 +949,10 @@ def build_parser():
     )
     parser.add_argument(
         "--train-every", type=int, default=1
+    )
+    parser.add_argument(
+        "--decision-interval-steps", type=int, default=1,
+        help="SUMO steps per Actor decision interval (total-steps still counts SUMO steps)",
     )
     parser.add_argument(
         "--log-every", type=int, default=40

@@ -146,9 +146,13 @@ python3 train_masac.py \
 
 正式训练默认参数为 1,000,000 个共享 SUMO 全局步、Replay 容量 1,000,000、batch 512、Learning Starts 100、学习率 3e-5、γ=0.99、`--tau=0.005`、seed 42，每 500,000 步保存模型和 Replay Buffer，默认输出 `runs/masac`。折扣因子对照可显式指定 `--gamma 0.995`。两辆 Ego 的 α 独立学习。上述 2,500 步命令显式使用小参数，用于冒烟验证。训练开始的前 `learning-starts` 个全局步使用均匀随机动作，后续使用随机 Actor 策略。
 
+训练时使用 `--decision-interval-steps 2` 可将 Actor 决策周期设为 0.2 s。两车共享决策边界，新车激活则提前开始下一区间。环境仍每 0.1 s 推进，训练步、保存步和更新频率仍按 SUMO 步计数。Replay 按决策区间保存经验，使用逐步折扣累加奖励及实际区间长度对应的 bootstrap 折扣。使用新输出目录从零训练。评估默认读取 checkpoint 中的频率和决策时钟。
+
 训练结束会保存模型 `masac_seed42_step_2500.pt` 和配对的 `masac_seed42_step_2500.replay.npz`。续训默认开启。重复原训练命令，沿用同一个 `--output-dir` 和原训练配置即可从最新 checkpoint 恢复。若要延长训练，把 `--total-steps` 改为新的累计目标。例如从 500,000 步续到 1,000,000 步，设置 `--total-steps 1000000`。从零训练时使用新的输出目录，可显式加 `--no-resume`。`runs/` 由 `.gitignore` 排除，归档续训文件时需保留模型、对应 Replay 和索引。
 
 ## 6. 独立评估
+
+使用 `--decision-interval-steps 2` 可显式评估 0.2 s 决策。旧 checkpoint 默认每 0.1 s 决策，显式降低其频率时，每辆 Ego 从激活时开始按自己的步数决策。中间步保持上次的纵向加速度请求并按当前速度限幅，横向请求只在决策步提交。SUMO、奖励、事件判定和轨迹仍按 0.1 s 更新。两种频率使用独立输出目录。报告记录决策间隔与逐车决策数，轨迹的 `actor_decision` 标明本步是否刷新动作。
 
 ```bash
 # 确定性策略（正式汇报优先使用）

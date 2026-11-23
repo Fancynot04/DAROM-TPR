@@ -42,6 +42,7 @@ class JointReplayBuffer:
         nav_dim=0,
         team=False,
         policy_obs_dim=None,
+        decision_transitions=False,
     ):
         if capacity <= 0:
             raise ValueError("Invalid capacity")
@@ -59,6 +60,8 @@ class JointReplayBuffer:
             "next_critic_obs": (2, 93 + nav_dim),
         }
         self.mask_fields = self.MASK_FIELDS
+        if decision_transitions:
+            self.shapes["bootstrap_discount"] = ()
         if team:
             self.shapes.update(team_reward=(), team_active=(), team_done=(),
                                success_mask=(2,), next_success_mask=(2,))

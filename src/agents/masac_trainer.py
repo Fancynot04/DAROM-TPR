@@ -160,7 +160,9 @@ class MASACTrainer:
                 batch["next_active_mask"][eligible],
                 success_mask=batch["next_success_mask"][eligible],
             )
-            targets = batch["team_reward"][eligible] + self.gamma * (
+            discount = batch.get("bootstrap_discount")
+            discount = self.gamma if discount is None else discount[eligible]
+            targets = batch["team_reward"][eligible] + discount * (
                 1.0 - batch["team_done"][eligible]
             ) * torch.minimum(target_q1, target_q2)
 
@@ -247,7 +249,8 @@ class MASACTrainer:
                 next_q2=target_q2,
                 next_log_probs=next_log_probs,
                 alpha=alpha,
-                gamma=self.gamma,
+                gamma=(batch["bootstrap_discount"].unsqueeze(-1)
+                       if "bootstrap_discount" in batch else self.gamma),
             )
 
         stats = {}

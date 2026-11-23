@@ -50,13 +50,16 @@ class EvaluationTrajectory:
                 }
         return positions
 
-    def step(self, env, step, actions, before, rewards, infos, prior_outcomes):
+    def step(self, env, step, actions, before, rewards, infos, prior_outcomes, *, decision_ids=None):
+        if decision_ids is None:
+            decision_ids = actions
         vehicle = env.world.conn.vehicle
         after = self.positions(vehicle, (ego for ego in self.agent_ids if infos[ego]["status"] == "active"))
         self.global_step += 1
         self._write(event="step", step=step, team_reward=env.team_reward, egos={
             ego: {
-                "action": actions.get(ego), "pre_position": before.get(ego),
+                "action": actions.get(ego), "actor_decision": ego in decision_ids,
+                "pre_position": before.get(ego),
                 "post_position": after.get(ego),
                 "metrics": infos[ego].get("evaluation_metrics"),
                 "control": infos[ego].get("control_trace"),

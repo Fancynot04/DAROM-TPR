@@ -170,6 +170,28 @@ def test_evaluator_files_and_incomplete_error():
                           for sample in samples[1:] for ego in AGENT_IDS
                           if sample['egos'][ego]['terminal'] is not None}
     assert observed_terminals == report['records'][0]['outcomes']
+
+    args.decision_interval_steps = 2
+    args.output = tmp_path / 'decision-interval-2' / 'summary.json'
+    slower = evaluate(args)
+    assert validate_results(args.output) == slower
+    assert slower['environment']['decision_interval_s'] == 0.2
+    trace_path = args.output.parent / slower['trajectory']['file']
+    with gzip.open(trace_path, 'rt', encoding='utf-8') as stream:
+        slower_samples = [json.loads(line) for line in stream][1:]
+    assert len(slower_samples) == slower['global_steps']
+    for ego in AGENT_IDS:
+        rows = [sample['egos'][ego] for sample in slower_samples
+                if sample['egos'][ego]['action'] is not None]
+        assert len(rows) > 2
+        assert slower['actor_decisions'][ego] == (len(rows) + 1) // 2
+        for i, row in enumerate(rows):
+            assert row['actor_decision'] == (i % 2 == 0)
+            if not row['actor_decision']:
+                assert row['action'] == [rows[i - 1]['action'][0], 0.0]
+                if row['metrics'] is not None:
+                    assert row['metrics']['pre']['request_direction'] == 0
+
     args.max_steps = 1
     args.output = tmp_path / 'incomplete' / 'summary.json'
     with pytest.raises(RuntimeError, match='incomplete episode'): evaluate(args)

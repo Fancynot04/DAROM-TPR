@@ -26,6 +26,7 @@ def discover(directory):
         config = state.get('config', {})
         env_version = config.get('masac_env_version') if config.get('reward_components') is not None else None
         rows.append(dict(path=path, global_step=int(state['global_step']), sha256=sha256(path),
+                         decision_interval_steps=config.get('decision_interval_steps', 1),
                          stalled_terminate=config.get('stalled_terminate', False),
                          masac_env_version=env_version, stalled_block_grace_s=stalled_block_grace_for_version(
                              env_version, config.get('stalled_block_grace_s'),
@@ -46,7 +47,8 @@ def discover(directory):
     return rows
 
 
-def expected_environment(max_steps, stalled_terminate=False, masac_env_version=None, stalled_block_grace_s=0.0):
+def expected_environment(max_steps, stalled_terminate=False, masac_env_version=None,
+                         stalled_block_grace_s=0.0, decision_interval_steps=1):
     root = Path(__file__).resolve().parents[1]
     from sumolib import checkBinary
 
@@ -56,6 +58,8 @@ def expected_environment(max_steps, stalled_terminate=False, masac_env_version=N
         agent_ids=list(AGENT_IDS),
         requested_speed_mode=96,
         step_length_s=0.1,
+        decision_interval_steps=decision_interval_steps,
+        decision_clock="shared_with_activation_boundary" if decision_interval_steps > 1 else "per_ego",
         max_steps=max_steps,
         stopped_speed_threshold_mps=0.5,
         disable_teleport=True,
@@ -87,6 +91,7 @@ def compatible(report, checkpoint, max_steps):
                     expected_environment(
                         max_steps, checkpoint.get('stalled_terminate', False),
                         checkpoint.get('masac_env_version'), checkpoint.get('stalled_block_grace_s', 0.0),
+                        checkpoint.get('decision_interval_steps', 1),
                     ).items())
             and all(report['environment']['actual_speed_modes'][ego] for ego in AGENT_IDS))
 
