@@ -286,6 +286,8 @@ def find_resume_checkpoint(directory, args):
         changed.append("reward_protocol")
     else:
         saved_protocol = MASACRewardProtocol.from_checkpoint(saved_settings)
+        reward_protocol["merge_on_success"] = saved_protocol.merge_on_success
+        reward_protocol["merge_reward"] = saved_protocol.merge_reward
         if getattr(args, "reward_comfort_weight", None) is None:
             reward_protocol["comfort_weight"] = saved_protocol.comfort_weight
         if saved_protocol != MASACRewardProtocol(**reward_protocol):

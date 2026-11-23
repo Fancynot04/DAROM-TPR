@@ -55,15 +55,17 @@ class MASACRewardConfig:
 
 @dataclass(frozen=True)
 class MASACRewardProtocol:
-    merge_on_success: bool = True
+    merge_on_success: bool = False
     efficiency_weight: float = 0.01
     route_guidance_weight: float = 5.0
     terminal_penalty_scale: float = 1.0
     collision_penalty: float | None = None
     comfort_weight: float = LEGACY_COMFORT_WEIGHT / 4
+    merge_reward: float = 5.0
 
     def __post_init__(self):
-        for name in ("efficiency_weight", "route_guidance_weight", "terminal_penalty_scale", "comfort_weight"):
+        for name in ("efficiency_weight", "route_guidance_weight", "terminal_penalty_scale",
+                     "comfort_weight", "merge_reward"):
             value = getattr(self, name)
             if not isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be finite and nonnegative")
@@ -74,12 +76,17 @@ class MASACRewardProtocol:
 
     @classmethod
     def from_checkpoint(cls, settings):
-        return cls(**{"comfort_weight": LEGACY_COMFORT_WEIGHT, **settings})
+        return cls(**{
+            "comfort_weight": LEGACY_COMFORT_WEIGHT,
+            "merge_on_success": True,
+            "merge_reward": 25.0,
+            **settings,
+        })
 
 
 LEGACY_MASAC_REWARD_PROTOCOL = MASACRewardProtocol(
     merge_on_success=False, efficiency_weight=0.05, route_guidance_weight=0.0,
-    comfort_weight=LEGACY_COMFORT_WEIGHT,
+    comfort_weight=LEGACY_COMFORT_WEIGHT, merge_reward=25.0,
 )
 
 
@@ -173,7 +180,7 @@ class MASACRewards:
         if self.protocol.merge_on_success and ego_id in self.merged:
             self.merged.remove(ego_id)
             if event == "Arrived":
-                return 25.0
+                return self.protocol.merge_reward
         return 0.0
 
     def score_route_guidance(self, ego_id, connection, accepted):
@@ -415,7 +422,7 @@ class MASACRewards:
             if merged:
                 self.merged.add(ego_id)
                 if not self.protocol.merge_on_success:
-                    values["merge"] = 25.0
+                    values["merge"] = self.protocol.merge_reward
         return values
 
     def settle_team(self, reasons):

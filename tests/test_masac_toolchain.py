@@ -490,7 +490,8 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     assert final["config"]["reward_components"]["rear_following"] is True
     assert final["config"]["reward_components"]["route_guidance"] is False
     assert final["config"]["reward_protocol"] == {
-        "merge_on_success": True, "efficiency_weight": 0.01, "route_guidance_weight": 5.0,
+        "merge_on_success": False, "merge_reward": 5.0,
+        "efficiency_weight": 0.01, "route_guidance_weight": 5.0,
         "terminal_penalty_scale": 1.0,
         "comfort_weight": 0.0025,
     }
@@ -626,8 +627,11 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     assert metadata["position"] != 0
 
     # Simulate a published model whose index write was interrupted, with stale log tail.
-    # Omit the comfort field to exercise a checkpoint written before it was recorded.
-    del before["config"]["reward_protocol"]["comfort_weight"]
+    # Simulate a checkpoint saved with legacy comfort and deferred merge rewards.
+    saved_protocol = before["config"]["reward_protocol"]
+    del saved_protocol["comfort_weight"]
+    del saved_protocol["merge_reward"]
+    saved_protocol["merge_on_success"] = True
     old_stages = [{
         "route": ["O3", "E75", "E76", "E77", "D3"],
         "phases": [
@@ -651,6 +655,8 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     assert final["resume_state"]["update_count"] == before["resume_state"]["update_count"] + 8
     assert final["resume_state"]["replay"]["size"] == 16
     assert final["config"]["reward_protocol"]["comfort_weight"] == 0.01
+    assert final["config"]["reward_protocol"]["merge_on_success"] is True
+    assert final["config"]["reward_protocol"]["merge_reward"] == 25.0
     assert final["config"]["route_preparation_settings"] == {
         "mode": "legacy_penalty", "stages": old_stages, "weights": {"weaving": 0.001, "exit": 0.005},
     }
@@ -752,6 +758,7 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(
     assert report["environment"]["stalled_block_grace_s"] == effective_grace
     assert ("stalled_diagnostics" in report["records"][0]) is bool(effective_grace)
     assert protocol["merge_on_success"] is not legacy
+    assert protocol["merge_reward"] == 25.0
     assert report["route_preparation"]["enabled_in_checkpoint"] is with_preparation
     assert report["route_preparation"]["settings"] == (
         {"mode": "legacy_penalty", **config["route_preparation_settings"]} if with_preparation else None

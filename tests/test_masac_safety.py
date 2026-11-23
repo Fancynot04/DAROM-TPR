@@ -99,10 +99,14 @@ def test_route_guidance_scores_traversed_link_once(via, destination, expected):
 
 
 @pytest.mark.parametrize("event", ["Arrived", "Collision", "Missed Exit", "Stalled", "Timeout", "Emergency Braking"])
-@pytest.mark.parametrize("legacy", [False, True])
-def test_merge_bonus_and_efficiency(event, legacy):
+@pytest.mark.parametrize("protocol,immediate_bonus,deferred_bonus", [
+    (MASACRewardProtocol(), 5, 0),
+    (MASACRewardProtocol.from_checkpoint({"merge_on_success": True}), 0, 25),
+    (LEGACY_MASAC_REWARD_PROTOCOL, 25, 0),
+])
+def test_merge_bonus_and_efficiency(event, protocol, immediate_bonus, deferred_bonus):
     config = MASACRewardConfig(following=False, rear_following=False, lane_change=False, comfort=False)
-    tracker = MASACRewards(config, LEGACY_MASAC_REWARD_PROTOCOL) if legacy else MASACRewards(config)
+    tracker = MASACRewards(config, protocol)
     vehicle = Mock()
     vehicle.getRoadID.return_value = "E76"
     control = SimpleNamespace(target_lane=None)
@@ -111,13 +115,13 @@ def test_merge_bonus_and_efficiency(event, legacy):
         vehicle.getSpeed.return_value = speed
         tracker.before_step(conn, key, control)
         values = tracker.after_step(conn, key, True, needs_merge)
-        assert values["efficiency"] == pytest.approx((0.05 if legacy else 0.01) * min(1, speed / 20))
-        assert values["merge"] == (25 if legacy and needs_merge else 0)
+        assert values["efficiency"] == pytest.approx(protocol.efficiency_weight * min(1, speed / 20))
+        assert values["merge"] == (immediate_bonus if needs_merge else 0)
         assert values["task"] == 0
         assert values["route_guidance"] == 0
     assert tracker.terminal("Arrived") == 50
     assert tracker.settle_merge("mainline", "Arrived") == 0
-    assert tracker.settle_merge("ramp", event) == (25 if event == "Arrived" and not legacy else 0)
+    assert tracker.settle_merge("ramp", event) == (deferred_bonus if event == "Arrived" else 0)
     assert tracker.settle_merge("ramp", "Arrived") == 0
     tracker.reset(("ramp", "slow"))
     assert tracker.settle_merge("slow", "Arrived") == 0
@@ -147,25 +151,29 @@ def test_sumo_emergency_braking_is_mandatory_and_independent_per_ego(tmp_path, m
         env.close()
 
 
-def test_sumo_timeout_discards_confirmed_merge(tmp_path):
+@pytest.mark.parametrize("old_checkpoint", [False, True])
+def test_sumo_merge_payment_precedes_timeout_for_new_protocol(tmp_path, old_checkpoint):
     route = tmp_path / "timeout.rou.xml"
     route.write_text("""<routes>
         <trip id="ego_1" depart="0" from="O3" to="D3" departSpeed="20"/>
         <trip id="ego_2" depart="3" from="E76" to="D3"/>
     </routes>""")
-    env = MultiEgoEnv(reward_config=MASACRewardConfig(), route_file=route, max_active_steps=2)
+    protocol = (MASACRewardProtocol.from_checkpoint({"merge_on_success": True})
+                if old_checkpoint else MASACRewardProtocol())
+    env = MultiEgoEnv(reward_config=MASACRewardConfig(), reward_protocol=protocol,
+                      route_file=route, max_active_steps=2)
     try:
         env.reset()
         env.world.conn.vehicle.moveTo("ego_1", "E76_0", 30)
         _, _, _, _, infos = env.step({"ego_1": [0, 0]})
         assert "ego_1" in env.reward_tracker.merged
-        assert infos["ego_1"]["reward_components"]["merge"] == 0
+        assert infos["ego_1"]["reward_components"]["merge"] == (0 if old_checkpoint else 5)
         _, _, terminated, _, infos = env.step({"ego_1": [0, 0]})
         assert terminated == {"ego_1": True, "ego_2": False}
         assert infos["ego_1"]["terminal_reason"] == "Timeout"
         values = infos["ego_1"]["reward_components"]
         assert (values["task"], values["merge"], values["route_guidance"]) == (-400, 0, 0)
-        assert env.reward_summary()["reward_components"]["ego_1"]["merge"] == 0
+        assert env.reward_summary()["reward_components"]["ego_1"]["merge"] == (0 if old_checkpoint else 5)
     finally:
         env.close()
 
@@ -448,8 +456,10 @@ def test_route_goal_observations_with_sumo(tmp_path, origin, goal, arrival):
                 values = info["reward_components"]
                 if values["merge"]:
                     assert ego == "ego_1"
-                    assert info["terminal_reason"] == "Arrived"
-                    assert values["task"] == 50
+                    assert info["terminal_reason"] is None
+                    assert info["road_id"] in ("E75", "E76")
+                    assert values["merge"] == 5
+                    assert values["task"] == 0
                 if values["route_guidance"]:
                     assert ego == "ego_1"
                     assert info["road_id"] == "E77"
@@ -458,7 +468,7 @@ def test_route_goal_observations_with_sumo(tmp_path, origin, goal, arrival):
 
         assert env.terminal_reasons == dict.fromkeys(env.AGENTS, "Arrived")
         ego_1, ego_2 = env.reward_summary()["reward_components"].values()
-        assert (ego_1["task"], ego_1["merge"], ego_1["route_guidance"]) == (50, 25, 5)
+        assert (ego_1["task"], ego_1["merge"], ego_1["route_guidance"]) == (50, 5, 5)
         assert (ego_2["task"], ego_2["merge"], ego_2["route_guidance"]) == (50, 0, 0)
         assert {"O3", "E75", "E76", "E77", "D3"} <= seen["ego_1"]
         assert origin in seen["ego_2"]
