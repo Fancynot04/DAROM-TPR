@@ -52,6 +52,26 @@ def test_reference_jerk_and_braking():
         assert not m.jerks
 
 
+def test_sumo_emergency_stop_is_separate_terminal_outcome():
+    from src.rewards.masac import MASACRewards, MASACRewardConfig
+    from src.evaluation_metrics import KNOWN_OUTCOMES
+
+    assert "Emergency Stop" not in KNOWN_OUTCOMES  # preserve older report category contract
+    reward = MASACRewards(MASACRewardConfig()).terminal("Emergency Stop")
+    assert reward == -400
+    stopped = AgentMetrics().finish("Emergency Stop", reward)
+    arrived = AgentMetrics().finish("Arrived", 50)
+    assert stopped["outcome"] == "Emergency Stop"
+    assert not stopped["success"]
+    joint = joint_record({"ego_1": stopped, "ego_2": arrived})
+    assert not joint["success"]
+    stats = aggregate([stopped, arrived])
+    assert stats["emergency_stop_rate"] == 50
+    assert stats["outcome_counts"]["Emergency Stop"] == 1
+    # Joint CSV columns remain stable; the event is recorded per Ego.
+    assert "emergency_stop" not in joint
+
+
 def test_masks_counts_and_aggregation():
     a = AgentMetrics()
     a.observe(sample(), False)  # first transition: speed/braking, no jerk

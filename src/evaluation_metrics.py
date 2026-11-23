@@ -4,6 +4,7 @@ import math
 REFERENCE_COMMIT = '913a73fef22be64ca1ac0ade5426874374b566cd'
 LEGACY_OUTCOMES = ('Arrived', 'Collision', 'Ego Teleported', 'Missed Exit', 'Timeout')
 KNOWN_OUTCOMES = (*LEGACY_OUTCOMES, 'Stalled')
+EMERGENCY_STOP_FAILURE = ('Emergency Stop', 'emergency_stop')
 LEGACY_FAILURES = (('Collision', 'collision'), ('Timeout', 'timeout'), ('Missed Exit', 'missed_exit'))
 FAILURES = (*LEGACY_FAILURES, ('Stalled', 'stalled'))
 
@@ -152,7 +153,7 @@ class AgentMetrics:
         if not isinstance(outcome, str) or not outcome.strip() or outcome in ('Unknown', 'UnknownRemoval'):
             raise RuntimeError(f'Missing or invalid terminal reason: {outcome!r}')
         result = dict(terminal_reason=outcome,
-                    outcome=outcome if outcome in KNOWN_OUTCOMES else 'Other',
+                    outcome=outcome if outcome in (*KNOWN_OUTCOMES, EMERGENCY_STOP_FAILURE[0]) else 'Other',
                     success=outcome == 'Arrived',
                     raw_arrival=outcome == 'Arrived', ego_teleported=False,
                     event_samples=self.event_samples,
@@ -216,6 +217,8 @@ def joint_record(agents, *, include_stalled=True):
     for key in ('mean_speed_mps', 'mean_abs_jerk_mps3'):
         result[key] = mean([r[key] for r in rows])
         result[key + '_valid_agents'] = sum(r[key] is not None for r in rows)
+    # Keep the joint record's column contract identical for every seed;
+    # the new outcome is classified in each per-Agent row and aggregate.
     for outcome, key in (FAILURES if include_stalled else LEGACY_FAILURES):
         result[key] = any(r['terminal_reason'] == outcome for r in rows)
     result['collision_free'] = not result['collision']
@@ -252,8 +255,14 @@ def aggregate(rows, *, include_stalled=True):
     for key in ('hard_braking_episode', 'sumo_emergency_stopping_episode'):
         result[key + 's'] = sum(r[key] for r in rows)
     failures = FAILURES if include_stalled else LEGACY_FAILURES
+    has_emergency_stop = any(r.get('terminal_reason') == EMERGENCY_STOP_FAILURE[0] or
+                             r.get('emergency_stop', False) for r in rows)
+    if has_emergency_stop:
+        failures = (*failures, EMERGENCY_STOP_FAILURE)
     if 'terminal_reason' in rows[0]:
         known = KNOWN_OUTCOMES if include_stalled else LEGACY_OUTCOMES
+        if has_emergency_stop:
+            known = (*known, EMERGENCY_STOP_FAILURE[0])
         result['outcome_counts'] = {key: sum(r['outcome'] == key for r in rows)
                                     for key in (*known, 'Other')}
         for outcome, key in failures:
@@ -274,8 +283,8 @@ def aggregate(rows, *, include_stalled=True):
         result['first_e77_lane_valid_episodes'] = len(lanes)
     else:
         for _, key in failures:
-            result[key + '_rate'] = 100 * sum(r[key] for r in rows) / n
-            result[key + '_rate_stats'] = wilson(sum(r[key] for r in rows), n)
+            result[key + '_rate'] = 100 * sum(r.get(key, False) for r in rows) / n
+            result[key + '_rate_stats'] = wilson(sum(r.get(key, False) for r in rows), n)
         for key in ('mean_speed_mps', 'mean_abs_jerk_mps3'):
             result[key + '_valid_agent_episodes'] = sum(r[key + '_valid_agents'] for r in rows)
     if 'collision_free' in rows[0]:

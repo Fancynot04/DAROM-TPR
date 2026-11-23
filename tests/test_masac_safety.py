@@ -32,7 +32,7 @@ def test_default_comfort_penalty_scales_and_clips(delta, expected):
 def test_terminal_penalty_scaling_preserves_success_and_team_rewards():
     tracker = MASACRewards(MASACRewardConfig(), MASACRewardProtocol(terminal_penalty_scale=0.2))
     assert tracker.terminal("Collision") == -100
-    for event in ("Missed Exit", "Stalled", "Timeout"):
+    for event in ("Missed Exit", "Stalled", "Timeout", "Emergency Stop"):
         assert tracker.terminal(event) == -80
     assert tracker.terminal("Arrived") == 50
     assert tracker.settle_team({"a": "Collision", "b": "Arrived"}) == 0
@@ -45,7 +45,7 @@ def test_collision_penalty_override_is_independent(scale, other_penalty):
     tracker = MASACRewards(MASACRewardConfig(), protocol)
     assert tracker.terminal("Collision") == -1000
     assert tracker.terminal("Arrived") == 50
-    for event in ("Missed Exit", "Stalled", "Timeout"):
+    for event in ("Missed Exit", "Stalled", "Timeout", "Emergency Stop"):
         assert tracker.terminal(event) == other_penalty
     assert MASACRewards(MASACRewardConfig(task=False), protocol).terminal("Collision") == 0
 
@@ -95,7 +95,7 @@ def test_route_guidance_scores_traversed_link_once(via, destination, expected):
     assert tracker.score_route_guidance("ego", connection, accepted) == expected
 
 
-@pytest.mark.parametrize("event", ["Arrived", "Collision", "Missed Exit", "Stalled", "Timeout"])
+@pytest.mark.parametrize("event", ["Arrived", "Collision", "Missed Exit", "Stalled", "Timeout", "Emergency Stop"])
 @pytest.mark.parametrize("legacy", [False, True])
 def test_merge_bonus_and_efficiency(event, legacy):
     config = MASACRewardConfig(following=False, rear_following=False, lane_change=False, comfort=False)
@@ -118,6 +118,35 @@ def test_merge_bonus_and_efficiency(event, legacy):
     assert tracker.settle_merge("ramp", "Arrived") == 0
     tracker.reset(("ramp", "slow"))
     assert tracker.settle_merge("slow", "Arrived") == 0
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_sumo_emergency_stop_is_independent_per_ego(tmp_path, monkeypatch, enabled):
+    route = tmp_path / "emergency-stop.rou.xml"
+    route.write_text("""<routes>
+        <trip id="ego_1" depart="0" from="O3" to="D3" departSpeed="20"/>
+        <trip id="ego_2" depart="3" from="E76" to="D3"/>
+    </routes>""")
+    env = MultiEgoEnv(reward_config=MASACRewardConfig(),
+                      route_file=route, collect_metrics=True,
+                      emergency_stop_terminate=enabled)
+    try:
+        env.reset(seed=42)
+        # Inject exactly the SUMO simulation event, not a longitudinal braking threshold.
+        monkeypatch.setattr(env.world.conn.simulation,
+                            "getEmergencyStoppingVehiclesIDList", lambda: ["ego_1"])
+        _, rewards, terminated, _, infos = env.step({"ego_1": [0, 0]})
+        assert terminated == {"ego_1": enabled, "ego_2": False}
+        assert infos["ego_1"]["evaluation_metrics"]["emergency_stopping"]
+        if enabled:
+            assert infos["ego_1"]["terminal_reason"] == "Emergency Stop"
+            assert infos["ego_1"]["reward_components"]["task"] == -400
+            assert rewards["ego_1"] < -399
+            assert "ego_1" not in env.world.conn.vehicle.getIDList()
+        else:
+            assert infos["ego_1"]["terminal_reason"] is None
+    finally:
+        env.close()
 
 
 def test_sumo_timeout_discards_confirmed_merge(tmp_path):
