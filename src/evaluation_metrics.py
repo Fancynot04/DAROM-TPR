@@ -217,10 +217,9 @@ def joint_record(agents, *, include_stalled=True):
     for key in ('mean_speed_mps', 'mean_abs_jerk_mps3'):
         result[key] = mean([r[key] for r in rows])
         result[key + '_valid_agents'] = sum(r[key] is not None for r in rows)
-    failures = FAILURES if include_stalled else LEGACY_FAILURES
-    if any(r['terminal_reason'] == EMERGENCY_STOP_FAILURE[0] for r in rows):
-        failures = (*failures, EMERGENCY_STOP_FAILURE)
-    for outcome, key in failures:
+    # Keep the joint record's column contract identical for every seed;
+    # the new outcome is classified in each per-Agent row and aggregate.
+    for outcome, key in (FAILURES if include_stalled else LEGACY_FAILURES):
         result[key] = any(r['terminal_reason'] == outcome for r in rows)
     result['collision_free'] = not result['collision']
     result['mean_policy_reward_return'] = sum(r['mean_policy_reward_return'] for r in rows)
