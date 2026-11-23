@@ -159,7 +159,7 @@ class MASACRewards:
         return dict.fromkeys(self.components, 0.0)
 
     def terminal(self, event):
-        if self.config.task or event == STALLED_EVENT:
+        if self.config.task or event in (STALLED_EVENT, EMERGENCY_STOP_EVENT):
             if event == "Collision" and self.protocol.collision_penalty is not None:
                 return -self.protocol.collision_penalty
             value = event_reward(event, {"events": TASK_EVENTS})[1]
