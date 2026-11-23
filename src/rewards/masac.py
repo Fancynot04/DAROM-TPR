@@ -3,7 +3,9 @@
 from dataclasses import dataclass
 from math import inf, isfinite
 
-from .events import EMERGENCY_STOP_EVENT, STALLED_EVENT, STALLED_PENALTY, event_reward
+from .events import (
+    EMERGENCY_BRAKING_EVENT, EMERGENCY_BRAKING_PENALTY, STALLED_EVENT, STALLED_PENALTY, event_reward,
+)
 
 
 TASK_EVENTS = {
@@ -12,7 +14,6 @@ TASK_EVENTS = {
     "missed_exit": -400.0,
     "timeout": -400.0,
     "stalled": STALLED_PENALTY,
-    "emergency_stop": -400.0,
 }
 TARGET_EXIT_DIM = 2
 LEGACY_MASAC_ENV_VERSION = 2
@@ -159,7 +160,9 @@ class MASACRewards:
         return dict.fromkeys(self.components, 0.0)
 
     def terminal(self, event):
-        if self.config.task or event in (STALLED_EVENT, EMERGENCY_STOP_EVENT):
+        if event == EMERGENCY_BRAKING_EVENT:
+            return EMERGENCY_BRAKING_PENALTY
+        if self.config.task or event == STALLED_EVENT:
             if event == "Collision" and self.protocol.collision_penalty is not None:
                 return -self.protocol.collision_penalty
             value = event_reward(event, {"events": TASK_EVENTS})[1]

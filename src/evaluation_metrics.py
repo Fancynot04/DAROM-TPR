@@ -1,10 +1,12 @@
 """Read-only evaluation statistics; reference: E76 commit 913a73f."""
 import math
 
+from src.rewards.events import EMERGENCY_BRAKING_EVENT
+
 REFERENCE_COMMIT = '913a73fef22be64ca1ac0ade5426874374b566cd'
 LEGACY_OUTCOMES = ('Arrived', 'Collision', 'Ego Teleported', 'Missed Exit', 'Timeout')
 KNOWN_OUTCOMES = (*LEGACY_OUTCOMES, 'Stalled')
-EMERGENCY_STOP_FAILURE = ('Emergency Stop', 'emergency_stop')
+EMERGENCY_BRAKING_FAILURE = (EMERGENCY_BRAKING_EVENT, 'emergency_braking')
 LEGACY_FAILURES = (('Collision', 'collision'), ('Timeout', 'timeout'), ('Missed Exit', 'missed_exit'))
 FAILURES = (*LEGACY_FAILURES, ('Stalled', 'stalled'))
 
@@ -153,7 +155,7 @@ class AgentMetrics:
         if not isinstance(outcome, str) or not outcome.strip() or outcome in ('Unknown', 'UnknownRemoval'):
             raise RuntimeError(f'Missing or invalid terminal reason: {outcome!r}')
         result = dict(terminal_reason=outcome,
-                    outcome=outcome if outcome in (*KNOWN_OUTCOMES, EMERGENCY_STOP_FAILURE[0]) else 'Other',
+                    outcome=outcome if outcome in (*KNOWN_OUTCOMES, EMERGENCY_BRAKING_FAILURE[0]) else 'Other',
                     success=outcome == 'Arrived',
                     raw_arrival=outcome == 'Arrived', ego_teleported=False,
                     event_samples=self.event_samples,
@@ -217,9 +219,8 @@ def joint_record(agents, *, include_stalled=True):
     for key in ('mean_speed_mps', 'mean_abs_jerk_mps3'):
         result[key] = mean([r[key] for r in rows])
         result[key + '_valid_agents'] = sum(r[key] is not None for r in rows)
-    # Keep the joint record's column contract identical for every seed;
-    # the new outcome is classified in each per-Agent row and aggregate.
-    for outcome, key in (FAILURES if include_stalled else LEGACY_FAILURES):
+    failures = FAILURES if include_stalled else LEGACY_FAILURES
+    for outcome, key in (*failures, EMERGENCY_BRAKING_FAILURE):
         result[key] = any(r['terminal_reason'] == outcome for r in rows)
     result['collision_free'] = not result['collision']
     result['mean_policy_reward_return'] = sum(r['mean_policy_reward_return'] for r in rows)
@@ -255,14 +256,14 @@ def aggregate(rows, *, include_stalled=True):
     for key in ('hard_braking_episode', 'sumo_emergency_stopping_episode'):
         result[key + 's'] = sum(r[key] for r in rows)
     failures = FAILURES if include_stalled else LEGACY_FAILURES
-    has_emergency_stop = any(r.get('terminal_reason') == EMERGENCY_STOP_FAILURE[0] or
-                             r.get('emergency_stop', False) for r in rows)
-    if has_emergency_stop:
-        failures = (*failures, EMERGENCY_STOP_FAILURE)
+    has_emergency_braking = any(r.get('terminal_reason') == EMERGENCY_BRAKING_FAILURE[0] or
+                             r.get('emergency_braking', False) for r in rows)
+    if has_emergency_braking:
+        failures = (*failures, EMERGENCY_BRAKING_FAILURE)
     if 'terminal_reason' in rows[0]:
         known = KNOWN_OUTCOMES if include_stalled else LEGACY_OUTCOMES
-        if has_emergency_stop:
-            known = (*known, EMERGENCY_STOP_FAILURE[0])
+        if has_emergency_braking:
+            known = (*known, EMERGENCY_BRAKING_FAILURE[0])
         result['outcome_counts'] = {key: sum(r['outcome'] == key for r in rows)
                                     for key in (*known, 'Other')}
         for outcome, key in failures:

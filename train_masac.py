@@ -50,7 +50,7 @@ RESUME_CONFIG_KEYS = (
     "seed", "batch_size", "buffer_capacity", "learning_starts", "train_every",
     "gamma", "tau", "learning_rate", "initial_alpha", "team_q_weight",
     "masac_env_version", "actor_leader_features", "max_active_steps", "usp",
-    "usp_penalty", "stalled_terminate", "emergency_stop_terminate", "stalled_block_grace_s",
+    "usp_penalty", "stalled_terminate", "emergency_braking_terminate", "stalled_block_grace_s",
     "route_guidance_rules",
 )
 
@@ -254,7 +254,7 @@ def find_resume_checkpoint(directory, args):
             or state["global_step"] != latest["global_step"]):
         raise ValueError(f"Invalid resume metadata: {path}")
     changed = [key for key in RESUME_CONFIG_KEYS
-               if state["config"].get(key, False if key == "emergency_stop_terminate" else None)
+               if state["config"].get(key)
                != getattr(args, key)]
     saved_route_settings = checkpoint_preparation_settings(state["config"].get("route_preparation_settings"))
     route_settings = preparation_settings(args, saved_route_settings, resuming=True)
@@ -406,7 +406,7 @@ def train_locked(args, device, output_dir):
     args.stalled_shadow = getattr(args, "stalled_shadow", False)
     args.usp = getattr(args, "usp", False)
     args.stalled_terminate = getattr(args, "stalled_terminate", None)
-    args.emergency_stop_terminate = getattr(args, "emergency_stop_terminate", True)
+    args.emergency_braking_terminate = True
     if args.stalled_terminate is None:
         args.stalled_terminate = not args.usp
     if args.stalled_terminate and args.usp:
@@ -553,7 +553,6 @@ def train_locked(args, device, output_dir):
         collect_control_trace=args.trace_controls,
         stalled_shadow=args.stalled_shadow,
         stalled_terminate=args.stalled_terminate,
-        emergency_stop_terminate=args.emergency_stop_terminate,
         stalled_block_grace_s=args.stalled_block_grace_s,
         stalled_match_route_links=args.masac_env_version == MASAC_ENV_VERSION,
         legacy_route_semantics=args.masac_env_version == LEGACY_MASAC_ENV_VERSION,
@@ -975,8 +974,6 @@ def build_parser():
                         help="Positive team Q weight in each Actor objective")
     parser.add_argument("--stalled-terminate", action=argparse.BooleanOptionalAction, default=None,
                         help="End a stalled Ego episode with a -400 penalty (default: enabled unless using USP)")
-    parser.add_argument("--emergency-stop-terminate", action=argparse.BooleanOptionalAction, default=True,
-                        help="Terminate the affected Ego on SUMO Emergency Stop with -400 (default: enabled for new training)")
     parser.add_argument("--stalled-shadow", action="store_true", help="Log per-step stalled diagnostics")
     parser.add_argument("--masac-env-version", type=int,
                         choices=SUPPORTED_MASAC_ENV_VERSIONS, default=MASAC_ENV_VERSION,

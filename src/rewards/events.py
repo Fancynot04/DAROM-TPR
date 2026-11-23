@@ -1,10 +1,11 @@
 """Terminal event names used by the E76 -> D3 reward contract."""
 STALLED_EVENT = "Stalled"
-EMERGENCY_STOP_EVENT = "Emergency Stop"
+EMERGENCY_BRAKING_EVENT = "Emergency Braking"
+EMERGENCY_BRAKING_PENALTY = -400.0
 STALLED_PENALTY = -400.0
 
 EVENTS = {'Arrived': 'success', 'Collision': 'collision', 'Missed Exit': 'missed_exit',
-          'Ego Teleported': 'teleport', EMERGENCY_STOP_EVENT: 'emergency_stop',
+          'Ego Teleported': 'teleport', EMERGENCY_BRAKING_EVENT: 'emergency_braking',
           STALLED_EVENT: 'stalled', 'Timeout': 'timeout'}
 
 def event_reward(outcome, config):
@@ -24,7 +25,7 @@ B0_EVENTS = {
     "teleport": -100.0,
     "timeout": -100.0,
     "stalled": STALLED_PENALTY,
-    "emergency_stop": -100.0,
+    "emergency_braking": EMERGENCY_BRAKING_PENALTY,
 }
 
 def b0_reward(event):

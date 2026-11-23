@@ -17,7 +17,7 @@ from .route_preparation import (
     DEFAULT_ROUTE_PREPARATION_BONUS, DEFAULT_ROUTE_PREPARATION_STAGES,
     PREPARATION_BONUS_MODES, PREPARATION_V1, RoutePreparation,
 )
-from src.rewards.events import EMERGENCY_STOP_EVENT, STALLED_EVENT, b0_reward
+from src.rewards.events import EMERGENCY_BRAKING_EVENT, STALLED_EVENT, b0_reward
 from src.rewards.masac import MASACRewardProtocol, MASACRewards, TARGET_EXIT_DIM
 
 from .action_history import MultiEgoActionHistory
@@ -45,7 +45,6 @@ class MultiEgoEnv:
         collect_control_trace=False,
         stalled_shadow=False,
         stalled_terminate=False,
-        emergency_stop_terminate=False,
         route_file=None,
         legacy_route_semantics=False,
         actor_leader_features=False,
@@ -72,7 +71,6 @@ class MultiEgoEnv:
         self.collect_control_trace = collect_control_trace
         self.stalled_shadow = stalled_shadow
         self.stalled_terminate = stalled_terminate
-        self.emergency_stop_terminate = bool(emergency_stop_terminate)
         self.stalled_block_grace_s = stalled_block_grace_s
         self.stalled_match_route_links = stalled_match_route_links
         self.sumo_warning_log_dir = None
@@ -692,10 +690,9 @@ class MultiEgoEnv:
         arrivals = set(
             sim.getArrivedIDList()
         )
-        # SUMO's Emergency Stop event (lane-end forced stop), not emergency braking warnings.
+        # The Emergency Braking terminal rule uses SUMO's per-vehicle Emergency Stop signal.
         # Read independently from metrics so the rule also applies during training.
-        emergency_stops = (set(sim.getEmergencyStoppingVehiclesIDList())
-                           if self.emergency_stop_terminate or self.collect_metrics else set())
+        emergency_stops = set(sim.getEmergencyStoppingVehiclesIDList())
 
         present = set(conn.vehicle.getIDList()) if self.collect_metrics or tracker is not None else set()
         preparation_teleports = set()
@@ -739,7 +736,6 @@ class MultiEgoEnv:
 
         metric_steps = {}
         if self.collect_metrics:
-            emergency = emergency_stops
             for ego_id in self.AGENTS:
                 if self.terminations[ego_id] and ego_id not in pre_terminated:
                     continue
@@ -753,7 +749,7 @@ class MultiEgoEnv:
                     "post_road": conn.vehicle.getRoadID(ego_id) if on_road else None,
                     "post_lane": int(conn.vehicle.getLaneIndex(ego_id)) if on_road else None,
                     "depart_time": self.egos[ego_id].state.depart_time,
-                    "emergency_stopping": ego_id in emergency,
+                    "emergency_stopping": ego_id in emergency_stops,
                     "agent_step": ego_id in acting_ids,
                 }
                 if ego_id in control_traces:
@@ -817,11 +813,11 @@ class MultiEgoEnv:
             elif state.terminal_reason == "UnknownRemoval":
                 raise RuntimeError(f"Unexpected removal: {ego_id}, reason={state.terminal_reason}")
 
+            elif ego_id in emergency_stops:
+                event = EMERGENCY_BRAKING_EVENT
+
             elif wrong_exit:
                 event = "Missed Exit"
-
-            elif self.emergency_stop_terminate and ego_id in emergency_stops:
-                event = EMERGENCY_STOP_EVENT
 
             elif ego_id in arrivals:
                 event = "Arrived"

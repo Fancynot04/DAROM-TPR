@@ -90,9 +90,6 @@ def evaluate(args):
     stalled_terminate = getattr(args, "stalled_terminate", None)
     if stalled_terminate is None:
         stalled_terminate = reward_config.get("stalled_terminate", False)
-    emergency_stop_terminate = getattr(args, "emergency_stop_terminate", None)
-    if emergency_stop_terminate is None:
-        emergency_stop_terminate = reward_config.get("emergency_stop_terminate", False)
 
     env = MultiEgoEnv(
         scenario=getattr(args, "scenario", "easy"),
@@ -117,7 +114,6 @@ def evaluate(args):
         # Checkpoints written before the timeout became configurable used 4,000 steps.
         max_active_steps=reward_config.get("max_active_steps", 4000),
         stalled_terminate=stalled_terminate,
-        emergency_stop_terminate=emergency_stop_terminate,
         stalled_block_grace_s=stalled_block_grace_for_version(
             env_version, reward_config.get("stalled_block_grace_s"),
         ),
@@ -428,7 +424,7 @@ def evaluate(args):
             "disable_teleport": True,
             "max_active_steps": env.max_active_steps,
             "stalled_terminate": stalled_terminate,
-            "emergency_stop_terminate": emergency_stop_terminate,
+            "emergency_braking_terminate": True,
             "masac_env_version": env_version,
             "stalled_block_grace_s": env.stalled_block_grace_s,
         },
@@ -573,8 +569,6 @@ if __name__ == "__main__":
     parser.add_argument("--stalled-terminate", action=argparse.BooleanOptionalAction, default=None,
                         help="Override the checkpoint's Stalled-v1 termination setting")
     parser.add_argument("--trace", action="store_true", help="Print first episode trace")
-    parser.add_argument("--emergency-stop-terminate", action=argparse.BooleanOptionalAction, default=None,
-                        help="Override checkpoint Emergency Stop terminal rule (legacy checkpoints default off)")
     parser.add_argument("--trajectory", action=argparse.BooleanOptionalAction, default=True,
                         help="Save a gzip JSONL trajectory for every evaluation episode")
     args = parser.parse_args()
