@@ -26,6 +26,11 @@ SUPPORTED_MASAC_ENV_VERSIONS = (
 # Shared reference for gap scoring, independent of SUMO vehicle braking limits.
 LANE_CHANGE_REFERENCE_DECEL = 4.5
 FOLLOWING_WEIGHT = 0.1
+REACTION_TIME_S = 1.5
+LANE_CHANGE_MIN_GAP_M = 2.0
+EFFICIENCY_REFERENCE_SPEED_MPS = 20.0
+COMFORT_DELTA_CAP_MPS2 = 1.0
+TEAM_SUCCESS_REWARD = 100.0
 LEGACY_COMFORT_WEIGHT = 0.01
 LEGACY_LANE_CHANGE_WEIGHT = 1.0
 
@@ -107,9 +112,9 @@ def gap_deficit(gap, required):
 
 def required_gap(behind_speed, ahead_speed):
     # Use the same 1.5 s threshold for the lane-change reaction time.
-    return 2.0 + max(
+    return LANE_CHANGE_MIN_GAP_M + max(
         0.0,
-        1.5 * behind_speed
+        REACTION_TIME_S * behind_speed
         + (behind_speed ** 2 - ahead_speed ** 2) / (2 * LANE_CHANGE_REFERENCE_DECEL),
     )
 
@@ -190,7 +195,7 @@ class MASACRewards:
         return 0.0
 
     def _following_risks(self, gap, behind_speed, ahead_speed):
-        gap_risk = gap_deficit(gap, max(1.5 * behind_speed, 1e-6))
+        gap_risk = gap_deficit(gap, max(REACTION_TIME_S * behind_speed, 1e-6))
         closing_speed = behind_speed - ahead_speed
         ttc = max(gap, 0.0) / closing_speed if closing_speed > 0 else inf
         return gap_risk, gap_deficit(ttc, self.config.ttc_threshold)
@@ -229,7 +234,7 @@ class MASACRewards:
         )) else 0.0)
         values = self.empty()
         if self.config.efficiency:
-            values["efficiency"] = self.protocol.efficiency_weight * min(1.0, speed / 20.0)
+            values["efficiency"] = self.protocol.efficiency_weight * min(1.0, speed / EFFICIENCY_REFERENCE_SPEED_MPS)
         gap_risk = ttc_risk = 0.0
         rear_gap_risk = rear_ttc_risk = 0.0
         if self.config.following:
@@ -408,7 +413,7 @@ class MASACRewards:
         vehicle = conn.vehicle
         if self.config.comfort:
             delta = abs(vehicle.getAcceleration(ego_id) - acceleration)
-            values["comfort"] = -self.protocol.comfort_weight * min(1.0, delta)
+            values["comfort"] = -self.protocol.comfort_weight * min(COMFORT_DELTA_CAP_MPS2, delta)
 
         if self.config.merge and needs_merge and ego_id not in self.merged:
             current_road = vehicle.getRoadID(ego_id)
@@ -429,6 +434,6 @@ class MASACRewards:
         if self.config.team and not self.team_return and all(
             reason == "Arrived" for reason in reasons.values()
         ):
-            self.team_return = 100.0
+            self.team_return = TEAM_SUCCESS_REWARD
             return self.team_return
         return 0.0

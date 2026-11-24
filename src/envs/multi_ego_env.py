@@ -29,6 +29,7 @@ class MultiEgoEnv:
 
     AGENTS = ("ego_1", "ego_2")
     OBS_SHAPE = (31, 3)
+    OBS_RADIUS_M = 50.0
     DEFAULT_MAX_ACTIVE_STEPS = 2500
 
     def __init__(
@@ -242,8 +243,8 @@ class MultiEgoEnv:
                 result = build_observation(
                     conn,
                     ego_id=ego_id,
-                    radius=50.0,
-                    num_entities=31,
+                    radius=self.OBS_RADIUS_M,
+                    num_entities=self.OBS_SHAPE[0],
                 )
 
                 observation = result.observation.copy()
@@ -384,6 +385,16 @@ class MultiEgoEnv:
                 })
 
 
+    def make_world(self, seed):
+        return SumoWorld(
+            scenario=self.scenario,
+            seed=seed,
+            route_file=self.route_file,
+            gui=self.gui,
+            warning_log=(self.sumo_warning_log_dir / f"seed-{seed}.log"
+                         if self.sumo_warning_log_dir is not None else None),
+        )
+
     def reset(self, seed=42):
         """只等待第一辆 Ego 出发，不要求同时插入。"""
 
@@ -401,14 +412,7 @@ class MultiEgoEnv:
         if self.route_preparation is not None:
             self.route_preparation.reset(self.AGENTS)
 
-        self.world = SumoWorld(
-            scenario=self.scenario,
-            seed=seed,
-            route_file=self.route_file,
-            gui=self.gui,
-            warning_log=(self.sumo_warning_log_dir / f"seed-{seed}.log"
-                         if self.sumo_warning_log_dir is not None else None),
-        )
+        self.world = self.make_world(seed)
         if (not self.legacy_route_semantics or self.route_guidance_rules or self.route_preparation is not None
                 ) and self.lane_network is None:
             self.lane_network = RouteLaneNetwork(self.world.net_file)

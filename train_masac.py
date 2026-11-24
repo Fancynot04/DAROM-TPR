@@ -18,6 +18,7 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
+from src.envs import control, stalled
 from src.envs.route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES
 from src.envs.route_preparation import (
     DEFAULT_LINEAR_PREPARATION_SETTINGS, DEFAULT_REFERENCE_STEP_M,
@@ -27,6 +28,8 @@ from src.envs.route_preparation import (
     checkpoint_preparation_settings,
 )
 from src.envs.stalled import stalled_block_grace_for_version
+from src.rewards import masac as reward_parameters
+from src.rewards.events import EMERGENCY_BRAKING_EVENT, EVENTS
 from src.rewards.masac import (
     LEGACY_LANE_CHANGE_WEIGHT, LEGACY_MASAC_ENV_VERSION, MASACRewardConfig, MASACRewardProtocol, MASAC_ENV_VERSION,
     SUPPORTED_MASAC_ENV_VERSIONS,
@@ -40,13 +43,15 @@ from src.agents.masac_trainer import MASACTrainer
 
 
 from src.experiment_tracking import (TrainingLog, ActionWindow, EpisodeWindow,
-    checkpoint_due, atomic_write, atomic_json, sha256, git_metadata, evaluation_fingerprint)
+    checkpoint_due, atomic_write, atomic_json, sha256, git_metadata, evaluation_fingerprint,
+    runtime_versions)
 from src.evaluation_metrics import AgentMetrics
 
 AGENT_IDS = JointReplayBuffer.AGENT_IDS
 DEFAULT_CHECKPOINT_EVERY = 500_000
 DEFAULT_GAMMA = 0.99
 SUPPORTED_GAMMAS = (DEFAULT_GAMMA, 0.995)
+EXPLORATION_BOUNDS = (-5.0, 5.0)
 
 RESUME_CONFIG_KEYS = (
     "seed", "batch_size", "buffer_capacity", "learning_starts", "train_every",
@@ -96,7 +101,7 @@ def choose_actions(
 
     if random_exploration:
         joint_actions = rng.uniform(
-            -5.0, 5.0, size=(2, 2)
+            *EXPLORATION_BOUNDS, size=(2, 2)
         ).astype(np.float32)
 
     else:
@@ -121,6 +126,100 @@ def choose_actions(
     }
 
     return joint_actions, action_dict
+
+
+def resolve_run_config(args, env, trainer, buffer, episode_seed_index):
+    seed = args.seed + episode_seed_index
+    world = env.make_world(seed)
+    reward = env.reward_tracker
+    actors = {
+        ego_id: dict(
+            observation_dim=actor.obs_dim, action_dim=actor.action_dim,
+            action_scale=actor.action_scale, log_std_bounds=actor.LOG_STD_BOUNDS,
+            encoder_input_mode=actor.encoder.input_mode, nav_dim=actor.encoder.nav_dim,
+            action_history_steps=actor.encoder.hist_len, delay_dim=actor.encoder.delay_dim,
+            observation_scale=actor.encoder.observation_scale.tolist(),
+            architecture=repr(actor),
+        )
+        for ego_id, actor in trainer.actors.actors.items()
+    }
+    critics = {
+        name: dict(
+            num_agents=model.num_agents, observation_dim=model.obs_dim,
+            action_dim=model.action_dim, action_scale=model.action_scale,
+            observation_scale=model.observation_scale.tolist(), architecture=repr(model),
+        ) if model is not None else None
+        for name, model in (("critic", trainer.critic), ("team_critic", trainer.team_critic))
+    }
+    optimizers = {
+        "critic": trainer.critic_optimizer, "team_critic": trainer.team_critic_optimizer,
+        **{f"actor_{ego}": opt for ego, opt in trainer.actor_optimizers.items()},
+        **{f"alpha_{ego}": opt for ego, opt in trainer.alpha_optimizers.items()},
+    }
+    config = {
+        **{name: str(value) if isinstance(value, Path) else value for name, value in vars(args).items()},
+        "resolved_config_version": 1,
+        "runtime_versions": runtime_versions(),
+        "environment": dict(
+            ego_ids=env.AGENTS, scenario=env.scenario, speed_mode=env.speed_mode, gui=env.gui,
+            collect_metrics=env.collect_metrics, collect_control_trace=env.collect_control_trace,
+            observation_shape=env.OBS_SHAPE, observation_radius_m=env.OBS_RADIUS_M,
+            target_exit_dim=env.target_exit_dim, legacy_route_semantics=env.legacy_route_semantics,
+            actor_leader_features=env.actor_leader_features, max_active_steps=env.max_active_steps,
+            action_history_steps=env.action_history.hist_len, max_delay_steps=env.delay_buffer.max_delay,
+            delayed_observation_shape=env.delay_buffer.observation_shape,
+            delay_constructor_seed=env.delay_buffer.seed, episode_seed_base=args.seed,
+            initial_episode_seed=seed, initial_episode_seed_index=episode_seed_index,
+            stalled_shadow=env.stalled_shadow, stalled_terminate=env.stalled_terminate,
+            stalled_block_grace_s=env.stalled_block_grace_s, stalled_match_route_links=env.stalled_match_route_links,
+            stalled_window_s=stalled.WINDOW_SECONDS, stalled_min_progress_m=stalled.MIN_PROGRESS_M,
+            stalled_leader_range_m=stalled.LEADER_RANGE_M, stalled_junction_approach_m=stalled.JUNCTION_APPROACH_M,
+            acceleration_bounds_mps2=[control.MIN_ACCEL, control.MAX_ACCEL], max_speed_mps=control.MAX_SPEED,
+            lane_change_edges=sorted(control.LANE_CHANGE_EDGES), exit_edges=sorted(control.EXIT_EDGES),
+            exit_lane_change_duration_s=control.EXIT_LANE_CHANGE_DURATION,
+            sumo=dict(command=world.launch_command(), step_length_s=world.step_length,
+                      net_file=str(world.net_file), net_sha256=sha256(world.net_file),
+                      route_file=str(world.route_file), route_sha256=sha256(world.route_file)),
+        ),
+        "reward": dict(
+            config=asdict(reward.config), protocol=asdict(reward.protocol),
+            route_guidance_rules=args.route_guidance_rules if reward.config.route_guidance else [],
+            route_preparation_settings=(
+                args.route_preparation_settings or DEFAULT_LINEAR_PREPARATION_SETTINGS
+            ) if env.route_preparation is not None else None,
+            terminal_values={
+                event: reward.terminal(event)
+                for event, key in EVENTS.items()
+                if key in reward_parameters.TASK_EVENTS or event == EMERGENCY_BRAKING_EVENT
+            },
+            following_weight=reward_parameters.FOLLOWING_WEIGHT,
+            reaction_time_s=reward_parameters.REACTION_TIME_S,
+            lane_change_min_gap_m=reward_parameters.LANE_CHANGE_MIN_GAP_M,
+            lane_change_reference_decel_mps2=reward_parameters.LANE_CHANGE_REFERENCE_DECEL,
+            efficiency_reference_speed_mps=reward_parameters.EFFICIENCY_REFERENCE_SPEED_MPS,
+            comfort_delta_cap_mps2=reward_parameters.COMFORT_DELTA_CAP_MPS2,
+            team_success_reward=reward_parameters.TEAM_SUCCESS_REWARD,
+            usp=dict(enabled=env.usp_enabled, penalty=env.usp.penalty, stop_speed_mps=env.usp.STOP_SPEED,
+                     grace_s=env.usp.GRACE_SECONDS, junction_margin_m=env.usp.JUNCTION_MARGIN,
+                     road_edges=sorted(env.usp.ROAD_EDGES)),
+        ),
+        "networks": {"actors": actors, **critics},
+        "trainer": dict(
+            gamma=trainer.gamma, tau=trainer.tau, target_entropy=trainer.target_entropy,
+            team_q_weight=trainer.team_q_weight, initial_alpha=args.initial_alpha,
+            exploration_action_bounds=EXPLORATION_BOUNDS,
+            optimizers={
+                name: dict(type=type(opt).__name__, param_groups=[
+                    {key: value for key, value in group.items() if key != "params"}
+                    for group in opt.param_groups
+                ])
+                for name, opt in optimizers.items() if opt is not None
+            },
+        ),
+        "replay_buffer": dict(capacity=buffer.capacity, shapes=buffer.shapes, mask_fields=buffer.mask_fields),
+    }
+    # Normalize tuples to JSON lists so checkpoint metadata matches the run file.
+    return json.loads(json.dumps(config, allow_nan=False))
 
 
 def save_checkpoint(
@@ -148,7 +247,7 @@ def save_checkpoint(
         "global_step": global_step,
         "episodes": episodes,
         "agent_ids": AGENT_IDS,
-        "config": vars(config),
+        "config": config,
         "resume_state": resume_state,
         "trainer_config": {"gamma": trainer.gamma, "tau": trainer.tau, "target_entropy": trainer.target_entropy},
         "actors": actors.state_dict(),
@@ -496,6 +595,9 @@ def train_locked(args, device, output_dir):
     if args.total_steps < start_step:
         raise ValueError(f"--total-steps must be at least the saved step ({start_step})")
     if args.total_steps == start_step:
+        config_path = output_dir / "resolved_config.json"
+        if not config_path.exists() and state["config"].get("resolved_config_version"):
+            atomic_json(config_path, state["config"])
         print(f"Training already reached {start_step} global steps", flush=True)
         return
 
@@ -575,6 +677,8 @@ def train_locked(args, device, output_dir):
         actor_leader_features=args.actor_leader_features,
     )
 
+    resolved_config = resolve_run_config(args, env, trainer, buffer, episode_seed_index)
+    atomic_json(output_dir / "resolved_config.json", resolved_config)
     provenance = git_metadata()
     episode_window = EpisodeWindow()
     if resume is not None:
@@ -895,7 +999,7 @@ def train_locked(args, device, output_dir):
                     )
                 checkpoint_index.append(save_checkpoint(
                     checkpoint, actors, critic, trainer, global_step, completed_episodes,
-                    args, resume_state,
+                    resolved_config, resume_state,
                 ))
                 atomic_json(checkpoint_dir / "index.json", checkpoint_index)
 

@@ -34,18 +34,8 @@ class SumoWorld:
 
         self.conn = None
 
-    def start(self):
-        """启动一个新的 SUMO 仿真。"""
-
-        if self.conn is not None:
-            raise RuntimeError("SUMO is already running")
-
-        if not self.net_file.is_file():
-            raise FileNotFoundError(self.net_file)
-
-        if not self.route_file.is_file():
-            raise FileNotFoundError(self.route_file)
-
+    def launch_command(self):
+        """Return the command for this world's SUMO process."""
         binary = checkBinary("sumo-gui" if self.gui else "sumo")
 
         command = [
@@ -72,8 +62,18 @@ class SumoWorld:
             command.append("--start")
         if self.warning_log is not None:
             command.extend(("--error-log", str(self.warning_log), "--aggregate-warnings", "-1"))
+        return command
 
-        traci.start(command, label=self.label)
+    def start(self):
+        """启动一个新的 SUMO 仿真。"""
+        if self.conn is not None:
+            raise RuntimeError("SUMO is already running")
+        if not self.net_file.is_file():
+            raise FileNotFoundError(self.net_file)
+        if not self.route_file.is_file():
+            raise FileNotFoundError(self.route_file)
+
+        traci.start(self.launch_command(), label=self.label)
         self.conn = traci.getConnection(self.label)
 
         return self.conn

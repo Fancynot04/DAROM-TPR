@@ -1,0 +1,5 @@
+scenario: easy
+seed: 42
+gamma: 0.999
+total_timesteps: 1000000
+checkpoint_freq: 1000000

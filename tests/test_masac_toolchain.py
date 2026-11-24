@@ -474,11 +474,23 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
 
     checkpoints = sorted((work / "checkpoints").glob("*.pt"))
     assert len(checkpoints) == 3
+    config_path = work / "resolved_config.json"
+    assert list(work.rglob("resolved_config.json")) == [config_path]
+    resolved = json.loads(config_path.read_text())
+    assert resolved["gamma"] == gamma
+    assert resolved["environment"]["sumo"]["step_length_s"] == 0.1
+    assert resolved["environment"]["max_delay_steps"] == 20
+    assert resolved["reward"]["config"]["ttc_threshold"] == 2.75
+    assert resolved["reward"]["protocol"]["comfort_weight"] == 0.0025
+    assert resolved["networks"]["actors"]["ego_1"]["observation_dim"] == (139 if actor_leader_features else 136)
+    assert "GRU(2, 64" in resolved["networks"]["actors"]["ego_1"]["architecture"]
+    assert resolved["trainer"]["optimizers"]["critic"]["param_groups"][0]["lr"] == 3e-5
     index = json.loads((work / "checkpoints/index.json").read_text())
     assert [r["global_step"] for r in index] == [100, 200, 220]
     for row in index:
         path = Path(row["path"])
         saved = torch.load(path, map_location="cpu", weights_only=True)
+        assert saved["config"] == resolved
         resumable = not actor_leader_features or row["global_step"] == 220
         assert (saved["resume_state"] is not None) == resumable
         assert ("critic_optimizer" in saved) == resumable
@@ -661,6 +673,11 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
         stream.write('{"event":"interrupted","global_step":21}\n')
     main(parser.parse_args(flags + ["--total-steps", "28"]))
     final = torch.load(directory / "masac_seed42_step_28.pt", weights_only=True, map_location="cpu")
+    resolved = json.loads((work / "resolved_config.json").read_text())
+    assert resolved == final["config"]
+    assert resolved["total_steps"] == 28
+    assert resolved["environment"]["initial_episode_seed"] == 43
+    assert resolved["reward"]["protocol"]["merge_reward"] == 25.0
     assert final["resume_state"]["update_count"] == before["resume_state"]["update_count"] + 8
     assert final["resume_state"]["replay"]["size"] == 16
     assert final["config"]["reward_protocol"]["comfort_weight"] == 0.01

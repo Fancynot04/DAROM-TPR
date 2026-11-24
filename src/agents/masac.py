@@ -17,6 +17,8 @@ from src.envs.observation import LEADER_FEATURE_SCALE
 class GaussianActor(nn.Module):
     """单辆 Ego 的 DAROM-GRU + 随机策略。"""
 
+    LOG_STD_BOUNDS = (-20.0, 2.0)
+
     def __init__(
         self,
         obs_dim=134,
@@ -82,7 +84,7 @@ class GaussianActor(nn.Module):
         mean = self.mean_head(hidden)
 
         log_std = self.log_std_head(hidden)
-        log_std = torch.clamp(log_std, -20.0, 2.0)
+        log_std = torch.clamp(log_std, *self.LOG_STD_BOUNDS)
 
         std = log_std.exp()
         distribution = Normal(mean, std)
