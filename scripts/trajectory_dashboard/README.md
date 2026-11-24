@@ -10,6 +10,27 @@ source tmp/ai/trajectory-dashboard/.venv/bin/activate
 python -m pip install streamlit==1.67.0 plotly==7.1.0
 ```
 
+### Mac 一键打开
+
+双击同目录的 `打开轨迹分析.command`，打开 `http://127.0.0.1:8501`。默认发现
+`~/Experiments/darom` 的评估和 `~/Library/Caches/darom-trajectories` 的已下载批次。
+侧栏的「刷新远程列表」读取 4090-2 上 `~/.local/share/darom-trajectories` 的清单。
+选中远程批次后点击「下载轨迹」，SHA-256 校验成功后可离线打开。SSH 密码提示出现在启动终端。
+
+切换到「并排对照」，左右分别选实验、训练检查点和评估批次。共用一个 Ego、车道横轴口径
+和双方都有的评估 seed。左右各自保留回合步游标，可查看长度不同的回合各自的终止步。
+每侧显示各自的训练 seed、训练步数、结局和三张轨迹诊断图。奖励图图例位于绘图区上方，
+窄列中可在图例区域内滚动查看更多分项。
+
+已有评估可在评估服务器运行以下命令发布到统一目录。发布器先校验轨迹与报告，再发布清单。
+
+```bash
+python -m scripts.trajectory_dashboard.catalog \
+  --summary /path/to/summary.json --experiment-id <完整实验ID> --batch <批次标签>
+```
+
+### 从终端直接打开指定轨迹
+
 在项目根目录校验并建立 seed 索引。
 
 ```bash

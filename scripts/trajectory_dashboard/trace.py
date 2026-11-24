@@ -190,9 +190,9 @@ def published_evaluations(directory):
     return dict(sorted(pairs.items()))
 
 
-def argument_parser(description, *, allow_eval_dir=False):
+def argument_parser(description, *, allow_eval_dir=False, allow_catalog=False):
     parser = argparse.ArgumentParser(description=description)
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group(required=not allow_catalog)
     source.add_argument("--trace", type=Path, help="Published eval_trajectory.jsonl.gz")
     if allow_eval_dir:
         source.add_argument("--eval-dir", type=Path, help="Parent of step_<checkpoint> evaluation directories")

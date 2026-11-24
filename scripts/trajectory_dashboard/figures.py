@@ -195,4 +195,7 @@ def reward_figure(points, selected, terms, gamma, revision):
                       row=3, col=1)
     _add_cursor(fig, selected, points)
     fig.update_xaxes(title_text="SUMO 仿真时间 (s)", row=3, col=1)
-    return _layout(fig, 620, revision)
+    _layout(fig, 620, revision)
+    # Anchor the wrapped legend above the first subplot and let Plotly reserve its margin.
+    fig.update_layout(legend=dict(y=1.115, yanchor="bottom", maxheight=115))
+    return fig
