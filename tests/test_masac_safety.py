@@ -16,7 +16,7 @@ from src.rewards.masac import (
 from train_masac import snapshot
 
 
-@pytest.mark.parametrize("delta, expected", [(0.4, -0.0015), (1.5, -0.00375)])
+@pytest.mark.parametrize("delta, expected", [(0.4, -0.001), (1.5, -0.0025)])
 def test_default_comfort_penalty_scales_and_clips(delta, expected):
     config = MASACRewardConfig(following=False, rear_following=False, lane_change=False,
                                efficiency=False, merge=False)
@@ -100,7 +100,7 @@ def test_route_guidance_scores_traversed_link_once(via, destination, expected):
 
 @pytest.mark.parametrize("event", ["Arrived", "Collision", "Missed Exit", "Stalled", "Timeout", "Emergency Braking"])
 @pytest.mark.parametrize("protocol,immediate_bonus,deferred_bonus,saturation_speed", [
-    (MASACRewardProtocol(), 5, 0, 25),
+    (MASACRewardProtocol(), 5, 0, 20),
     (MASACRewardProtocol.from_checkpoint({"merge_on_success": True}), 0, 25, 20),
     (LEGACY_MASAC_REWARD_PROTOCOL, 25, 0, 20),
 ])

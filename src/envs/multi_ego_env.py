@@ -8,6 +8,7 @@ import numpy as np
 from .sumo_world import SumoWorld, SUMO_DIR
 from .ego import Ego
 from .control import EgoController
+from .lane_change_gate import LaneChangeGate
 from .observation import RouteGoal, build_observation, leader_observation, remaining_goal_distance
 from .stalled import StalledDetector
 
@@ -53,6 +54,7 @@ class MultiEgoEnv:
         stalled_block_grace_s=0.0,
         stalled_match_route_links=False,
         route_preparation_settings=None,
+        lane_change_gate_egos=(),
     ):
         # 目前只生成了 Easy 双 Ego 路线
         if scenario != "easy":
@@ -79,6 +81,10 @@ class MultiEgoEnv:
                            SUMO_DIR / "Antwerp_easy_o3_d3_homogeneous_dual.rou.xml")
         self.scenario = scenario
         self.speed_mode = speed_mode
+        self.lane_change_gate_egos = frozenset(lane_change_gate_egos)
+        if not self.lane_change_gate_egos.issubset(self.AGENTS):
+            raise ValueError("Lane-change gate Ego IDs must be in MultiEgoEnv.AGENTS")
+        self.lane_change_gate = LaneChangeGate() if self.lane_change_gate_egos else None
         self.gui = bool(gui)
         self.reward_tracker = MASACRewards(reward_config, reward_protocol) if reward_config is not None else None
         self.route_preparation = None
@@ -150,6 +156,7 @@ class MultiEgoEnv:
                     conn,
                     ego_id,
                     speed_mode=self.speed_mode,
+                    lane_change_gate=self.lane_change_gate if ego_id in self.lane_change_gate_egos else None,
                 )
 
                 controller.configure()
@@ -624,6 +631,7 @@ class MultiEgoEnv:
                 )
 
         control_traces = {}
+        gate_decisions = {}
         for ego_id in self.AGENTS:
             if ego_id in acting_ids:
                 if self.collect_control_trace:
@@ -649,9 +657,13 @@ class MultiEgoEnv:
                 control = self.controllers[ego_id].apply_action(
                     actions[ego_id], active_lane_change=active_change,
                 )
+                if control.lane_change_gate is not None:
+                    gate_decisions[ego_id] = control.lane_change_gate
 
                 if self.collect_control_trace:
                     control_traces[ego_id]["commanded_acceleration_mps2"] = control.executed_accel
+                    if ego_id in gate_decisions:
+                        control_traces[ego_id]["lane_change_gate"] = gate_decisions[ego_id]
 
                 if tracker is not None:
                     tracker.before_step(conn, ego_id, control)
@@ -898,6 +910,8 @@ class MultiEgoEnv:
         observations, infos = self._build_output()
 
         for ego_id in self.AGENTS:
+            if ego_id in gate_decisions:
+                infos[ego_id]["lane_change_gate"] = gate_decisions[ego_id]
             if self.collect_metrics:
                 sample = metric_steps.get(ego_id)
                 if sample is not None:

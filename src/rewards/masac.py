@@ -29,7 +29,7 @@ FOLLOWING_WEIGHT = 0.1
 REACTION_TIME_S = 1.5
 LANE_CHANGE_MIN_GAP_M = 2.0
 LEGACY_EFFICIENCY_REFERENCE_SPEED_MPS = 20.0
-EFFICIENCY_REFERENCE_SPEED_MPS = 25.0
+EFFICIENCY_REFERENCE_SPEED_MPS = 20.0
 COMFORT_DELTA_CAP_MPS2 = 1.0
 TEAM_SUCCESS_REWARD = 100.0
 LEGACY_COMFORT_WEIGHT = 0.01
@@ -66,7 +66,7 @@ class MASACRewardProtocol:
     route_guidance_weight: float = 5.0
     terminal_penalty_scale: float = 1.0
     collision_penalty: float | None = None
-    comfort_weight: float = 0.00375
+    comfort_weight: float = 0.0025
     merge_reward: float = 5.0
     efficiency_reference_speed_mps: float = EFFICIENCY_REFERENCE_SPEED_MPS
 

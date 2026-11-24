@@ -30,7 +30,7 @@ class ControlResult:
     target_lane: int | None
     speed_limited: bool
     lane_duration: float = 0.0
-    
+    lane_change_gate: dict | None = None
 
 
 def parse_action(action):
@@ -72,11 +72,12 @@ def limit_acceleration(command, speed, dt):
 class EgoController:
     """控制一辆 Ego，不负责推进 SUMO 时钟。"""
 
-    def __init__(self, conn, ego_id: str, speed_mode=96):
+    def __init__(self, conn, ego_id: str, speed_mode=96, lane_change_gate=None):
         self.conn = conn
         self.ego_id = ego_id
         self.speed_mode = int(speed_mode)
         self.exit_change = ExitLaneChangeTracker()
+        self.lane_change_gate = lane_change_gate
 
     def configure(self):
         """Ego 插入 SUMO 后执行一次。"""
@@ -112,6 +113,7 @@ class EgoController:
         # 1. 处理横向换道
         target_lane = None
         duration = 0.0
+        gate_decision = None
 
         # The lane index can flip while the body is still crossing the lane line.
         # A repeated same-direction action must not request another lane at that point.
@@ -120,7 +122,11 @@ class EgoController:
             candidate = lane + direction
             lane_count = self.conn.edge.getLaneNumber(road)
 
-            if 0 <= candidate < lane_count:
+            valid_target = 0 <= candidate < lane_count
+            if valid_target and self.lane_change_gate is not None and active_lane_change != (candidate, direction):
+                gate_decision = self.lane_change_gate.check(vehicle, self.ego_id, direction, speed, candidate)
+
+            if valid_target and not (gate_decision and gate_decision["blocked_by"]):
                 duration = (
                     EXIT_LANE_CHANGE_DURATION
                     if road in EXIT_EDGES
@@ -158,6 +164,7 @@ class EgoController:
             target_lane=target_lane,
             speed_limited=executed_accel < accel,
             lane_duration=duration,
+            lane_change_gate=gate_decision,
         )
 
     def observe_after_step(self):

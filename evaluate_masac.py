@@ -98,6 +98,8 @@ def evaluate(args):
     stalled_terminate = getattr(args, "stalled_terminate", None)
     if stalled_terminate is None:
         stalled_terminate = reward_config.get("stalled_terminate", False)
+    gated_ego = getattr(args, "lane_change_gate", "off")
+    gated_egos = AGENT_IDS if gated_ego == "both" else (() if gated_ego == "off" else (gated_ego,))
 
     env = MultiEgoEnv(
         scenario=getattr(args, "scenario", "easy"),
@@ -128,6 +130,7 @@ def evaluate(args):
         stalled_match_route_links=env_version == MASAC_ENV_VERSION,
         legacy_route_semantics=components is None or env_version == LEGACY_MASAC_ENV_VERSION,
         actor_leader_features=actor_leader_features,
+        lane_change_gate_egos=gated_egos,
     )
 
     records = []
@@ -176,6 +179,7 @@ def evaluate(args):
             }
             held_acceleration = {}
             decision_counts = dict.fromkeys(AGENT_IDS, 0)
+            gate_counts = {ego_id: Counter() for ego_id in gated_egos}
             decision_age = decision_interval
             previous_mask = np.zeros(len(AGENT_IDS), dtype=np.float32)
 
@@ -260,6 +264,13 @@ def evaluate(args):
                     truncations,
                     infos,
                 ) = env.step(actions)
+                for ego_id, counts in gate_counts.items():
+                    gate = infos[ego_id].get("lane_change_gate")
+                    if gate is not None:
+                        counts["checked"] += 1
+                        if gate["blocked_by"]:
+                            counts["blocked"] += 1
+                            counts.update(gate["blocked_by"])
                 if trajectory is not None:
                     trajectory.step(env, step + 1, actions, positions_before, rewards, infos, outcomes,
                                     decision_ids=decision_ids)
@@ -369,6 +380,10 @@ def evaluate(args):
             env.close()  # Flush SUMO's warning log before classifying this episode.
             warnings = read_sumo_warnings(warning_path, step_length)
             for ego_id, agent in agent_records.items():
+                if ego_id in gate_counts:
+                    agent["lane_change_gate"] = {
+                        key: gate_counts[ego_id][key] for key in ("checked", "blocked", "front", "rear")
+                    }
                 vehicle_warnings = None if warnings is None else warnings.get(ego_id, {})
                 blocks = None if vehicle_warnings is None else vehicle_warnings.get("lane_end_blocks", [])
                 agent.update(lane_end_arrival_fields(agent["raw_arrival"], None if blocks is None else bool(blocks)))
@@ -463,6 +478,10 @@ def evaluate(args):
             "emergency_braking_terminate": True,
             "masac_env_version": env_version,
             "stalled_block_grace_s": env.stalled_block_grace_s,
+            "lane_change_gate": {
+                "ego_ids": list(gated_egos),
+                "settings": asdict(env.lane_change_gate) if gated_egos else None,
+            },
         },
         "reference_commit": REFERENCE_COMMIT,
         "rate_unit": "fraction for legacy success_rates/joint_success_rate; percent in per_agent/joint",
@@ -610,6 +629,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--stalled-terminate", action=argparse.BooleanOptionalAction, default=None,
                         help="Override the checkpoint's Stalled-v1 termination setting")
+    parser.add_argument("--lane-change-gate", choices=("off", *AGENT_IDS, "both"), default="off",
+                        help="Apply the entry gate to selected Egos using current TraCI observations")
     parser.add_argument("--trace", action="store_true", help="Print first episode trace")
     parser.add_argument("--trajectory", action=argparse.BooleanOptionalAction, default=True,
                         help="Save a gzip JSONL trajectory for every evaluation episode")
