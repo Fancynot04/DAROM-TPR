@@ -499,7 +499,7 @@ def test_real_transition_keeps_speed_and_preparation_independent(tmp_path, enabl
         _, rewards, _, _, infos = env.step({'ego_1': [0, 0]})
         step = infos['ego_1']['reward_components']
         assert step['route_preparation'] == pytest.approx(0.02 * 0.5 * 0.07235 if enabled else 0)
-        assert step['efficiency'] == pytest.approx(0.005)
+        assert step['efficiency'] == pytest.approx(0.004)
         assert step['route_guidance'] == 0.0
         assert rewards['ego_1'] == pytest.approx(sum(step.values()))
         diagnostics = env.reward_summary()['route_preparation_diagnostics']['ego_1']
@@ -616,12 +616,12 @@ def test_real_lane_change_updates_bonus_on_stable_completion(tmp_path):
 
 
 @pytest.mark.parametrize('lane,speed,accel,weighted_readiness,base_net', [
-    ('E75_2', 2, 2, 0.2, -0.0015),
-    ('E75_2', 2, 0, 0.2, 0.001),
-    ('E75_2', 10, 2, 0.2, 0.0025),
-    ('E76_4', 2, 2, 0, -0.0015),
-    ('E76_3', 2, 2, 0, -0.0015),
-    ('E76_0', 2, 2, 1.0, -0.0015),
+    ('E75_2', 2, 2, 0.2, -0.00295),
+    ('E75_2', 2, 0, 0.2, 0.0008),
+    ('E75_2', 10, 2, 0.2, 0.00025),
+    ('E76_4', 2, 2, 0, -0.00295),
+    ('E76_3', 2, 2, 0, -0.00295),
+    ('E76_0', 2, 2, 1.0, -0.00295),
 ])
 def test_real_safe_progress_dense_net(tmp_path, lane, speed, accel, weighted_readiness, base_net):
     route_file = tmp_path / 'dense.rou.xml'
@@ -641,8 +641,8 @@ def test_real_safe_progress_dense_net(tmp_path, lane, speed, accel, weighted_rea
         bonus = 0.005 * weighted_readiness * info['route_preparation']['progress_m'] / V1_REFERENCE_STEP_M
         parts = info['reward_components']
         assert parts['route_preparation'] == pytest.approx(bonus)
-        assert parts['comfort'] == pytest.approx(-0.0025 if accel else 0)
-        assert parts['efficiency'] == pytest.approx(0.01 * speed / 20)
+        assert parts['comfort'] == pytest.approx(-0.00375 if accel else 0)
+        assert parts['efficiency'] == pytest.approx(0.01 * speed / 25)
         dense = ('following', 'rear_following', 'lane_change', 'comfort', 'efficiency', 'route_preparation')
         assert sum(parts[key] for key in dense) == pytest.approx(base_net + bonus)
     finally:

@@ -437,6 +437,8 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
         )
         assert report["metric_version"] == METRIC_VERSION
         assert report["trainer_config"]["gamma"] == gamma
+        assert report["reward_protocol"]["efficiency_reference_speed_mps"] == 25.0
+        assert report["reward_protocol"]["comfort_weight"] == 0.00375
         assert report["training_config"]["masac_env_version"] == env_version
         assert report["training_config"]["safety_reward"] == {
             "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 0.5,
@@ -481,7 +483,8 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     assert resolved["environment"]["sumo"]["step_length_s"] == 0.1
     assert resolved["environment"]["max_delay_steps"] == 20
     assert resolved["reward"]["config"]["ttc_threshold"] == 2.75
-    assert resolved["reward"]["protocol"]["comfort_weight"] == 0.0025
+    assert resolved["reward"]["protocol"]["comfort_weight"] == 0.00375
+    assert resolved["reward"]["efficiency_reference_speed_mps"] == 25.0
     assert resolved["networks"]["actors"]["ego_1"]["observation_dim"] == (139 if actor_leader_features else 136)
     assert "GRU(2, 64" in resolved["networks"]["actors"]["ego_1"]["architecture"]
     assert resolved["trainer"]["optimizers"]["critic"]["param_groups"][0]["lr"] == 3e-5
@@ -512,7 +515,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
         "merge_on_success": False, "merge_reward": 5.0,
         "efficiency_weight": 0.01, "route_guidance_weight": 5.0,
         "terminal_penalty_scale": 1.0,
-        "comfort_weight": 0.0025,
+        "comfort_weight": 0.00375, "efficiency_reference_speed_mps": 25.0,
     }
     assert final["config"]["route_guidance_rules"][0]["accepted_connections"] == [["E76_0", "E77_0"]]
     assert final["team_critic"] and final["target_team_critic"]
@@ -536,7 +539,8 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     first = controls[0]["egos"]["ego_1"]
     assert first["reward_components"]["route_guidance"] == 0
     assert first["road"] == "O3"
-    assert first["speed_mps"] == pytest.approx(10.0)
+    assert first["speed_mps"] == pytest.approx(18.0)
+    assert first["reward_components"]["efficiency"] == pytest.approx(0.0072)
     assert first["requested_acceleration_mps2"] == first["commanded_acceleration_mps2"] == 0.0
     assert first["actual_acceleration_mps2"] is not None
     assert "leader_gap_m" in first and first["lane_remaining_m"] > 0
@@ -652,6 +656,7 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     saved_protocol = before["config"]["reward_protocol"]
     del saved_protocol["comfort_weight"]
     del saved_protocol["merge_reward"]
+    del saved_protocol["efficiency_reference_speed_mps"]
     saved_protocol["merge_on_success"] = True
     old_stages = [{
         "route": ["O3", "E75", "E76", "E77", "D3"],
@@ -678,9 +683,11 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     assert resolved["total_steps"] == 28
     assert resolved["environment"]["initial_episode_seed"] == 43
     assert resolved["reward"]["protocol"]["merge_reward"] == 25.0
+    assert resolved["reward"]["efficiency_reference_speed_mps"] == 20.0
     assert final["resume_state"]["update_count"] == before["resume_state"]["update_count"] + 8
     assert final["resume_state"]["replay"]["size"] == 16
     assert final["config"]["reward_protocol"]["comfort_weight"] == 0.01
+    assert final["config"]["reward_protocol"]["efficiency_reference_speed_mps"] == 20.0
     assert final["config"]["reward_protocol"]["merge_on_success"] is True
     assert final["config"]["reward_protocol"]["merge_reward"] == 25.0
     assert final["config"]["route_preparation_settings"] == {
@@ -794,11 +801,12 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(
     assert protocol["terminal_penalty_scale"] == (0.2 if with_preparation else 1.0)
     assert protocol["collision_penalty"] == (1000 if with_preparation else None)
     assert protocol["comfort_weight"] == (0.0025 if with_preparation else 0.01)
+    assert protocol["efficiency_reference_speed_mps"] == 20.0
     assert report["route_guidance_rules"] == config.get("route_guidance_rules", [])
     for values in report["records"][0]["reward_components"].values():
         assert values["rear_following"] == 0
         assert values["route_preparation"] == 0
-        assert values["efficiency"] == pytest.approx(0.025 if legacy else 0.005)
+        assert values["efficiency"] == pytest.approx(0.045 if legacy else 0.009)
         assert values["route_guidance"] == 0
 
 

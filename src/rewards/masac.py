@@ -28,7 +28,8 @@ LANE_CHANGE_REFERENCE_DECEL = 4.5
 FOLLOWING_WEIGHT = 0.1
 REACTION_TIME_S = 1.5
 LANE_CHANGE_MIN_GAP_M = 2.0
-EFFICIENCY_REFERENCE_SPEED_MPS = 20.0
+LEGACY_EFFICIENCY_REFERENCE_SPEED_MPS = 20.0
+EFFICIENCY_REFERENCE_SPEED_MPS = 25.0
 COMFORT_DELTA_CAP_MPS2 = 1.0
 TEAM_SUCCESS_REWARD = 100.0
 LEGACY_COMFORT_WEIGHT = 0.01
@@ -65,8 +66,9 @@ class MASACRewardProtocol:
     route_guidance_weight: float = 5.0
     terminal_penalty_scale: float = 1.0
     collision_penalty: float | None = None
-    comfort_weight: float = LEGACY_COMFORT_WEIGHT / 4
+    comfort_weight: float = 0.00375
     merge_reward: float = 5.0
+    efficiency_reference_speed_mps: float = EFFICIENCY_REFERENCE_SPEED_MPS
 
     def __post_init__(self):
         for name in ("efficiency_weight", "route_guidance_weight", "terminal_penalty_scale",
@@ -74,6 +76,8 @@ class MASACRewardProtocol:
             value = getattr(self, name)
             if not isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be finite and nonnegative")
+        if not isfinite(self.efficiency_reference_speed_mps) or self.efficiency_reference_speed_mps <= 0:
+            raise ValueError("efficiency_reference_speed_mps must be finite and positive")
         if self.collision_penalty is not None and (
             not isfinite(self.collision_penalty) or self.collision_penalty < 0
         ):
@@ -85,6 +89,7 @@ class MASACRewardProtocol:
             "comfort_weight": LEGACY_COMFORT_WEIGHT,
             "merge_on_success": True,
             "merge_reward": 25.0,
+            "efficiency_reference_speed_mps": LEGACY_EFFICIENCY_REFERENCE_SPEED_MPS,
             **settings,
         })
 
@@ -92,6 +97,7 @@ class MASACRewardProtocol:
 LEGACY_MASAC_REWARD_PROTOCOL = MASACRewardProtocol(
     merge_on_success=False, efficiency_weight=0.05, route_guidance_weight=0.0,
     comfort_weight=LEGACY_COMFORT_WEIGHT, merge_reward=25.0,
+    efficiency_reference_speed_mps=LEGACY_EFFICIENCY_REFERENCE_SPEED_MPS,
 )
 
 
@@ -234,7 +240,9 @@ class MASACRewards:
         )) else 0.0)
         values = self.empty()
         if self.config.efficiency:
-            values["efficiency"] = self.protocol.efficiency_weight * min(1.0, speed / EFFICIENCY_REFERENCE_SPEED_MPS)
+            values["efficiency"] = self.protocol.efficiency_weight * min(
+                1.0, speed / self.protocol.efficiency_reference_speed_mps,
+            )
         gap_risk = ttc_risk = 0.0
         rear_gap_risk = rear_ttc_risk = 0.0
         if self.config.following:

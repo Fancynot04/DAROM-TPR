@@ -196,7 +196,7 @@ def resolve_run_config(args, env, trainer, buffer, episode_seed_index):
             reaction_time_s=reward_parameters.REACTION_TIME_S,
             lane_change_min_gap_m=reward_parameters.LANE_CHANGE_MIN_GAP_M,
             lane_change_reference_decel_mps2=reward_parameters.LANE_CHANGE_REFERENCE_DECEL,
-            efficiency_reference_speed_mps=reward_parameters.EFFICIENCY_REFERENCE_SPEED_MPS,
+            efficiency_reference_speed_mps=reward.protocol.efficiency_reference_speed_mps,
             comfort_delta_cap_mps2=reward_parameters.COMFORT_DELTA_CAP_MPS2,
             team_success_reward=reward_parameters.TEAM_SUCCESS_REWARD,
             usp=dict(enabled=env.usp_enabled, penalty=env.usp.penalty, stop_speed_mps=env.usp.STOP_SPEED,
@@ -396,6 +396,7 @@ def find_resume_checkpoint(directory, args):
         saved_protocol = MASACRewardProtocol.from_checkpoint(saved_settings)
         reward_protocol["merge_on_success"] = saved_protocol.merge_on_success
         reward_protocol["merge_reward"] = saved_protocol.merge_reward
+        reward_protocol["efficiency_reference_speed_mps"] = saved_protocol.efficiency_reference_speed_mps
         if getattr(args, "reward_comfort_weight", None) is None:
             reward_protocol["comfort_weight"] = saved_protocol.comfort_weight
         if saved_protocol != MASACRewardProtocol(**reward_protocol):

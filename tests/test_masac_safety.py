@@ -16,7 +16,7 @@ from src.rewards.masac import (
 from train_masac import snapshot
 
 
-@pytest.mark.parametrize("delta, expected", [(0.4, -0.001), (1.5, -0.0025)])
+@pytest.mark.parametrize("delta, expected", [(0.4, -0.0015), (1.5, -0.00375)])
 def test_default_comfort_penalty_scales_and_clips(delta, expected):
     config = MASACRewardConfig(following=False, rear_following=False, lane_change=False,
                                efficiency=False, merge=False)
@@ -99,23 +99,24 @@ def test_route_guidance_scores_traversed_link_once(via, destination, expected):
 
 
 @pytest.mark.parametrize("event", ["Arrived", "Collision", "Missed Exit", "Stalled", "Timeout", "Emergency Braking"])
-@pytest.mark.parametrize("protocol,immediate_bonus,deferred_bonus", [
-    (MASACRewardProtocol(), 5, 0),
-    (MASACRewardProtocol.from_checkpoint({"merge_on_success": True}), 0, 25),
-    (LEGACY_MASAC_REWARD_PROTOCOL, 25, 0),
+@pytest.mark.parametrize("protocol,immediate_bonus,deferred_bonus,saturation_speed", [
+    (MASACRewardProtocol(), 5, 0, 25),
+    (MASACRewardProtocol.from_checkpoint({"merge_on_success": True}), 0, 25, 20),
+    (LEGACY_MASAC_REWARD_PROTOCOL, 25, 0, 20),
 ])
-def test_merge_bonus_and_efficiency(event, protocol, immediate_bonus, deferred_bonus):
+def test_merge_bonus_and_efficiency(event, protocol, immediate_bonus, deferred_bonus, saturation_speed):
     config = MASACRewardConfig(following=False, rear_following=False, lane_change=False, comfort=False)
     tracker = MASACRewards(config, protocol)
     vehicle = Mock()
     vehicle.getRoadID.return_value = "E76"
     control = SimpleNamespace(target_lane=None)
     conn = SimpleNamespace(vehicle=vehicle, simulation=Mock())
-    for key, speed, needs_merge in (("ramp", 20, True), ("mainline", 30, False), ("slow", 10, True)):
+    for key, speed, needs_merge in (("ramp", 20, True), ("mainline", 30, False),
+                                    ("saturation", 25, False), ("slow", 10, True)):
         vehicle.getSpeed.return_value = speed
         tracker.before_step(conn, key, control)
         values = tracker.after_step(conn, key, True, needs_merge)
-        assert values["efficiency"] == pytest.approx(protocol.efficiency_weight * min(1, speed / 20))
+        assert values["efficiency"] == pytest.approx(protocol.efficiency_weight * min(1, speed / saturation_speed))
         assert values["merge"] == (immediate_bonus if needs_merge else 0)
         assert values["task"] == 0
         assert values["route_guidance"] == 0
