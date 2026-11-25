@@ -1,4 +1,4 @@
-"""Frozen protocol: deterministic Easy, 100 shared evaluation seeds per checkpoint."""
+"""Frozen protocol: deterministic, 100 shared evaluation seeds per checkpoint."""
 import argparse
 from pathlib import Path
 import sys
@@ -10,6 +10,7 @@ from src.experiment_tracking import sha256, atomic_json, git_metadata, evaluatio
 from src.evaluation_results import validate_results, EVALUATION_PROTOCOL_VERSION
 from src.evaluation_metrics import REFERENCE_COMMIT
 from src.envs.stalled import stalled_block_grace_for_version
+from src.envs.sumo_world import DUAL_EGO_ROUTES, SUMO_DIR, checkpoint_scenario
 
 from src.agents.replay_buffer import JointReplayBuffer
 
@@ -26,6 +27,7 @@ def discover(directory):
         config = state.get('config', {})
         env_version = config.get('masac_env_version') if config.get('reward_components') is not None else None
         rows.append(dict(path=path, global_step=int(state['global_step']), sha256=sha256(path),
+                         scenario=checkpoint_scenario(config),
                          decision_interval_steps=config.get('decision_interval_steps', 1),
                          stalled_terminate=config.get('stalled_terminate', False),
                          masac_env_version=env_version, stalled_block_grace_s=stalled_block_grace_for_version(
@@ -48,13 +50,12 @@ def discover(directory):
 
 
 def expected_environment(max_steps, stalled_terminate=False, masac_env_version=None,
-                         stalled_block_grace_s=0.0, decision_interval_steps=1):
-    root = Path(__file__).resolve().parents[1]
+                         stalled_block_grace_s=0.0, decision_interval_steps=1, scenario="easy"):
     from sumolib import checkBinary
 
     return dict(
         sumo_binary_sha256=sha256(checkBinary("sumo")),
-        scenario="easy",
+        scenario=scenario,
         agent_ids=list(AGENT_IDS),
         requested_speed_mode=96,
         step_length_s=0.1,
@@ -66,12 +67,8 @@ def expected_environment(max_steps, stalled_terminate=False, masac_env_version=N
         stalled_terminate=stalled_terminate,
         masac_env_version=masac_env_version,
         stalled_block_grace_s=stalled_block_grace_s,
-        net_sha256=sha256(
-            root / "sumo_new/Antwerp.net.xml"
-        ),
-        route_sha256=sha256(
-            root / "sumo_new/Antwerp_easy_o3_d3_homogeneous_dual.rou.xml"
-        ),
+        net_sha256=sha256(SUMO_DIR / "Antwerp.net.xml"),
+        route_sha256=sha256(DUAL_EGO_ROUTES[scenario]),
     )
 
 
@@ -92,6 +89,7 @@ def compatible(report, checkpoint, max_steps):
                         max_steps, checkpoint.get('stalled_terminate', False),
                         checkpoint.get('masac_env_version'), checkpoint.get('stalled_block_grace_s', 0.0),
                         checkpoint.get('decision_interval_steps', 1),
+                        checkpoint.get('scenario', 'easy'),
                     ).items())
             and all(report['environment']['actual_speed_modes'][ego] for ego in AGENT_IDS))
 

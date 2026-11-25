@@ -358,6 +358,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     import evaluate_masac
     from src.agents.masac import MultiAgentGaussianActor
     from src.envs.multi_ego_env import MultiEgoEnv
+    from src.envs.sumo_world import DUAL_EGO_ROUTES, checkpoint_scenario
 
     class ShortEpisodeEnv(MultiEgoEnv):
         def step(self, actions):
@@ -390,7 +391,9 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     monkeypatch.setattr(train_masac, "choose_actions", safe_fixed_actions)
     monkeypatch.setattr(evaluate_masac, "MultiEgoEnv", ShortEpisodeEnv)
 
+    scenario = "easy_speed18" if actor_leader_features else "easy"
     args = SimpleNamespace(
+        scenario=scenario,
         total_steps=220,
         seed=42,
         learning_starts=20,
@@ -440,6 +443,10 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
         assert report["reward_protocol"]["efficiency_reference_speed_mps"] == 20.0
         assert report["reward_protocol"]["comfort_weight"] == 0.0025
         assert report["training_config"]["masac_env_version"] == env_version
+        assert report["environment"]["scenario"] == scenario
+        route_hash = sha256(DUAL_EGO_ROUTES[scenario])
+        assert report["environment"]["route_sha256"] == route_hash
+        assert checkpoint_scenario({"environment": {"sumo": {"route_sha256": route_hash}}}) == scenario
         assert report["training_config"]["safety_reward"] == {
             "ttc_threshold": 2.75, "following_lookahead": 120.0, "lane_change_weight": 0.5,
         }
@@ -539,8 +546,9 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
     first = controls[0]["egos"]["ego_1"]
     assert first["reward_components"]["route_guidance"] == 0
     assert first["road"] == "O3"
-    assert first["speed_mps"] == pytest.approx(18.0)
-    assert first["reward_components"]["efficiency"] == pytest.approx(0.009)
+    expected_speed = 18.0 if scenario == "easy_speed18" else 10.0
+    assert first["speed_mps"] == pytest.approx(expected_speed)
+    assert first["reward_components"]["efficiency"] == pytest.approx(0.01 * expected_speed / 20.0)
     assert first["requested_acceleration_mps2"] == first["commanded_acceleration_mps2"] == 0.0
     assert first["actual_acceleration_mps2"] is not None
     assert "leader_gap_m" in first and first["lane_remaining_m"] > 0
@@ -806,7 +814,7 @@ def test_checkpoint_evaluation_uses_saved_reward_protocol(
     for values in report["records"][0]["reward_components"].values():
         assert values["rear_following"] == 0
         assert values["route_preparation"] == 0
-        assert values["efficiency"] == pytest.approx(0.045 if legacy else 0.009)
+        assert values["efficiency"] == pytest.approx(0.025 if legacy else 0.005)
         assert values["route_guidance"] == 0
 
 

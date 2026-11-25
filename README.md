@@ -8,18 +8,20 @@
 
 | 项目      | 当前实现                                                     |
 | --------- | ------------------------------------------------------------ |
-| 场景      | Antwerp **Easy**（双 Ego；Medium/Hard 双 Ego 尚未接入）      |
+| 场景      | Antwerp 双 Ego `easy`（默认）和 `easy_speed18` |
 | `ego_1`   | O3 → D3；计划 120 s 出发；`O3_0` 起步                        |
 | `ego_2`   | O3 → D3；计划 123 s 出发；`O3_0` 起步                      |
 | 仿真      | 一个 SUMO 进程、一个 0.1 s 全局时钟；各车实际插入时刻可不同  |
-| 速度      | 道路及 Ego 限速 120 km/h（33.333 m/s）；两辆 Ego 的设定出发速度均为 18 m/s |
+| 速度      | 道路及 Ego 限速 120 km/h（33.333 m/s）；两辆 Ego 在 `easy` 中以 10 m/s 出发，在 `easy_speed18` 中以 18 m/s 出发 |
 | Episode   | 每辆 Ego 默认最多 **2,500 个活跃控制步（250 s 仿真时间）**；分别终止，双方结束后重置 |
 | Ego 控制  | 纵向加速度 + 横向换道请求；`laneChangeMode=0`；评估可选换道入口门控 |
 | 奖励      | 模块化奖励，具体配置见下文 |
 
 **训练目标**：分别提高两辆 Ego 的安全抵达率，最终提高**同一回合两车同时抵达 D3 的联合成功率**。两车均由各自的 Actor 决策，计划出发间隔为 3 s，实际插入时刻由 SUMO 决定。
 
-Easy 双 Ego 路线中的小客车和摩托车采用 `speedFactor="normc(0.75,0.08,0.55,0.9)"` 和 `departSpeed="desired"`。按入口限速计算，名义期望入网速度约为 25 m/s，采样倍率对应的速度范围为 18.33–30 m/s。货车使用 `departSpeed="max"`，车型最高速度分别为 25 和 22 m/s。
+`easy` 使用实验 `2183b2` 的原始路线，小客车和摩托车按 `departSpeed="speedLimit"` 请求入网速度。`easy_speed18` 中的小客车和摩托车采用 `speedFactor="normc(0.75,0.08,0.55,0.9)"` 和 `departSpeed="desired"`。按入口限速计算，名义期望入网速度约为 25 m/s，采样倍率对应的速度范围为 18.33–30 m/s。两个场景的货车均使用 `departSpeed="max"`，车型最高速度分别为 25 和 22 m/s。
+
+新训练可用 `--scenario easy_speed18` 选择 18 m/s 场景。续训和评估默认读取检查点的场景，已有场景文件哈希的旧检查点也可识别。单次评估可用 `--scenario` 显式指定场景，结果记录实际使用的路线文件哈希。
 
 ## 2. CTDE-MASAC 结构
 
@@ -112,7 +114,8 @@ src/rewards/events.py               终止事件映射及旧版 B0 奖励
 src/rewards/masac.py                模块化奖励配置及回合记账
 sumo_new/
   Antwerp.net.xml                   Antwerp 路网
-  Antwerp_easy_o3_d3_homogeneous_dual.rou.xml  当前双 Ego Easy 路线
+  Antwerp_easy_o3_d3_homogeneous_dual.rou.xml  2183b2 双 Ego Easy 路线
+  Antwerp_easy_speed18_o3_d3_homogeneous_dual.rou.xml  18 m/s 双 Ego 路线
   Antwerp_easy_o3_d3.rou.xml        单 Ego O3 参考路线
   Antwerp_medium_o3_d3.rou.xml      单 Ego Medium 路线
   Antwerp_hard_o3_d3.rou.xml        单 Ego Hard 路线

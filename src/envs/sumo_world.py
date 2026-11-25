@@ -4,17 +4,32 @@ from pathlib import Path
 import traci
 from sumolib import checkBinary
 
+from src.experiment_tracking import sha256
+
 
 # 项目根目录下的 SUMO 文件
 SUMO_DIR = Path(__file__).resolve().parents[2] / "sumo_new"
 STEP_LENGTH_S = 0.1
+DUAL_EGO_ROUTES = {
+    scenario: SUMO_DIR / f"Antwerp_{scenario}_o3_d3_homogeneous_dual.rou.xml"
+    for scenario in ("easy", "easy_speed18")
+}
+
+
+def checkpoint_scenario(config):
+    if config.get("scenario") is not None:
+        return config["scenario"]
+    route_hash = config.get("environment", {}).get("sumo", {}).get("route_sha256")
+    if route_hash and route_hash == sha256(DUAL_EGO_ROUTES["easy_speed18"]):
+        return "easy_speed18"
+    return "easy"
 
 
 class SumoWorld:
     """管理一个 SUMO 仿真世界，不负责具体 Ego 的决策。"""
 
     def __init__(self, scenario="easy", seed=42, gui=False, route_file=None, warning_log=None):
-        if scenario not in ("easy", "medium", "hard"):
+        if scenario not in ("easy", "medium", "hard", "easy_speed18"):
             raise ValueError(f"Unknown scenario: {scenario}")
 
         self.scenario = scenario
@@ -29,7 +44,8 @@ class SumoWorld:
         self.route_file = (
             Path(route_file)
             if route_file is not None
-            else SUMO_DIR / f"Antwerp_{scenario}_o3_d3.rou.xml"
+            else (DUAL_EGO_ROUTES[scenario] if scenario == "easy_speed18"
+                  else SUMO_DIR / f"Antwerp_{scenario}_o3_d3.rou.xml")
         )
 
         self.conn = None

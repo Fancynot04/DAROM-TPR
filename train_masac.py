@@ -18,6 +18,7 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
+from src.envs.sumo_world import DUAL_EGO_ROUTES, checkpoint_scenario
 from src.envs import control, stalled
 from src.envs.route_lane_plan import DEFAULT_ROUTE_GUIDANCE_RULES
 from src.envs.route_preparation import (
@@ -362,6 +363,13 @@ def find_resume_checkpoint(directory, args):
     changed = [key for key in RESUME_CONFIG_KEYS
                if state["config"].get(key)
                != getattr(args, key)]
+    saved_scenario = checkpoint_scenario(state["config"])
+    scenario = getattr(args, "scenario", None) or saved_scenario
+    saved_route_hash = state["config"].get("environment", {}).get("sumo", {}).get("route_sha256")
+    if scenario != saved_scenario:
+        changed.append("scenario")
+    elif saved_route_hash and saved_route_hash != sha256(DUAL_EGO_ROUTES[scenario]):
+        changed.append("route_sha256")
     if state["config"].get("decision_interval_steps", 1) != getattr(args, "decision_interval_steps", 1):
         changed.append("decision_interval_steps")
     saved_route_settings = checkpoint_preparation_settings(state["config"].get("route_preparation_settings"))
@@ -414,6 +422,7 @@ def find_resume_checkpoint(directory, args):
     if orphaned:
         atomic_json(index_path, index)
     args.reward_protocol = reward_protocol
+    args.scenario = scenario
     args.route_preparation_settings = route_settings
     args.reward_components = components
     args.safety_reward = safety
@@ -590,6 +599,7 @@ def train_locked(args, device, output_dir):
         reward_protocol = MASACRewardProtocol(**args.reward_protocol)
     else:
         args.route_preparation_settings = preparation_settings(args)
+        args.scenario = getattr(args, "scenario", None) or "easy"
     reward_config = MASACRewardConfig(**args.reward_components, **args.safety_reward)
     args.reward_lane_change_weight = reward_config.lane_change_weight
     args.reward_route_preparation = reward_config.route_preparation
@@ -664,7 +674,7 @@ def train_locked(args, device, output_dir):
 
     # 3. 创建双 Ego 环境
     env = MultiEgoEnv(
-        scenario="easy",
+        scenario=args.scenario,
         speed_mode=96,
         collect_metrics=True,
         usp_enabled=args.usp,
@@ -1041,6 +1051,8 @@ def train_locked(args, device, output_dir):
 
 def build_parser():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--scenario", choices=DUAL_EGO_ROUTES,
+                        help="SUMO scenario (default: easy for fresh training, checkpoint scenario when resuming)")
 
     parser.add_argument(
         "--total-steps", type=int, default=1000000

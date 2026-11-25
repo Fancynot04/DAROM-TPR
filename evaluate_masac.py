@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
-from src.envs.sumo_world import STEP_LENGTH_S
+from src.envs.sumo_world import DUAL_EGO_ROUTES, STEP_LENGTH_S, SUMO_DIR, checkpoint_scenario
 from src.envs.stalled import stalled_block_grace_for_version
 from src.envs.route_preparation import checkpoint_preparation_settings
 from src.rewards.masac import (
@@ -102,7 +102,7 @@ def evaluate(args):
     gated_egos = AGENT_IDS if gated_ego == "both" else (() if gated_ego == "off" else (gated_ego,))
 
     env = MultiEgoEnv(
-        scenario=getattr(args, "scenario", "easy"),
+        scenario=getattr(args, "scenario", None) or checkpoint_scenario(reward_config),
         speed_mode=96,
         collect_metrics=True,
         collect_control_trace=record_trajectory,
@@ -463,14 +463,14 @@ def evaluate(args):
         "sumo_version": sumo_version,
         "environment": {
             "sumo_binary_sha256": sha256(checkBinary("sumo")),
-            "scenario": "easy", "agent_ids": list(AGENT_IDS), "requested_speed_mode": 96,
+            "scenario": env.scenario, "agent_ids": list(AGENT_IDS), "requested_speed_mode": 96,
             "actual_speed_modes": {key: sorted({mode for record in records for mode in record["per_agent"][key]["speed_modes"]}) for key in AGENT_IDS},
             "step_length_s": STEP_LENGTH_S, "max_steps": args.max_steps,
             "decision_interval_steps": decision_interval,
             "decision_interval_s": decision_interval * STEP_LENGTH_S,
             "decision_clock": "shared_with_activation_boundary" if shared_decisions else "per_ego",
-            "net_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp.net.xml"),
-            "route_sha256": sha256(Path(__file__).parent / "sumo_new/Antwerp_easy_o3_d3_homogeneous_dual.rou.xml"),
+            "net_sha256": sha256(SUMO_DIR / "Antwerp.net.xml"),
+            "route_sha256": sha256(env.route_file),
             "stopped_speed_threshold_mps": 0.5,
             "disable_teleport": True,
             "max_active_steps": env.max_active_steps,
@@ -596,8 +596,8 @@ if __name__ == "__main__":
     # 场景配置
     parser.add_argument(
         "--scenario",
-        choices=["easy"],
-        default="easy",
+        choices=DUAL_EGO_ROUTES,
+        help="Override the checkpoint scenario for this evaluation",
     )
 
     # 是否启用 GUI

@@ -5,7 +5,7 @@ from xml.etree import ElementTree
 
 import numpy as np
 
-from .sumo_world import SumoWorld, SUMO_DIR
+from .sumo_world import DUAL_EGO_ROUTES, SumoWorld
 from .ego import Ego
 from .control import EgoController
 from .lane_change_gate import LaneChangeGate
@@ -56,11 +56,8 @@ class MultiEgoEnv:
         route_preparation_settings=None,
         lane_change_gate_egos=(),
     ):
-        # 目前只生成了 Easy 双 Ego 路线
-        if scenario != "easy":
-            raise ValueError(
-                "Only Easy dual-Ego route is available"
-            )
+        if scenario not in DUAL_EGO_ROUTES:
+            raise ValueError(f"Unknown dual-Ego scenario: {scenario}")
 
         if max_active_steps <= 0:
             raise ValueError("max_active_steps must be positive")
@@ -77,8 +74,7 @@ class MultiEgoEnv:
         self.stalled_match_route_links = stalled_match_route_links
         self.sumo_warning_log_dir = None
         self.stall_detectors = {}
-        self.route_file = (route_file if route_file is not None else
-                           SUMO_DIR / "Antwerp_easy_o3_d3_homogeneous_dual.rou.xml")
+        self.route_file = route_file if route_file is not None else DUAL_EGO_ROUTES[scenario]
         self.scenario = scenario
         self.speed_mode = speed_mode
         self.lane_change_gate_egos = frozenset(lane_change_gate_egos)

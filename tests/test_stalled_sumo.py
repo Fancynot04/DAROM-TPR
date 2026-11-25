@@ -90,7 +90,7 @@ def test_dual_ego_uses_independent_windows_without_changing_outcomes(tmp_path, m
         '<trip id="ego_2" type="ego" from="O3" to="D3" depart="3" departPos="30" departSpeed="0"/>'
         '</routes>'
     )
-    monkeypatch.setattr(env_module, "SUMO_DIR", tmp_path)
+    monkeypatch.setitem(env_module.DUAL_EGO_ROUTES, "easy", fixture)
     baseline = []
     for shadow in (False, True):
         env = env_module.MultiEgoEnv(stalled_shadow=shadow)
@@ -215,7 +215,7 @@ def stalled_terminate_route(tmp_path, monkeypatch):
         '<trip id="ego_2" type="ego" from="O3" to="D3" depart="3" departPos="30" departSpeed="0"/>'
         '</routes>'
     )
-    monkeypatch.setattr(env_module, "SUMO_DIR", tmp_path)
+    monkeypatch.setitem(env_module.DUAL_EGO_ROUTES, "easy", fixture)
 
 
 def assert_teleport_disabled(sim):
