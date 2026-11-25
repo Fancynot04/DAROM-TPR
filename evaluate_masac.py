@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from src.envs.multi_ego_env import MultiEgoEnv
+from src.envs.control import LaneChangeRequest, add_lane_change_request_arguments, resolve_lane_change_request
 from src.envs.sumo_world import DUAL_EGO_ROUTES, STEP_LENGTH_S, SUMO_DIR, checkpoint_scenario
 from src.envs.stalled import stalled_block_grace_for_version
 from src.envs.route_preparation import checkpoint_preparation_settings
@@ -101,7 +102,9 @@ def evaluate(args):
     gated_ego = getattr(args, "lane_change_gate", "off")
     gated_egos = AGENT_IDS if gated_ego == "both" else (() if gated_ego == "off" else (gated_ego,))
 
+    trained_lane_change_request = LaneChangeRequest.from_checkpoint(reward_config)
     env = MultiEgoEnv(
+        lane_change_request=resolve_lane_change_request(args, trained_lane_change_request),
         scenario=getattr(args, "scenario", None) or checkpoint_scenario(reward_config),
         speed_mode=96,
         collect_metrics=True,
@@ -137,6 +140,9 @@ def evaluate(args):
     sumo_version = None
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
+    if getattr(args, "sumo_lanechange_output", False):
+        env.sumo_lanechange_dir = output.parent / "sumo_lanechanges"
+        env.sumo_lanechange_dir.mkdir(exist_ok=False)
     warning_logs = TemporaryDirectory(prefix="sumo-warnings-", dir=output.parent)
     env.sumo_warning_log_dir = Path(warning_logs.name)
     trajectory = None
@@ -478,6 +484,11 @@ def evaluate(args):
             "emergency_braking_terminate": True,
             "masac_env_version": env_version,
             "stalled_block_grace_s": env.stalled_block_grace_s,
+            "lane_change_request": env.lane_change_request.settings(),
+            "sumo_lanechange_output": (
+                "sumo_lanechanges/seed-{seed}.xml" if env.sumo_lanechange_dir is not None else None
+            ),
+            "checkpoint_lane_change_request": trained_lane_change_request.settings(),
             "lane_change_gate": {
                 "ego_ids": list(gated_egos),
                 "settings": asdict(env.lane_change_gate) if gated_egos else None,
@@ -634,6 +645,9 @@ if __name__ == "__main__":
     parser.add_argument("--trace", action="store_true", help="Print first episode trace")
     parser.add_argument("--trajectory", action=argparse.BooleanOptionalAction, default=True,
                         help="Save a gzip JSONL trajectory for every evaluation episode")
+    parser.add_argument("--sumo-lanechange-output", action="store_true",
+                        help="Save native SUMO lane-change XML for each seed next to the report")
+    add_lane_change_request_arguments(parser)
     args = parser.parse_args()
 
     if args.max_steps <= 0:

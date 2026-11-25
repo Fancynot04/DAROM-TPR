@@ -7,7 +7,7 @@ import numpy as np
 
 from .sumo_world import DUAL_EGO_ROUTES, SumoWorld
 from .ego import Ego
-from .control import EgoController
+from .control import EgoController, LaneChangeRequest
 from .lane_change_gate import LaneChangeGate
 from .observation import RouteGoal, build_observation, leader_observation, remaining_goal_distance
 from .stalled import StalledDetector
@@ -55,6 +55,7 @@ class MultiEgoEnv:
         stalled_match_route_links=False,
         route_preparation_settings=None,
         lane_change_gate_egos=(),
+        lane_change_request=LaneChangeRequest(),
     ):
         if scenario not in DUAL_EGO_ROUTES:
             raise ValueError(f"Unknown dual-Ego scenario: {scenario}")
@@ -73,10 +74,12 @@ class MultiEgoEnv:
         self.stalled_block_grace_s = stalled_block_grace_s
         self.stalled_match_route_links = stalled_match_route_links
         self.sumo_warning_log_dir = None
+        self.sumo_lanechange_dir = None
         self.stall_detectors = {}
         self.route_file = route_file if route_file is not None else DUAL_EGO_ROUTES[scenario]
         self.scenario = scenario
         self.speed_mode = speed_mode
+        self.lane_change_request = lane_change_request
         self.lane_change_gate_egos = frozenset(lane_change_gate_egos)
         if not self.lane_change_gate_egos.issubset(self.AGENTS):
             raise ValueError("Lane-change gate Ego IDs must be in MultiEgoEnv.AGENTS")
@@ -152,6 +155,7 @@ class MultiEgoEnv:
                     conn,
                     ego_id,
                     speed_mode=self.speed_mode,
+                    lane_change_request=self.lane_change_request,
                     lane_change_gate=self.lane_change_gate if ego_id in self.lane_change_gate_egos else None,
                 )
 
@@ -396,6 +400,8 @@ class MultiEgoEnv:
             gui=self.gui,
             warning_log=(self.sumo_warning_log_dir / f"seed-{seed}.log"
                          if self.sumo_warning_log_dir is not None else None),
+            lanechange_output=(self.sumo_lanechange_dir / f"seed-{seed}.xml"
+                               if self.sumo_lanechange_dir is not None else None),
         )
 
     def reset(self, seed=42):
@@ -661,7 +667,14 @@ class MultiEgoEnv:
                     gate_decisions[ego_id] = control.lane_change_gate
 
                 if self.collect_control_trace:
-                    control_traces[ego_id]["commanded_acceleration_mps2"] = control.executed_accel
+                    control_traces[ego_id].update(
+                        commanded_acceleration_mps2=control.executed_accel,
+                        lane_request_direction=control.lane_direction,
+                        lane_request_target=control.target_lane,
+                        lane_request_duration_s=(
+                            control.lane_duration if control.target_lane is not None else None
+                        ),
+                    )
                     if ego_id in gate_decisions:
                         control_traces[ego_id]["lane_change_gate"] = gate_decisions[ego_id]
 

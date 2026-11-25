@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.experiment_tracking import sha256, atomic_json, git_metadata, evaluation_fingerprint, runtime_versions
 from src.evaluation_results import validate_results, EVALUATION_PROTOCOL_VERSION
 from src.evaluation_metrics import REFERENCE_COMMIT
+from src.envs.control import LaneChangeRequest
 from src.envs.stalled import stalled_block_grace_for_version
 from src.envs.sumo_world import DUAL_EGO_ROUTES, SUMO_DIR, checkpoint_scenario
 
@@ -28,6 +29,7 @@ def discover(directory):
         env_version = config.get('masac_env_version') if config.get('reward_components') is not None else None
         rows.append(dict(path=path, global_step=int(state['global_step']), sha256=sha256(path),
                          scenario=checkpoint_scenario(config),
+                         lane_change_request=LaneChangeRequest.from_checkpoint(config),
                          decision_interval_steps=config.get('decision_interval_steps', 1),
                          stalled_terminate=config.get('stalled_terminate', False),
                          masac_env_version=env_version, stalled_block_grace_s=stalled_block_grace_for_version(
@@ -50,12 +52,14 @@ def discover(directory):
 
 
 def expected_environment(max_steps, stalled_terminate=False, masac_env_version=None,
-                         stalled_block_grace_s=0.0, decision_interval_steps=1, scenario="easy"):
+                         stalled_block_grace_s=0.0, decision_interval_steps=1, scenario="easy",
+                         lane_change_request=LaneChangeRequest()):
     from sumolib import checkBinary
 
     return dict(
         sumo_binary_sha256=sha256(checkBinary("sumo")),
         scenario=scenario,
+        lane_change_request=lane_change_request.settings(),
         agent_ids=list(AGENT_IDS),
         requested_speed_mode=96,
         step_length_s=0.1,
@@ -90,6 +94,7 @@ def compatible(report, checkpoint, max_steps):
                         checkpoint.get('masac_env_version'), checkpoint.get('stalled_block_grace_s', 0.0),
                         checkpoint.get('decision_interval_steps', 1),
                         checkpoint.get('scenario', 'easy'),
+                        checkpoint.get('lane_change_request', LaneChangeRequest()),
                     ).items())
             and all(report['environment']['actual_speed_modes'][ego] for ego in AGENT_IDS))
 

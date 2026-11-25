@@ -1,6 +1,7 @@
 
 """测试 DAROM 动作解析与车辆控制。"""
 
+from argparse import ArgumentParser
 from unittest.mock import Mock
 
 import numpy as np
@@ -8,6 +9,9 @@ import pytest
 
 from src.envs.control import (
     EgoController,
+    LaneChangeRequest,
+    add_lane_change_request_arguments,
+    resolve_lane_change_request,
     MAX_SPEED,
     parse_action,
     limit_acceleration,
@@ -128,3 +132,54 @@ def test_gate_leaves_ongoing_same_direction_change_in_place():
     vehicle.getRightLeaders.assert_not_called()
     vehicle.getRightFollowers.assert_not_called()
     vehicle.changeLane.assert_called_once_with("ego", 1, 4.0)
+
+
+@pytest.mark.parametrize("road,legacy_duration", [("E75", 0.0), ("E76", 4.0), ("E77", 4.0)])
+@pytest.mark.parametrize("uniform_duration", [None, 0.0, 0.1, 0.5, 1.0, 4.0])
+def test_lane_request_duration_and_repeated_direction(road, legacy_duration, uniform_duration):
+    conn = Mock()
+    vehicle = conn.vehicle
+    vehicle.getIDList.return_value = ["ego"]
+    vehicle.getRoadID.return_value = road
+    vehicle.getLaneIndex.return_value = 2
+    vehicle.getSpeed.return_value = 10.0
+    conn.edge.getLaneNumber.return_value = 5
+    conn.simulation.getDeltaT.return_value = 0.1
+    request = (LaneChangeRequest() if uniform_duration is None
+               else LaneChangeRequest("uniform", uniform_duration))
+    controller = EgoController(conn, "ego", lane_change_request=request)
+
+    command = controller.apply_action([0.0, 5.0])
+    duration = legacy_duration if uniform_duration is None else uniform_duration
+    assert command.lane_duration == duration
+    assert command.target_lane == 3
+
+    vehicle.getLaneIndex.return_value = 3
+    assert controller.apply_action([0.0, 0.0], active_lane_change=(3, 1)).target_lane is None
+    assert controller.apply_action([0.0, 5.0], active_lane_change=(3, 1)).target_lane is None
+    vehicle.changeLane.assert_called_once_with("ego", 3, duration)
+
+
+def test_request_cli_and_checkpoint_defaults():
+    parser = ArgumentParser()
+    add_lane_change_request_arguments(parser)
+    legacy = LaneChangeRequest.from_checkpoint({"environment": {"exit_lane_change_duration_s": 4.0}})
+    saved = LaneChangeRequest.from_checkpoint({
+        "lane_change_request_mode": "uniform", "lane_change_request_duration": 0.5,
+    })
+    assert legacy == LaneChangeRequest()
+    assert resolve_lane_change_request(parser.parse_args([]), saved) == saved
+    assert resolve_lane_change_request(parser.parse_args([])) == legacy
+    assert resolve_lane_change_request(
+        parser.parse_args(["--lane-change-request-mode", "uniform"]),
+    ) == LaneChangeRequest("uniform", 0.1)
+    assert resolve_lane_change_request(
+        parser.parse_args(["--lane-change-request-duration", "0"]), saved,
+    ) == LaneChangeRequest("uniform", 0.0)
+    assert resolve_lane_change_request(
+        parser.parse_args(["--lane-change-request-mode", "legacy"]), saved,
+    ) == legacy
+    with pytest.raises(ValueError):
+        resolve_lane_change_request(parser.parse_args([
+            "--lane-change-request-mode", "legacy", "--lane-change-request-duration", "1",
+        ]))

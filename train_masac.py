@@ -177,7 +177,7 @@ def resolve_run_config(args, env, trainer, buffer, episode_seed_index):
             stalled_leader_range_m=stalled.LEADER_RANGE_M, stalled_junction_approach_m=stalled.JUNCTION_APPROACH_M,
             acceleration_bounds_mps2=[control.MIN_ACCEL, control.MAX_ACCEL], max_speed_mps=control.MAX_SPEED,
             lane_change_edges=sorted(control.LANE_CHANGE_EDGES), exit_edges=sorted(control.EXIT_EDGES),
-            exit_lane_change_duration_s=control.EXIT_LANE_CHANGE_DURATION,
+            lane_change_request=env.lane_change_request.settings(),
             sumo=dict(command=world.launch_command(), step_length_s=world.step_length,
                       net_file=str(world.net_file), net_sha256=sha256(world.net_file),
                       route_file=str(world.route_file), route_sha256=sha256(world.route_file)),
@@ -363,6 +363,10 @@ def find_resume_checkpoint(directory, args):
     changed = [key for key in RESUME_CONFIG_KEYS
                if state["config"].get(key)
                != getattr(args, key)]
+    saved_lane_change_request = control.LaneChangeRequest.from_checkpoint(state["config"])
+    lane_change_request = control.resolve_lane_change_request(args, saved_lane_change_request)
+    if lane_change_request != saved_lane_change_request:
+        changed.append("lane_change_request")
     saved_scenario = checkpoint_scenario(state["config"])
     scenario = getattr(args, "scenario", None) or saved_scenario
     saved_route_hash = state["config"].get("environment", {}).get("sumo", {}).get("route_sha256")
@@ -423,6 +427,8 @@ def find_resume_checkpoint(directory, args):
         atomic_json(index_path, index)
     args.reward_protocol = reward_protocol
     args.scenario = scenario
+    args.lane_change_request_mode = lane_change_request.mode
+    args.lane_change_request_duration = lane_change_request.duration_s
     args.route_preparation_settings = route_settings
     args.reward_components = components
     args.safety_reward = safety
@@ -600,6 +606,9 @@ def train_locked(args, device, output_dir):
     else:
         args.route_preparation_settings = preparation_settings(args)
         args.scenario = getattr(args, "scenario", None) or "easy"
+    lane_change_request = control.resolve_lane_change_request(args)
+    args.lane_change_request_mode = lane_change_request.mode
+    args.lane_change_request_duration = lane_change_request.duration_s
     reward_config = MASACRewardConfig(**args.reward_components, **args.safety_reward)
     args.reward_lane_change_weight = reward_config.lane_change_weight
     args.reward_route_preparation = reward_config.route_preparation
@@ -675,6 +684,7 @@ def train_locked(args, device, output_dir):
     # 3. 创建双 Ego 环境
     env = MultiEgoEnv(
         scenario=args.scenario,
+        lane_change_request=lane_change_request,
         speed_mode=96,
         collect_metrics=True,
         usp_enabled=args.usp,
@@ -1163,6 +1173,7 @@ def build_parser():
                         help="Continue from the latest checkpoint in --output-dir (default: enabled)")
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--tensorboard", action=argparse.BooleanOptionalAction, default=True)
+    control.add_lane_change_request_arguments(parser)
     return parser
 
 

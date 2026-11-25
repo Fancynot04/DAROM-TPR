@@ -36,6 +36,10 @@ Actor 输出两个连续值，均限制在 `[-5,5]`。纵向值对应加速度�
 
 ### 评估换道入口门控
 
+训练和评估均支持 `--lane-change-request-mode legacy|uniform`。新训练和没有该配置的旧 checkpoint 使用 `legacy`，E76、E77 的 TraCI 请求有效期为 4 s，其余允许换道的路段为 0 s。`uniform` 默认使用 0.1 s，也可通过 `--lane-change-request-duration` 选择 0、0.1、0.5、1 或 4 s。单独传有效期会启用 `uniform`。有效期影响 TraCI 目标车道请求，Actor 输出 0 时本步不提交新指令，车身横移仍由 SUMO 执行。
+
+配置写入训练日志、`resolved_config.json` 和 checkpoint。续训沿用原协议，显式更改会报配置冲突。评估可覆盖协议，报告环境字段同时记录实际协议和 checkpoint 协议。标准评估轨迹中的 `control` 记录离散请求方向、实际提交的目标车道与有效期。目标为 `null` 表示没有提交指令，有效期为 `0` 表示实际提交了 0 s 指令。评估可加 `--sumo-lanechange-output`，把 SUMO 的 started、车道编号变化和 ended 事件按种子写到报告同级的 `sumo_lanechanges/`，供核对跨路段横移和延迟执行。
+
 在评估命令中加 `--lane-change-gate ego_2` 仅保护 Ego 2，也可选 `ego_1` 或 `both`。默认 `off`，原 checkpoint 可直接用于对照。门控在 TraCI `changeLane` 之前查询目标车道的实时前后车辆。采用恒速近似，计算未来 4 秒内的最小净间隙 `当前净间隙 − 4 s × max(闭合速度, 0)`。任一侧低于 2 米时拦截该请求，纵向动作仍按原有限速规则执行。
 
 评估 JSON 记录启用的 Ego 和阈值，每回合按车记录检查次数、拦截次数及前后侧触发次数。同一次拦截可能同时触发前后两侧。逐步轨迹的 `control.lane_change_gate` 记录预计间隙和对应车辆。该版本检查入口请求，横移期间已在执行的同向换道可继续，训练保持默认关闭。

@@ -356,11 +356,11 @@ def lane_change():
     time = 0.0
     conn = SimpleNamespace(vehicle=vehicle, lane=lane, simulation=SimpleNamespace(getTime=lambda: time))
 
-    def tick(entries):
+    def tick(entries, *, duration=4.0):
         nonlocal time
         for key, (target, _, _, risk, _) in entries.items():
             set_risk(key, risk)
-            control = SimpleNamespace(target_lane=target, lane_duration=4)
+            control = SimpleNamespace(target_lane=target, lane_duration=duration)
             tracker.before_step(conn, key, control)
         time += 0.1
         for key, (_, post_lane, motion, _, _) in entries.items():
@@ -399,6 +399,25 @@ def test_lane_change_risk_increments_and_stable_target(lane_change):
     assert started["event"] == "started"
     assert completed["event"] == "completed"
     assert completed["target_lane"] == 1
+    assert completed["max_risk"] == pytest.approx(0.8)
+    assert completed["cumulative_penalty"] == pytest.approx(sum(rewards))
+    assert not tracker.pending_changes
+
+
+@pytest.mark.parametrize("duration", [0.0, 0.1])
+def test_short_lane_change_request_keeps_tracking_risk_after_expiry(lane_change, duration):
+    tracker, tick = lane_change
+    rewards = [
+        tick({"a": (1, 0, 1, 0.2, None)}, duration=duration)["a"],
+        tick({"a": (None, 1, 1, 0.4, None)})["a"],
+        tick({"a": (None, 1, 1, 0.8, None)})["a"],
+        tick({"a": (None, 1, 0, 0.3, None)})["a"],
+    ]
+    assert rewards == pytest.approx([-0.1, -0.1, -0.2, 0.0])
+    started, completed = tracker.lane_change_events
+    assert started["event"] == "started"
+    assert completed["event"] == "completed"
+    assert completed["time"] > duration
     assert completed["max_risk"] == pytest.approx(0.8)
     assert completed["cumulative_penalty"] == pytest.approx(sum(rewards))
     assert not tracker.pending_changes

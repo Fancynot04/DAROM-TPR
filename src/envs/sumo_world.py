@@ -28,7 +28,8 @@ def checkpoint_scenario(config):
 class SumoWorld:
     """管理一个 SUMO 仿真世界，不负责具体 Ego 的决策。"""
 
-    def __init__(self, scenario="easy", seed=42, gui=False, route_file=None, warning_log=None):
+    def __init__(self, scenario="easy", seed=42, gui=False, route_file=None, warning_log=None,
+                 lanechange_output=None):
         if scenario not in ("easy", "medium", "hard", "easy_speed18"):
             raise ValueError(f"Unknown scenario: {scenario}")
 
@@ -36,6 +37,7 @@ class SumoWorld:
         self.seed = seed
         self.gui = gui
         self.warning_log = warning_log
+        self.lanechange_output = lanechange_output
 
         self.step_length = STEP_LENGTH_S
         self.label = "o3_d3_world"
@@ -78,6 +80,11 @@ class SumoWorld:
             command.append("--start")
         if self.warning_log is not None:
             command.extend(("--error-log", str(self.warning_log), "--aggregate-warnings", "-1"))
+        if self.lanechange_output is not None:
+            command.extend((
+                "--lanechange-output", str(self.lanechange_output),
+                "--lanechange-output.started", "--lanechange-output.ended",
+            ))
         return command
 
     def start(self):
