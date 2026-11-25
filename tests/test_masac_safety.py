@@ -179,6 +179,38 @@ def test_sumo_merge_payment_precedes_timeout_for_new_protocol(tmp_path, old_chec
         env.close()
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_sumo_exit_retention_charges_only_on_outward_lane_transition(tmp_path, enabled):
+    route = tmp_path / "exit-retention.rou.xml"
+    route.write_text("""<routes>
+        <trip id="ego_1" depart="0" from="E77" to="D3" departLane="0" departSpeed="20"/>
+        <trip id="ego_2" depart="30" from="E77" to="D3" departLane="0"/>
+    </routes>""")
+    env = MultiEgoEnv(reward_config=MASACRewardConfig(exit_retention=enabled), route_file=route)
+    try:
+        env.reset()
+        vehicle = env.world.conn.vehicle
+        ego = "ego_1"
+        previous_lane = vehicle.getLaneID(ego)
+        assert previous_lane == "E77_0"
+        departures = 0
+        for step in range(30):
+            _, rewards, _, _, infos = env.step({ego: [0, 5 if step == 1 else 0]})
+            lane = vehicle.getLaneID(ego)
+            departed = previous_lane == "E77_0" and lane == "E77_1"
+            departures += departed
+            values = infos[ego]["reward_components"]
+            assert values["exit_retention"] == (-0.5 if enabled and departed else 0)
+            assert rewards[ego] == pytest.approx(sum(values.values()))
+            if step == 0:
+                assert values["route_preparation"] > 0
+            previous_lane = lane
+        assert departures == 1
+        assert env.reward_summary()["reward_components"][ego]["exit_retention"] == (-0.5 if enabled else 0)
+    finally:
+        env.close()
+
+
 @pytest.mark.parametrize(
     "edge,goal,wrong_lane,right_lane,changes",
     [("E82", "D1", 2, 4, 1), ("E82", "D2", 3, 1, -1), ("E77", "D3", 4, 0, -4)],

@@ -18,7 +18,7 @@ from .route_preparation import (
     DEFAULT_LINEAR_PREPARATION_SETTINGS, PREPARATION_BONUS_MODES, RoutePreparation,
 )
 from src.rewards.events import EMERGENCY_BRAKING_EVENT, STALLED_EVENT, b0_reward
-from src.rewards.masac import MASACRewardProtocol, MASACRewards, TARGET_EXIT_DIM
+from src.rewards.masac import EXIT_RETENTION_PENALTY, MASACRewardProtocol, MASACRewards, TARGET_EXIT_DIM
 
 from .action_history import MultiEgoActionHistory
 from .delay_buffer import MultiEgoDelayBuffer
@@ -578,6 +578,10 @@ class MultiEgoEnv:
 
         # 2. 仅尚未终止的 Ego 提交动作
         acting_ids = active_ids - pre_terminated
+        exit_lane_egos = {
+            ego_id for ego_id in acting_ids
+            if conn.vehicle.getLaneID(ego_id) == "E77_0"
+        } if tracker is not None and tracker.config.exit_retention else set()
         preparation_samples = {}
         preparation_changes = {}
         linear_preparation = self.route_preparation is not None and self.route_preparation.linear
@@ -711,10 +715,10 @@ class MultiEgoEnv:
         emergency_stops = set(sim.getEmergencyStoppingVehiclesIDList())
 
         present = set(conn.vehicle.getIDList()) if self.collect_metrics or tracker is not None else set()
-        preparation_teleports = set()
-        if (continuous_preparation or linear_preparation) and preparation_samples:
-            preparation_teleports.update(sim.getStartingTeleportIDList())
-            preparation_teleports.update(sim.getEndingTeleportIDList())
+        step_teleports = set()
+        if exit_lane_egos or ((continuous_preparation or linear_preparation) and preparation_samples):
+            step_teleports.update(sim.getStartingTeleportIDList())
+            step_teleports.update(sim.getEndingTeleportIDList())
         if tracker is not None:
             for ego_id in acting_ids:
                 change_events_before = len(tracker.lane_change_events)
@@ -727,6 +731,10 @@ class MultiEgoEnv:
                     conn, ego_id, ego_id in present,
                     self.needs_merge[ego_id], terminal_event=terminal_event,
                 )
+                if (ego_id in exit_lane_egos and ego_id in present and ego_id not in step_teleports
+                        and conn.vehicle.getRoadID(ego_id) == "E77"
+                        and conn.vehicle.getLaneIndex(ego_id) > 0):
+                    components[ego_id]["exit_retention"] = EXIT_RETENTION_PENALTY
                 if ego_id in preparation_samples:
                     completed_change = None
                     if len(tracker.lane_change_events) > change_events_before:
@@ -738,7 +746,7 @@ class MultiEgoEnv:
                         reason = terminal_event
                         if ego_id in emergency_stops:
                             reason = reason or EMERGENCY_BRAKING_EVENT
-                        if ego_id in preparation_teleports:
+                        if ego_id in step_teleports:
                             reason = reason or "teleport"
                         if ego_id not in present:
                             reason = reason or "position_unavailable"
@@ -746,7 +754,7 @@ class MultiEgoEnv:
                     elif continuous_preparation:
                         change, target_risk = preparation_changes[ego_id]
                         reason = terminal_event
-                        if ego_id in preparation_teleports:
+                        if ego_id in step_teleports:
                             reason = reason or "teleport"
                         if ego_id not in present:
                             reason = reason or "position_unavailable"

@@ -34,6 +34,7 @@ COMFORT_DELTA_CAP_MPS2 = 1.0
 TEAM_SUCCESS_REWARD = 100.0
 LEGACY_COMFORT_WEIGHT = 0.01
 LEGACY_LANE_CHANGE_WEIGHT = 1.0
+EXIT_RETENTION_PENALTY = -0.5
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class MASACRewardConfig:
     lane_change_weight: float = 0.5
     rear_following: bool = True
     route_preparation: bool = True
+    exit_retention: bool = False
 
     def __post_init__(self):
         for name in ("ttc_threshold", "following_lookahead", "lane_change_weight"):
@@ -160,7 +162,7 @@ class MASACRewards:
         self.protocol = protocol
         self.components = (
             "task", "merge", "following", "rear_following", "lane_change",
-            "efficiency", "comfort", "route_guidance", "route_preparation",
+            "efficiency", "comfort", "route_guidance", "route_preparation", "exit_retention",
         )
         self.reset(())
 

@@ -368,13 +368,18 @@ def find_resume_checkpoint(directory, args):
     route_settings = preparation_settings(args, saved_route_settings, resuming=True)
     if saved_route_settings != route_settings:
         changed.append("route_preparation_settings")
-    saved_components = {"rear_following": False, **state["config"].get("reward_components", {})}
+    saved_components = {
+        "rear_following": False,
+        "exit_retention": False,
+        **state["config"].get("reward_components", {}),
+    }
     saved_components["route_preparation"] = (
         saved_route_settings is not None and saved_components.get("route_preparation", False)
     )
     components = args.reward_components.copy()
-    if getattr(args, "reward_route_preparation", None) is None:
-        components["route_preparation"] = saved_components["route_preparation"]
+    for component in ("route_preparation", "exit_retention"):
+        if getattr(args, "reward_" + component, None) is None:
+            components[component] = saved_components[component]
     if components != saved_components:
         changed.append("reward_components")
     saved_safety = {
@@ -1091,7 +1096,8 @@ def build_parser():
     for field in fields(MASACRewardConfig):
         parser.add_argument(
             "--reward-" + field.name.replace("_", "-"),
-            default=None if field.name in {"lane_change_weight", "route_preparation"} else field.default,
+            default=None if field.name in {"lane_change_weight", "route_preparation", "exit_retention"}
+            else field.default,
             **({"action": argparse.BooleanOptionalAction} if isinstance(field.default, bool)
                else {"type": float}),
         )

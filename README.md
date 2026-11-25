@@ -69,6 +69,8 @@ Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 
 
 `d` 是步首到 E77 末端的路线距离，忽略 Junction 内部车道长度。内部连接期间使用实际连接的下游车道来确定 `n`。`Δs` 按已验证的步首和步末路线位置计算，跨边界时计入实际经过的内部车道长度。停止、倒退或无法确认位移时奖励为零。每一步只结算当前模式的 `route_preparation`。跟驰、后车风险、换道和团队奖励各自按现有模块结算。
 
+训练参数 `--reward-exit-retention` 启用独立的 `exit_retention` 分量。若 Ego 在 SUMO 步首属于 `E77_0`，步末属于 E77 上编号大于 0 的车道，本步额外扣 0.5。保持车道、返回 `E77_0`、驶入连接道或 D3、车辆移除及传送均计 0。该分量和 `linear_progress_v1` 同时结算。新训练默认关闭，评估及续训沿用检查点的奖励配置。
+
 控制 trace 和评估轨迹记录步首距离、合法换道需求、实测前进距离及三个系数。可用 `--no-reward-route-preparation` 关闭该模块。该模式每步前进 1 m 时已达进度上限，因此在相同的一段目标车道上，10 m/s 可能比 20 m/s 累积更多路线奖励。错过出口率、碰撞率和 E77_0 向外实际换道次数用于检查训练后的行为。
 
 旧 checkpoint 的评估与续训按保存的路线准备模式复现。旧模式包括首次推进事件奖及阶梯巡航奖 `first_progress_staircase`、`progress_bonus`、`continuous_bonus` 和 `legacy_penalty`。缺少路线准备配置的旧 checkpoint 关闭该项。可用 `--reward-route-preparation-mode` 显式选择历史模式；历史模式支持 `--route-preparation-stages FILE.json` 配置分区。新模式的三个固定参数随 checkpoint 和评估输出保存。
