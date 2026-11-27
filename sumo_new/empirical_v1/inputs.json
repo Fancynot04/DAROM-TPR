@@ -1,0 +1,2439 @@
+{
+  "source": {
+    "paper": {
+      "filename": "TRB_submit.pdf",
+      "sha256": "90f7f18e09bf0475782ebabb8768f07bb4e0cc187eda8835341e3096d36f63d9"
+    },
+    "archive": {
+      "filename": "darom_dataset.zip",
+      "sha256": "6a7c01cba487e75326112bbac1391b28a66598427557c8a4fe3d36157aeda7e0"
+    },
+    "paper_tables_sha256": "ca97e8b4134c6386d05fb52b0f51fc2201d0b3e4dc5fff06e570ea4efe7e2464",
+    "audit_sha256": "32756d0833a9243e03069b846c40c15cd3b024dd70f7c0c7201061e1e9879096",
+    "raw_subset_sha256": {
+      "20220901": "4e3d1e15800723f90ff1d163e9580019855a92f51ec3072bbccbcdd45545a91d",
+      "20220905": "c7603ab0b2363e8211bcbcb9e69d9ad0acf907380e66e263e36566cc8611231c",
+      "20220914": "06d5c58afc2f6a9a12ad65035eb008df6911604091f59cb36f1e1de4f9e671a3",
+      "20220916": "c5d2a041f600e2a68b598fea5dd6e4349304c11a15c0ec58acd5062d245fb90d",
+      "20220917": "b075e093182f7dd88e83e5eb493e42dc38a92ec2eb39ee23f64b3ed47b62ae4b",
+      "20220919": "3d5148ad77137ea3946085decf987a0cd092579f36791a7d55335b040687f68f"
+    },
+    "raw_members": {
+      "20220901": "New_Data/20220901/20220901.txt",
+      "20220905": "New_Data/20220905/20220905.txt",
+      "20220914": "New_Data/20220914/20220914.txt",
+      "20220916": "New_Data/20220916/20220916.txt",
+      "20220917": "New_Data/20220917/20220917.txt",
+      "20220919": "New_Data/20220919/20220919.txt"
+    },
+    "match_members": {
+      "20220901": {
+        "WA1r": "New_Data/20220901/E313tR1_ES_Ramp_Z3(WA1r)_20220901_0430_2330_All_Matches.csv",
+        "WA7": "New_Data/20220901/R1_NS_Z10(WA7)_20220901_0430_2330_All_Matches.csv",
+        "WA1": "New_Data/20220901/R1_NS_Z4(WA1)_20220901_0430_2330_All_Matches.csv",
+        "WA2": "New_Data/20220901/R1_NS_Z5(WA2)_20220901_0430_2330_All_Matches.csv",
+        "WA3": "New_Data/20220901/R1_NS_Z6(WA3)_20220901_0430_2330_All_Matches.csv",
+        "WA4": "New_Data/20220901/R1_NS_Z7(WA4)_20220901_0430_2330_All_Matches.csv",
+        "WA5": "New_Data/20220901/R1_NS_Z8(WA5)_20220901_0430_2330_All_Matches.csv",
+        "WA6": "New_Data/20220901/R1_NS_Z9(WA6)_20220901_0430_2330_All_Matches.csv"
+      },
+      "20220905": {
+        "WA1r": "New_Data/20220905/E313tR1_ES_Ramp_Z3(WA1r)_20220905_0430_2330_All_Matches.csv",
+        "WA7": "New_Data/20220905/R1_NS_Z10(WA7)_20220905_0430_2330_All_Matches.csv",
+        "WA1": "New_Data/20220905/R1_NS_Z4(WA1)_20220905_0430_2330_All_Matches.csv",
+        "WA2": "New_Data/20220905/R1_NS_Z5(WA2)_20220905_0430_2330_All_Matches.csv",
+        "WA3": "New_Data/20220905/R1_NS_Z6(WA3)_20220905_0430_2330_All_Matches.csv",
+        "WA4": "New_Data/20220905/R1_NS_Z7(WA4)_20220905_0430_2330_All_Matches.csv",
+        "WA5": "New_Data/20220905/R1_NS_Z8(WA5)_20220905_0430_2330_All_Matches.csv",
+        "WA6": "New_Data/20220905/R1_NS_Z9(WA6)_20220905_0430_2330_All_Matches.csv"
+      },
+      "20220914": {
+        "WA1r": "New_Data/20220914/E313tR1_ES_Ramp_Z3(WA1r)_20220914_0430_2330_All_Matches.csv",
+        "WA7": "New_Data/20220914/R1_NS_Z10(WA7)_20220914_0430_2330_All_Matches.csv",
+        "WA1": "New_Data/20220914/R1_NS_Z4(WA1)_20220914_0430_2330_All_Matches.csv",
+        "WA2": "New_Data/20220914/R1_NS_Z5(WA2)_20220914_0430_2330_All_Matches.csv",
+        "WA3": "New_Data/20220914/R1_NS_Z6(WA3)_20220914_0430_2330_All_Matches.csv",
+        "WA4": "New_Data/20220914/R1_NS_Z7(WA4)_20220914_0430_2330_All_Matches.csv",
+        "WA5": "New_Data/20220914/R1_NS_Z8(WA5)_20220914_0430_2330_All_Matches.csv",
+        "WA6": "New_Data/20220914/R1_NS_Z9(WA6)_20220914_0430_2330_All_Matches.csv"
+      },
+      "20220916": {
+        "WA1r": "New_Data/20220916/E313tR1_ES_Ramp_Z3(WA1r)_20220916_0430_2330_All_Matches.csv",
+        "WA7": "New_Data/20220916/R1_NS_Z10(WA7)_20220916_0430_2330_All_Matches.csv",
+        "WA1": "New_Data/20220916/R1_NS_Z4(WA1)_20220916_0430_2330_All_Matches.csv",
+        "WA2": "New_Data/20220916/R1_NS_Z5(WA2)_20220916_0430_2330_All_Matches.csv",
+        "WA3": "New_Data/20220916/R1_NS_Z6(WA3)_20220916_0430_2330_All_Matches.csv",
+        "WA4": "New_Data/20220916/R1_NS_Z7(WA4)_20220916_0430_2330_All_Matches.csv",
+        "WA5": "New_Data/20220916/R1_NS_Z8(WA5)_20220916_0430_2330_All_Matches.csv",
+        "WA6": "New_Data/20220916/R1_NS_Z9(WA6)_20220916_0430_2330_All_Matches.csv"
+      },
+      "20220917": {
+        "WA1r": "New_Data/20220917/E313tR1_ES_Ramp_Z3(WA1r)_20220917_0430_2330_All_Matches.csv",
+        "WA7": "New_Data/20220917/R1_NS_Z10(WA7)_20220917_0430_2330_All_Matches.csv",
+        "WA1": "New_Data/20220917/R1_NS_Z4(WA1)_20220917_0430_2330_All_Matches.csv",
+        "WA2": "New_Data/20220917/R1_NS_Z5(WA2)_20220917_0430_2330_All_Matches.csv",
+        "WA3": "New_Data/20220917/R1_NS_Z6(WA3)_20220917_0430_2330_All_Matches.csv",
+        "WA4": "New_Data/20220917/R1_NS_Z7(WA4)_20220917_0430_2330_All_Matches.csv",
+        "WA5": "New_Data/20220917/R1_NS_Z8(WA5)_20220917_0430_2330_All_Matches.csv",
+        "WA6": "New_Data/20220917/R1_NS_Z9(WA6)_20220917_0430_2330_All_Matches.csv"
+      },
+      "20220919": {
+        "WA1r": "New_Data/20220919/E313tR1_ES_Ramp_Z3(WA1r)_20220919_0430_2330_All_Matches.csv",
+        "WA7": "New_Data/20220919/R1_NS_Z10(WA7)_20220919_0430_2330_All_Matches.csv",
+        "WA1": "New_Data/20220919/R1_NS_Z4(WA1)_20220919_0430_2330_All_Matches.csv",
+        "WA2": "New_Data/20220919/R1_NS_Z5(WA2)_20220919_0430_2330_All_Matches.csv",
+        "WA3": "New_Data/20220919/R1_NS_Z6(WA3)_20220919_0430_2330_All_Matches.csv",
+        "WA4": "New_Data/20220919/R1_NS_Z7(WA4)_20220919_0430_2330_All_Matches.csv",
+        "WA5": "New_Data/20220919/R1_NS_Z8(WA5)_20220919_0430_2330_All_Matches.csv",
+        "WA6": "New_Data/20220919/R1_NS_Z9(WA6)_20220919_0430_2330_All_Matches.csv"
+      }
+    },
+    "detectors": {
+      "origin": {
+        "O1": [
+          467,
+          468,
+          469
+        ],
+        "O2": [
+          471,
+          472
+        ],
+        "O3": [
+          464
+        ]
+      },
+      "destination": {
+        "D1": [
+          3850,
+          3851,
+          3852
+        ],
+        "D2": [
+          2801,
+          2802,
+          2803
+        ],
+        "D3": [
+          458
+        ]
+      },
+      "quarantine": [
+        3849
+      ]
+    }
+  },
+  "paper_tables": {
+    "study_date": "2022-09-27",
+    "periods": {
+      "P1": [
+        "11:30",
+        "12:30"
+      ],
+      "P2": [
+        "12:30",
+        "13:30"
+      ]
+    },
+    "table_1": [
+      [
+        "Motorbike",
+        "0 < L ≤ 1",
+        0.5
+      ],
+      [
+        "Car",
+        "1 < L ≤ 6.9",
+        1
+      ],
+      [
+        "Van",
+        "4 < L ≤ 6.9",
+        1
+      ],
+      [
+        "Rigid lorry",
+        "6.9 < L ≤ 12",
+        1.5
+      ],
+      [
+        "Trailer/Bus",
+        "L > 12",
+        2
+      ]
+    ],
+    "table_2_convention": "Pairs list P1, P2. Counts in vehicles. Both percentages transcribed as printed, not recomputed.",
+    "table_2": [
+      [
+        "O1",
+        "D1",
+        [
+          1679,
+          1637
+        ],
+        [
+          45.98,
+          43.83
+        ],
+        [
+          67.7,
+          65.06
+        ]
+      ],
+      [
+        "O1",
+        "D2",
+        [
+          1782,
+          1831
+        ],
+        [
+          48.27,
+          49.02
+        ],
+        [
+          49.47,
+          45.22
+        ]
+      ],
+      [
+        "O1",
+        "D3",
+        [
+          231,
+          267
+        ],
+        [
+          6.25,
+          7.15
+        ],
+        [
+          35.21,
+          38.47
+        ]
+      ],
+      [
+        "O2",
+        "D1",
+        [
+          630,
+          689
+        ],
+        [
+          29.94,
+          28.38
+        ],
+        [
+          25.4,
+          27.38
+        ]
+      ],
+      [
+        "O2",
+        "D2",
+        [
+          1246,
+          1491
+        ],
+        [
+          59.22,
+          63.55
+        ],
+        [
+          34.59,
+          36.82
+        ]
+      ],
+      [
+        "O2",
+        "D3",
+        [
+          228,
+          196
+        ],
+        [
+          10.84,
+          8.07
+        ],
+        [
+          34.76,
+          28.24
+        ]
+      ],
+      [
+        "O3",
+        "D1",
+        [
+          171,
+          190
+        ],
+        [
+          18.16,
+          16.18
+        ],
+        [
+          6.9,
+          7.56
+        ]
+      ],
+      [
+        "O3",
+        "D2",
+        [
+          574,
+          727
+        ],
+        [
+          60.93,
+          64.14
+        ],
+        [
+          15.94,
+          17.96
+        ]
+      ],
+      [
+        "O3",
+        "D3",
+        [
+          197,
+          231
+        ],
+        [
+          20.91,
+          19.68
+        ],
+        [
+          30.03,
+          33.29
+        ]
+      ]
+    ],
+    "table_2_origin_totals": {
+      "O1": [
+        3692,
+        3735
+      ],
+      "O2": [
+        2104,
+        2376
+      ],
+      "O3": [
+        942,
+        1148
+      ]
+    },
+    "table_2_destination_totals": {
+      "D1": [
+        2480,
+        2516
+      ],
+      "D2": [
+        3602,
+        4049
+      ],
+      "D3": [
+        656,
+        694
+      ]
+    },
+    "table_2_totals": [
+      6738,
+      7259
+    ],
+    "table_3_convention": "Only O1. Within each destination, paired counts are P1, P2. Type1–Type5 in Table 1 order.",
+    "table_3": [
+      [
+        "Motorbike",
+        [
+          5,
+          12
+        ],
+        [
+          11,
+          3
+        ],
+        [
+          0,
+          0
+        ]
+      ],
+      [
+        "Car",
+        [
+          741,
+          701
+        ],
+        [
+          1241,
+          1349
+        ],
+        [
+          202,
+          227
+        ]
+      ],
+      [
+        "Van",
+        [
+          349,
+          343
+        ],
+        [
+          182,
+          180
+        ],
+        [
+          23,
+          30
+        ]
+      ],
+      [
+        "Rigid lorry",
+        [
+          89,
+          87
+        ],
+        [
+          76,
+          69
+        ],
+        [
+          5,
+          5
+        ]
+      ],
+      [
+        "Trailer/Bus",
+        [
+          488,
+          491
+        ],
+        [
+          277,
+          232
+        ],
+        [
+          1,
+          3
+        ]
+      ]
+    ]
+  },
+  "windows": [
+    {
+      "date": "20220901",
+      "period": "P1",
+      "origin": "O1",
+      "raw_rows": 3665,
+      "raw_unique_observations": 3665,
+      "first_segment_unique": 3483,
+      "completed_chain": 2641,
+      "assigned_od": 2445,
+      "chain_missing": 842,
+      "failure_WA2_missing": 73,
+      "failure_WA7_missing": 260,
+      "failure_WA4_missing": 119,
+      "failure_WA5_missing": 118,
+      "first_segment_missing": 182,
+      "failure_WA1_missing": 182,
+      "failure_WA3_missing": 143,
+      "unassigned_3849": 196,
+      "failure_WA6_missing": 129,
+      "first_segment_coverage": 0.9503410641200546,
+      "chain_coverage": 0.720600272851296,
+      "od_assignment_rate": 0.6671214188267395,
+      "od_unassigned_rate": 0.3328785811732605,
+      "raw_by_length_group": {
+        "rigid_lorry": 211,
+        "light_overlap": 1752,
+        "trailer_bus": 660,
+        "car_confirmed": 1017,
+        "motorbike": 25
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 1,
+          "car_confirmed": 249,
+          "rigid_lorry": 51,
+          "trailer_bus": 230,
+          "light_overlap": 408,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 6,
+          "car_confirmed": 352,
+          "rigid_lorry": 84,
+          "trailer_bus": 211,
+          "light_overlap": 646,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 2,
+          "car_confirmed": 59,
+          "rigid_lorry": 9,
+          "trailer_bus": 18,
+          "light_overlap": 119,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 54,
+          "rigid_lorry": 17,
+          "trailer_bus": 44,
+          "light_overlap": 81,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220901",
+      "period": "P1",
+      "origin": "O2",
+      "raw_rows": 2678,
+      "raw_unique_observations": 2678,
+      "first_segment_unique": 2548,
+      "completed_chain": 1980,
+      "assigned_od": 1862,
+      "chain_missing": 568,
+      "failure_WA5_missing": 74,
+      "failure_WA6_missing": 91,
+      "failure_WA2_missing": 120,
+      "unassigned_3849": 118,
+      "failure_WA7_missing": 127,
+      "failure_WA4_missing": 64,
+      "failure_WA3_missing": 92,
+      "first_segment_missing": 130,
+      "failure_WA1r_missing": 130,
+      "first_segment_coverage": 0.9514563106796117,
+      "chain_coverage": 0.7393577296489918,
+      "od_assignment_rate": 0.6952949962658701,
+      "od_unassigned_rate": 0.3047050037341299,
+      "raw_by_length_group": {
+        "trailer_bus": 554,
+        "rigid_lorry": 138,
+        "light_overlap": 1328,
+        "car_confirmed": 649,
+        "motorbike": 9
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 3,
+          "car_confirmed": 108,
+          "rigid_lorry": 29,
+          "trailer_bus": 155,
+          "light_overlap": 202,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 2,
+          "car_confirmed": 286,
+          "rigid_lorry": 54,
+          "trailer_bus": 196,
+          "light_overlap": 574,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 1,
+          "car_confirmed": 71,
+          "rigid_lorry": 15,
+          "trailer_bus": 19,
+          "light_overlap": 147,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 1,
+          "car_confirmed": 20,
+          "rigid_lorry": 7,
+          "trailer_bus": 36,
+          "light_overlap": 54,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220901",
+      "period": "P1",
+      "origin": "O3",
+      "raw_rows": 718,
+      "raw_unique_observations": 718,
+      "first_segment_unique": 654,
+      "completed_chain": 551,
+      "assigned_od": 535,
+      "first_segment_missing": 64,
+      "failure_WA3_missing": 64,
+      "chain_missing": 103,
+      "failure_WA6_missing": 20,
+      "failure_WA4_missing": 28,
+      "failure_WA5_missing": 22,
+      "unassigned_3849": 16,
+      "failure_WA7_missing": 33,
+      "first_segment_coverage": 0.9108635097493036,
+      "chain_coverage": 0.7674094707520891,
+      "od_assignment_rate": 0.745125348189415,
+      "od_unassigned_rate": 0.254874651810585,
+      "raw_by_length_group": {
+        "car_confirmed": 229,
+        "light_overlap": 442,
+        "motorbike": 3,
+        "trailer_bus": 21,
+        "rigid_lorry": 23
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 1,
+          "car_confirmed": 21,
+          "rigid_lorry": 3,
+          "trailer_bus": 9,
+          "light_overlap": 44,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 1,
+          "car_confirmed": 94,
+          "rigid_lorry": 8,
+          "trailer_bus": 4,
+          "light_overlap": 190,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 59,
+          "rigid_lorry": 5,
+          "trailer_bus": 1,
+          "light_overlap": 95,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 1,
+          "rigid_lorry": 1,
+          "trailer_bus": 0,
+          "light_overlap": 14,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220905",
+      "period": "P1",
+      "origin": "O1",
+      "raw_rows": 3771,
+      "raw_unique_observations": 3771,
+      "first_segment_unique": 3575,
+      "chain_missing": 819,
+      "failure_WA6_missing": 167,
+      "completed_chain": 2756,
+      "assigned_od": 2587,
+      "failure_WA4_missing": 95,
+      "unassigned_3849": 169,
+      "failure_WA2_missing": 83,
+      "first_segment_missing": 196,
+      "failure_WA1_missing": 196,
+      "failure_WA5_missing": 116,
+      "failure_WA7_missing": 246,
+      "failure_WA3_missing": 112,
+      "first_segment_coverage": 0.9480243967117475,
+      "chain_coverage": 0.7308406258286927,
+      "od_assignment_rate": 0.6860249270750464,
+      "od_unassigned_rate": 0.31397507292495364,
+      "raw_by_length_group": {
+        "light_overlap": 1501,
+        "trailer_bus": 796,
+        "car_confirmed": 1251,
+        "rigid_lorry": 212,
+        "motorbike": 11
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 2,
+          "car_confirmed": 310,
+          "rigid_lorry": 47,
+          "trailer_bus": 236,
+          "light_overlap": 342,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 8,
+          "car_confirmed": 489,
+          "rigid_lorry": 80,
+          "trailer_bus": 259,
+          "light_overlap": 622,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 74,
+          "rigid_lorry": 13,
+          "trailer_bus": 15,
+          "light_overlap": 90,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 53,
+          "rigid_lorry": 12,
+          "trailer_bus": 40,
+          "light_overlap": 64,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220905",
+      "period": "P1",
+      "origin": "O2",
+      "raw_rows": 2482,
+      "raw_unique_observations": 2482,
+      "first_segment_unique": 2171,
+      "completed_chain": 1652,
+      "assigned_od": 1561,
+      "unassigned_3849": 91,
+      "first_segment_missing": 311,
+      "failure_WA1r_missing": 311,
+      "chain_missing": 519,
+      "failure_WA3_missing": 109,
+      "failure_WA2_missing": 110,
+      "failure_WA6_missing": 81,
+      "failure_WA5_missing": 74,
+      "failure_WA4_missing": 71,
+      "failure_WA7_missing": 74,
+      "first_segment_coverage": 0.8746978243352136,
+      "chain_coverage": 0.6655922643029815,
+      "od_assignment_rate": 0.628928283642224,
+      "od_unassigned_rate": 0.371071716357776,
+      "raw_by_length_group": {
+        "trailer_bus": 539,
+        "light_overlap": 1143,
+        "rigid_lorry": 152,
+        "car_confirmed": 644,
+        "motorbike": 4
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 1,
+          "car_confirmed": 83,
+          "rigid_lorry": 35,
+          "trailer_bus": 115,
+          "light_overlap": 173,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 0,
+          "car_confirmed": 246,
+          "rigid_lorry": 57,
+          "trailer_bus": 179,
+          "light_overlap": 497,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 56,
+          "rigid_lorry": 6,
+          "trailer_bus": 22,
+          "light_overlap": 91,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 22,
+          "rigid_lorry": 9,
+          "trailer_bus": 24,
+          "light_overlap": 36,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220905",
+      "period": "P1",
+      "origin": "O3",
+      "raw_rows": 816,
+      "raw_unique_observations": 816,
+      "first_segment_missing": 85,
+      "failure_WA3_missing": 85,
+      "first_segment_unique": 731,
+      "completed_chain": 608,
+      "assigned_od": 592,
+      "chain_missing": 123,
+      "failure_WA7_missing": 36,
+      "failure_WA6_missing": 22,
+      "failure_WA4_missing": 48,
+      "failure_WA5_missing": 17,
+      "unassigned_3849": 16,
+      "first_segment_coverage": 0.8958333333333334,
+      "chain_coverage": 0.7450980392156863,
+      "od_assignment_rate": 0.7254901960784313,
+      "od_unassigned_rate": 0.27450980392156865,
+      "raw_by_length_group": {
+        "light_overlap": 516,
+        "car_confirmed": 242,
+        "rigid_lorry": 34,
+        "trailer_bus": 24
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 0,
+          "car_confirmed": 22,
+          "rigid_lorry": 2,
+          "trailer_bus": 5,
+          "light_overlap": 46,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 0,
+          "car_confirmed": 106,
+          "rigid_lorry": 14,
+          "trailer_bus": 10,
+          "light_overlap": 234,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 45,
+          "rigid_lorry": 5,
+          "trailer_bus": 3,
+          "light_overlap": 100,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 8,
+          "rigid_lorry": 0,
+          "trailer_bus": 0,
+          "light_overlap": 8,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220914",
+      "period": "P1",
+      "origin": "O1",
+      "raw_rows": 3480,
+      "raw_unique_observations": 3480,
+      "first_segment_missing": 175,
+      "failure_WA1_missing": 175,
+      "first_segment_unique": 3305,
+      "chain_missing": 598,
+      "failure_WA7_missing": 105,
+      "completed_chain": 2707,
+      "assigned_od": 2616,
+      "failure_WA3_missing": 123,
+      "failure_WA6_missing": 82,
+      "failure_WA4_missing": 97,
+      "failure_WA2_missing": 80,
+      "failure_WA5_missing": 111,
+      "unassigned_3849": 91,
+      "first_segment_coverage": 0.9497126436781609,
+      "chain_coverage": 0.7778735632183909,
+      "od_assignment_rate": 0.7517241379310344,
+      "od_unassigned_rate": 0.24827586206896557,
+      "raw_by_length_group": {
+        "trailer_bus": 681,
+        "light_overlap": 1469,
+        "rigid_lorry": 158,
+        "car_confirmed": 1170,
+        "motorbike": 2
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 0,
+          "car_confirmed": 383,
+          "rigid_lorry": 65,
+          "trailer_bus": 347,
+          "light_overlap": 489,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 2,
+          "car_confirmed": 405,
+          "rigid_lorry": 52,
+          "trailer_bus": 170,
+          "light_overlap": 534,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 66,
+          "rigid_lorry": 5,
+          "trailer_bus": 7,
+          "light_overlap": 91,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 43,
+          "rigid_lorry": 4,
+          "trailer_bus": 7,
+          "light_overlap": 37,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220914",
+      "period": "P1",
+      "origin": "O2",
+      "raw_rows": 2018,
+      "raw_unique_observations": 2018,
+      "first_segment_unique": 1721,
+      "completed_chain": 1374,
+      "assigned_od": 1334,
+      "chain_missing": 347,
+      "failure_WA2_missing": 79,
+      "failure_WA5_missing": 51,
+      "first_segment_missing": 297,
+      "failure_WA1r_missing": 297,
+      "failure_WA3_missing": 83,
+      "failure_WA6_missing": 40,
+      "unassigned_3849": 40,
+      "failure_WA4_missing": 57,
+      "failure_WA7_missing": 37,
+      "first_segment_coverage": 0.852824578790882,
+      "chain_coverage": 0.6808721506442021,
+      "od_assignment_rate": 0.6610505450941526,
+      "od_unassigned_rate": 0.3389494549058474,
+      "raw_by_length_group": {
+        "trailer_bus": 525,
+        "car_confirmed": 520,
+        "light_overlap": 869,
+        "rigid_lorry": 104
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 0,
+          "car_confirmed": 63,
+          "rigid_lorry": 25,
+          "trailer_bus": 192,
+          "light_overlap": 146,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 0,
+          "car_confirmed": 212,
+          "rigid_lorry": 34,
+          "trailer_bus": 151,
+          "light_overlap": 346,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 45,
+          "rigid_lorry": 15,
+          "trailer_bus": 17,
+          "light_overlap": 88,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 6,
+          "rigid_lorry": 1,
+          "trailer_bus": 12,
+          "light_overlap": 21,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220914",
+      "period": "P1",
+      "origin": "O3",
+      "raw_rows": 845,
+      "raw_unique_observations": 845,
+      "first_segment_unique": 772,
+      "chain_missing": 100,
+      "failure_WA5_missing": 22,
+      "completed_chain": 672,
+      "assigned_od": 658,
+      "first_segment_missing": 73,
+      "failure_WA3_missing": 73,
+      "failure_WA4_missing": 33,
+      "failure_WA7_missing": 18,
+      "unassigned_3849": 14,
+      "failure_WA6_missing": 27,
+      "first_segment_coverage": 0.9136094674556213,
+      "chain_coverage": 0.7952662721893491,
+      "od_assignment_rate": 0.778698224852071,
+      "od_unassigned_rate": 0.22130177514792904,
+      "raw_by_length_group": {
+        "car_confirmed": 280,
+        "light_overlap": 518,
+        "rigid_lorry": 29,
+        "trailer_bus": 18
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 0,
+          "car_confirmed": 20,
+          "rigid_lorry": 6,
+          "trailer_bus": 5,
+          "light_overlap": 40,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 0,
+          "car_confirmed": 140,
+          "rigid_lorry": 16,
+          "trailer_bus": 6,
+          "light_overlap": 250,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 52,
+          "rigid_lorry": 2,
+          "trailer_bus": 0,
+          "light_overlap": 121,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 6,
+          "rigid_lorry": 1,
+          "trailer_bus": 1,
+          "light_overlap": 6,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220916",
+      "period": "P1",
+      "origin": "O1",
+      "raw_rows": 2952,
+      "raw_unique_observations": 2952,
+      "first_segment_unique": 2744,
+      "completed_chain": 1767,
+      "assigned_od": 1723,
+      "first_segment_missing": 208,
+      "failure_WA1_missing": 208,
+      "chain_missing": 977,
+      "failure_WA2_missing": 156,
+      "failure_WA3_missing": 224,
+      "failure_WA6_missing": 129,
+      "failure_WA7_missing": 172,
+      "failure_WA5_missing": 138,
+      "unassigned_3849": 44,
+      "failure_WA4_missing": 158,
+      "first_segment_coverage": 0.9295392953929539,
+      "chain_coverage": 0.5985772357723578,
+      "od_assignment_rate": 0.5836720867208672,
+      "od_unassigned_rate": 0.41632791327913277,
+      "raw_by_length_group": {
+        "light_overlap": 1357,
+        "trailer_bus": 472,
+        "car_confirmed": 972,
+        "rigid_lorry": 141,
+        "motorbike": 10
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 1,
+          "car_confirmed": 186,
+          "rigid_lorry": 20,
+          "trailer_bus": 101,
+          "light_overlap": 246,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 2,
+          "car_confirmed": 294,
+          "rigid_lorry": 52,
+          "trailer_bus": 135,
+          "light_overlap": 511,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 3,
+          "car_confirmed": 65,
+          "rigid_lorry": 9,
+          "trailer_bus": 13,
+          "light_overlap": 85,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 13,
+          "rigid_lorry": 2,
+          "trailer_bus": 6,
+          "light_overlap": 23,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220916",
+      "period": "P1",
+      "origin": "O2",
+      "raw_rows": 1947,
+      "raw_unique_observations": 1947,
+      "first_segment_unique": 1762,
+      "chain_missing": 671,
+      "failure_WA5_missing": 94,
+      "failure_WA2_missing": 167,
+      "completed_chain": 1091,
+      "assigned_od": 1066,
+      "failure_WA4_missing": 113,
+      "failure_WA3_missing": 149,
+      "failure_WA7_missing": 77,
+      "first_segment_missing": 185,
+      "failure_WA1r_missing": 185,
+      "unassigned_3849": 25,
+      "failure_WA6_missing": 71,
+      "first_segment_coverage": 0.9049820236260914,
+      "chain_coverage": 0.5603492552645095,
+      "od_assignment_rate": 0.5475089881869543,
+      "od_unassigned_rate": 0.45249101181304574,
+      "raw_by_length_group": {
+        "trailer_bus": 381,
+        "light_overlap": 958,
+        "car_confirmed": 515,
+        "rigid_lorry": 93
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 0,
+          "car_confirmed": 40,
+          "rigid_lorry": 8,
+          "trailer_bus": 62,
+          "light_overlap": 61,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 0,
+          "car_confirmed": 206,
+          "rigid_lorry": 36,
+          "trailer_bus": 115,
+          "light_overlap": 393,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 48,
+          "rigid_lorry": 6,
+          "trailer_bus": 13,
+          "light_overlap": 78,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 5,
+          "rigid_lorry": 1,
+          "trailer_bus": 9,
+          "light_overlap": 10,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220916",
+      "period": "P1",
+      "origin": "O3",
+      "raw_rows": 718,
+      "raw_unique_observations": 718,
+      "first_segment_unique": 662,
+      "completed_chain": 484,
+      "assigned_od": 477,
+      "first_segment_missing": 56,
+      "failure_WA3_missing": 56,
+      "chain_missing": 178,
+      "failure_WA5_missing": 34,
+      "failure_WA6_missing": 25,
+      "failure_WA4_missing": 93,
+      "failure_WA7_missing": 26,
+      "unassigned_3849": 7,
+      "first_segment_coverage": 0.9220055710306406,
+      "chain_coverage": 0.6740947075208914,
+      "od_assignment_rate": 0.6643454038997214,
+      "od_unassigned_rate": 0.3356545961002786,
+      "raw_by_length_group": {
+        "car_confirmed": 240,
+        "light_overlap": 447,
+        "trailer_bus": 11,
+        "rigid_lorry": 18,
+        "motorbike": 2
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 0,
+          "car_confirmed": 12,
+          "rigid_lorry": 0,
+          "trailer_bus": 1,
+          "light_overlap": 19,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 0,
+          "car_confirmed": 101,
+          "rigid_lorry": 7,
+          "trailer_bus": 4,
+          "light_overlap": 194,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 38,
+          "rigid_lorry": 3,
+          "trailer_bus": 0,
+          "light_overlap": 98,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 3,
+          "rigid_lorry": 0,
+          "trailer_bus": 0,
+          "light_overlap": 4,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220917",
+      "period": "P1",
+      "origin": "O1",
+      "raw_rows": 4131,
+      "raw_unique_observations": 4131,
+      "first_segment_unique": 3780,
+      "completed_chain": 3129,
+      "assigned_od": 3037,
+      "chain_missing": 651,
+      "failure_WA5_missing": 140,
+      "first_segment_missing": 351,
+      "failure_WA1_missing": 351,
+      "failure_WA4_missing": 104,
+      "failure_WA3_missing": 150,
+      "failure_WA2_missing": 87,
+      "failure_WA6_missing": 85,
+      "failure_WA7_missing": 85,
+      "unassigned_3849": 92,
+      "first_segment_coverage": 0.9150326797385621,
+      "chain_coverage": 0.7574437182280319,
+      "od_assignment_rate": 0.7351730815783103,
+      "od_unassigned_rate": 0.2648269184216897,
+      "raw_by_length_group": {
+        "trailer_bus": 213,
+        "light_overlap": 2363,
+        "rigid_lorry": 110,
+        "car_confirmed": 1435,
+        "motorbike": 10
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 4,
+          "car_confirmed": 536,
+          "rigid_lorry": 42,
+          "trailer_bus": 110,
+          "light_overlap": 934,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 0,
+          "car_confirmed": 452,
+          "rigid_lorry": 39,
+          "trailer_bus": 46,
+          "light_overlap": 701,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 59,
+          "rigid_lorry": 6,
+          "trailer_bus": 3,
+          "light_overlap": 105,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 29,
+          "rigid_lorry": 2,
+          "trailer_bus": 1,
+          "light_overlap": 60,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220917",
+      "period": "P1",
+      "origin": "O2",
+      "raw_rows": 2873,
+      "raw_unique_observations": 2873,
+      "first_segment_unique": 2816,
+      "chain_missing": 517,
+      "failure_WA2_missing": 135,
+      "failure_WA3_missing": 105,
+      "completed_chain": 2299,
+      "assigned_od": 2245,
+      "first_segment_missing": 57,
+      "failure_WA1r_missing": 57,
+      "failure_WA5_missing": 87,
+      "failure_WA6_missing": 61,
+      "failure_WA4_missing": 86,
+      "unassigned_3849": 54,
+      "failure_WA7_missing": 43,
+      "first_segment_coverage": 0.9801601113818308,
+      "chain_coverage": 0.8002088409328229,
+      "od_assignment_rate": 0.7814131569787678,
+      "od_unassigned_rate": 0.2185868430212322,
+      "raw_by_length_group": {
+        "trailer_bus": 150,
+        "car_confirmed": 952,
+        "light_overlap": 1680,
+        "rigid_lorry": 86,
+        "motorbike": 5
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 1,
+          "car_confirmed": 190,
+          "rigid_lorry": 25,
+          "trailer_bus": 80,
+          "light_overlap": 368,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 1,
+          "car_confirmed": 435,
+          "rigid_lorry": 35,
+          "trailer_bus": 27,
+          "light_overlap": 767,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 115,
+          "rigid_lorry": 10,
+          "trailer_bus": 8,
+          "light_overlap": 183,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 18,
+          "rigid_lorry": 1,
+          "trailer_bus": 1,
+          "light_overlap": 34,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220917",
+      "period": "P1",
+      "origin": "O3",
+      "raw_rows": 929,
+      "raw_unique_observations": 929,
+      "first_segment_unique": 884,
+      "completed_chain": 781,
+      "assigned_od": 766,
+      "first_segment_missing": 45,
+      "failure_WA3_missing": 45,
+      "chain_missing": 103,
+      "failure_WA5_missing": 30,
+      "failure_WA4_missing": 46,
+      "failure_WA7_missing": 12,
+      "failure_WA6_missing": 15,
+      "unassigned_3849": 15,
+      "first_segment_coverage": 0.9515608180839612,
+      "chain_coverage": 0.8406889128094726,
+      "od_assignment_rate": 0.8245425188374597,
+      "od_unassigned_rate": 0.17545748116254034,
+      "raw_by_length_group": {
+        "car_confirmed": 328,
+        "light_overlap": 573,
+        "rigid_lorry": 22,
+        "trailer_bus": 3,
+        "motorbike": 3
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 0,
+          "car_confirmed": 48,
+          "rigid_lorry": 6,
+          "trailer_bus": 2,
+          "light_overlap": 78,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 1,
+          "car_confirmed": 161,
+          "rigid_lorry": 5,
+          "trailer_bus": 1,
+          "light_overlap": 281,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 2,
+          "car_confirmed": 54,
+          "rigid_lorry": 5,
+          "trailer_bus": 0,
+          "light_overlap": 122,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 6,
+          "rigid_lorry": 0,
+          "trailer_bus": 0,
+          "light_overlap": 9,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220919",
+      "period": "P1",
+      "origin": "O1",
+      "raw_rows": 4263,
+      "raw_unique_observations": 4263,
+      "first_segment_unique": 3995,
+      "completed_chain": 3333,
+      "assigned_od": 3237,
+      "chain_missing": 662,
+      "failure_WA5_missing": 137,
+      "first_segment_missing": 268,
+      "failure_WA1_missing": 268,
+      "unassigned_3849": 96,
+      "failure_WA7_missing": 114,
+      "failure_WA2_missing": 83,
+      "failure_WA6_missing": 91,
+      "failure_WA3_missing": 138,
+      "failure_WA4_missing": 99,
+      "first_segment_coverage": 0.9371334740792869,
+      "chain_coverage": 0.7818437719915552,
+      "od_assignment_rate": 0.7593244194229416,
+      "od_unassigned_rate": 0.2406755805770584,
+      "raw_by_length_group": {
+        "car_confirmed": 1233,
+        "trailer_bus": 827,
+        "light_overlap": 1980,
+        "rigid_lorry": 203,
+        "motorbike": 20
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 3,
+          "car_confirmed": 443,
+          "rigid_lorry": 71,
+          "trailer_bus": 401,
+          "light_overlap": 654,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 6,
+          "car_confirmed": 393,
+          "rigid_lorry": 91,
+          "trailer_bus": 261,
+          "light_overlap": 724,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 65,
+          "rigid_lorry": 11,
+          "trailer_bus": 11,
+          "light_overlap": 103,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 28,
+          "rigid_lorry": 7,
+          "trailer_bus": 9,
+          "light_overlap": 52,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220919",
+      "period": "P1",
+      "origin": "O2",
+      "raw_rows": 2767,
+      "raw_unique_observations": 2767,
+      "first_segment_unique": 2741,
+      "completed_chain": 2213,
+      "assigned_od": 2149,
+      "chain_missing": 528,
+      "failure_WA3_missing": 114,
+      "failure_WA4_missing": 78,
+      "failure_WA7_missing": 71,
+      "failure_WA5_missing": 80,
+      "failure_WA2_missing": 117,
+      "failure_WA6_missing": 68,
+      "unassigned_3849": 64,
+      "first_segment_missing": 26,
+      "failure_WA1r_missing": 26,
+      "first_segment_coverage": 0.9906035417419587,
+      "chain_coverage": 0.7997831586555837,
+      "od_assignment_rate": 0.7766534152511746,
+      "od_unassigned_rate": 0.2233465847488254,
+      "raw_by_length_group": {
+        "trailer_bus": 549,
+        "light_overlap": 1433,
+        "rigid_lorry": 132,
+        "car_confirmed": 649,
+        "motorbike": 4
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 1,
+          "car_confirmed": 120,
+          "rigid_lorry": 37,
+          "trailer_bus": 214,
+          "light_overlap": 289,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 1,
+          "car_confirmed": 302,
+          "rigid_lorry": 60,
+          "trailer_bus": 195,
+          "light_overlap": 668,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 67,
+          "rigid_lorry": 7,
+          "trailer_bus": 16,
+          "light_overlap": 172,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 20,
+          "rigid_lorry": 2,
+          "trailer_bus": 10,
+          "light_overlap": 32,
+          "invalid": 0
+        }
+      }
+    },
+    {
+      "date": "20220919",
+      "period": "P1",
+      "origin": "O3",
+      "raw_rows": 790,
+      "raw_unique_observations": 790,
+      "first_segment_unique": 751,
+      "completed_chain": 677,
+      "assigned_od": 666,
+      "chain_missing": 74,
+      "failure_WA5_missing": 20,
+      "first_segment_missing": 39,
+      "failure_WA3_missing": 39,
+      "failure_WA6_missing": 23,
+      "unassigned_3849": 11,
+      "failure_WA4_missing": 21,
+      "failure_WA7_missing": 10,
+      "first_segment_coverage": 0.950632911392405,
+      "chain_coverage": 0.8569620253164557,
+      "od_assignment_rate": 0.8430379746835444,
+      "od_unassigned_rate": 0.15696202531645564,
+      "raw_by_length_group": {
+        "light_overlap": 481,
+        "rigid_lorry": 30,
+        "car_confirmed": 257,
+        "trailer_bus": 20,
+        "motorbike": 2
+      },
+      "matched_by_destination": {
+        "D1": {
+          "motorbike": 0,
+          "car_confirmed": 32,
+          "rigid_lorry": 4,
+          "trailer_bus": 7,
+          "light_overlap": 50,
+          "invalid": 0
+        },
+        "D2": {
+          "motorbike": 1,
+          "car_confirmed": 130,
+          "rigid_lorry": 16,
+          "trailer_bus": 5,
+          "light_overlap": 257,
+          "invalid": 0
+        },
+        "D3": {
+          "motorbike": 0,
+          "car_confirmed": 56,
+          "rigid_lorry": 4,
+          "trailer_bus": 1,
+          "light_overlap": 103,
+          "invalid": 0
+        },
+        "出口待判定": {
+          "motorbike": 0,
+          "car_confirmed": 2,
+          "rigid_lorry": 2,
+          "trailer_bus": 1,
+          "light_overlap": 6,
+          "invalid": 0
+        }
+      }
+    }
+  ],
+  "physical_lengths_dm": {
+    "car_confirmed": [
+      [
+        25,
+        21
+      ],
+      [
+        26,
+        15
+      ],
+      [
+        27,
+        32
+      ],
+      [
+        28,
+        26
+      ],
+      [
+        29,
+        82
+      ],
+      [
+        30,
+        107
+      ],
+      [
+        31,
+        169
+      ],
+      [
+        32,
+        279
+      ],
+      [
+        33,
+        340
+      ],
+      [
+        34,
+        533
+      ],
+      [
+        35,
+        778
+      ],
+      [
+        36,
+        1067
+      ],
+      [
+        37,
+        895
+      ],
+      [
+        38,
+        1510
+      ],
+      [
+        39,
+        1772
+      ],
+      [
+        40,
+        2103
+      ]
+    ],
+    "light_overlap": [
+      [
+        41,
+        2200
+      ],
+      [
+        42,
+        2201
+      ],
+      [
+        43,
+        1851
+      ],
+      [
+        44,
+        1800
+      ],
+      [
+        45,
+        1511
+      ],
+      [
+        46,
+        1202
+      ],
+      [
+        47,
+        665
+      ],
+      [
+        48,
+        787
+      ],
+      [
+        49,
+        585
+      ],
+      [
+        50,
+        386
+      ],
+      [
+        51,
+        273
+      ],
+      [
+        52,
+        272
+      ],
+      [
+        53,
+        217
+      ],
+      [
+        54,
+        235
+      ],
+      [
+        55,
+        196
+      ],
+      [
+        56,
+        119
+      ],
+      [
+        57,
+        157
+      ],
+      [
+        58,
+        144
+      ],
+      [
+        59,
+        184
+      ],
+      [
+        60,
+        131
+      ],
+      [
+        61,
+        140
+      ],
+      [
+        62,
+        166
+      ],
+      [
+        63,
+        99
+      ],
+      [
+        64,
+        130
+      ],
+      [
+        65,
+        134
+      ],
+      [
+        66,
+        87
+      ],
+      [
+        67,
+        144
+      ],
+      [
+        68,
+        79
+      ],
+      [
+        69,
+        99
+      ]
+    ],
+    "rigid_lorry": [
+      [
+        70,
+        79
+      ],
+      [
+        71,
+        84
+      ],
+      [
+        72,
+        69
+      ],
+      [
+        73,
+        52
+      ],
+      [
+        74,
+        43
+      ],
+      [
+        75,
+        41
+      ],
+      [
+        76,
+        15
+      ],
+      [
+        77,
+        26
+      ],
+      [
+        78,
+        21
+      ],
+      [
+        79,
+        21
+      ],
+      [
+        80,
+        19
+      ],
+      [
+        81,
+        27
+      ],
+      [
+        82,
+        29
+      ],
+      [
+        83,
+        25
+      ],
+      [
+        84,
+        41
+      ],
+      [
+        85,
+        22
+      ],
+      [
+        86,
+        38
+      ],
+      [
+        87,
+        38
+      ],
+      [
+        88,
+        33
+      ],
+      [
+        89,
+        22
+      ],
+      [
+        90,
+        28
+      ],
+      [
+        91,
+        30
+      ],
+      [
+        92,
+        36
+      ],
+      [
+        93,
+        34
+      ],
+      [
+        94,
+        29
+      ],
+      [
+        95,
+        31
+      ],
+      [
+        96,
+        41
+      ],
+      [
+        97,
+        31
+      ],
+      [
+        98,
+        35
+      ],
+      [
+        99,
+        34
+      ],
+      [
+        100,
+        34
+      ],
+      [
+        101,
+        29
+      ],
+      [
+        102,
+        30
+      ],
+      [
+        103,
+        37
+      ],
+      [
+        104,
+        32
+      ],
+      [
+        105,
+        14
+      ],
+      [
+        106,
+        37
+      ],
+      [
+        107,
+        32
+      ],
+      [
+        108,
+        22
+      ],
+      [
+        109,
+        44
+      ],
+      [
+        110,
+        14
+      ],
+      [
+        111,
+        33
+      ],
+      [
+        112,
+        33
+      ],
+      [
+        113,
+        34
+      ],
+      [
+        114,
+        20
+      ],
+      [
+        115,
+        26
+      ],
+      [
+        116,
+        29
+      ],
+      [
+        117,
+        29
+      ],
+      [
+        118,
+        25
+      ],
+      [
+        119,
+        29
+      ],
+      [
+        120,
+        21
+      ]
+    ],
+    "trailer_bus": [
+      [
+        121,
+        24
+      ],
+      [
+        122,
+        37
+      ],
+      [
+        123,
+        32
+      ],
+      [
+        124,
+        25
+      ],
+      [
+        125,
+        34
+      ],
+      [
+        126,
+        29
+      ],
+      [
+        127,
+        32
+      ],
+      [
+        128,
+        32
+      ],
+      [
+        129,
+        32
+      ],
+      [
+        130,
+        27
+      ],
+      [
+        131,
+        25
+      ],
+      [
+        132,
+        40
+      ],
+      [
+        133,
+        21
+      ],
+      [
+        134,
+        37
+      ],
+      [
+        135,
+        31
+      ],
+      [
+        136,
+        35
+      ],
+      [
+        137,
+        37
+      ],
+      [
+        138,
+        40
+      ],
+      [
+        139,
+        48
+      ],
+      [
+        140,
+        59
+      ],
+      [
+        141,
+        35
+      ],
+      [
+        142,
+        44
+      ],
+      [
+        143,
+        35
+      ],
+      [
+        144,
+        48
+      ],
+      [
+        145,
+        51
+      ],
+      [
+        146,
+        29
+      ],
+      [
+        147,
+        54
+      ],
+      [
+        148,
+        52
+      ],
+      [
+        149,
+        74
+      ],
+      [
+        150,
+        57
+      ],
+      [
+        151,
+        47
+      ],
+      [
+        152,
+        55
+      ],
+      [
+        153,
+        42
+      ],
+      [
+        154,
+        60
+      ],
+      [
+        155,
+        55
+      ],
+      [
+        156,
+        70
+      ],
+      [
+        157,
+        94
+      ],
+      [
+        158,
+        82
+      ],
+      [
+        159,
+        84
+      ],
+      [
+        160,
+        117
+      ],
+      [
+        161,
+        88
+      ],
+      [
+        162,
+        46
+      ],
+      [
+        163,
+        143
+      ],
+      [
+        164,
+        184
+      ],
+      [
+        165,
+        216
+      ],
+      [
+        166,
+        238
+      ],
+      [
+        167,
+        280
+      ],
+      [
+        168,
+        276
+      ],
+      [
+        169,
+        258
+      ],
+      [
+        170,
+        228
+      ],
+      [
+        171,
+        209
+      ],
+      [
+        172,
+        48
+      ],
+      [
+        173,
+        182
+      ],
+      [
+        174,
+        157
+      ],
+      [
+        175,
+        186
+      ],
+      [
+        176,
+        139
+      ],
+      [
+        177,
+        143
+      ],
+      [
+        178,
+        132
+      ],
+      [
+        179,
+        99
+      ],
+      [
+        180,
+        69
+      ],
+      [
+        181,
+        30
+      ],
+      [
+        182,
+        56
+      ],
+      [
+        183,
+        30
+      ],
+      [
+        184,
+        39
+      ],
+      [
+        185,
+        25
+      ],
+      [
+        186,
+        29
+      ],
+      [
+        187,
+        32
+      ],
+      [
+        188,
+        10
+      ],
+      [
+        189,
+        21
+      ],
+      [
+        190,
+        18
+      ],
+      [
+        191,
+        30
+      ],
+      [
+        192,
+        31
+      ],
+      [
+        193,
+        18
+      ],
+      [
+        194,
+        21
+      ],
+      [
+        195,
+        9
+      ],
+      [
+        196,
+        20
+      ],
+      [
+        197,
+        13
+      ],
+      [
+        198,
+        18
+      ],
+      [
+        199,
+        15
+      ],
+      [
+        200,
+        25
+      ],
+      [
+        201,
+        9
+      ],
+      [
+        202,
+        17
+      ],
+      [
+        203,
+        12
+      ],
+      [
+        204,
+        17
+      ],
+      [
+        205,
+        16
+      ],
+      [
+        206,
+        18
+      ],
+      [
+        207,
+        15
+      ],
+      [
+        208,
+        12
+      ],
+      [
+        209,
+        17
+      ],
+      [
+        210,
+        8
+      ],
+      [
+        211,
+        7
+      ],
+      [
+        212,
+        5
+      ],
+      [
+        213,
+        5
+      ],
+      [
+        214,
+        6
+      ],
+      [
+        215,
+        3
+      ],
+      [
+        216,
+        1
+      ],
+      [
+        217,
+        6
+      ],
+      [
+        218,
+        1
+      ],
+      [
+        219,
+        1
+      ],
+      [
+        220,
+        2
+      ]
+    ]
+  },
+  "p1_boundary_codes_by_day": {
+    "20220901": {
+      "entry_observations": 7061,
+      "speed_254": 39,
+      "length_255": 40,
+      "joint_speed_254_length_255": 39,
+      "excluded_from_physical_trailer_bus": 42,
+      "excluded_from_physical_car_confirmed": 38,
+      "headway_3001": 25,
+      "headway_3001_with_preceding_obs": 24,
+      "headway_3001_preceding_gap_ge_30s": 24
+    },
+    "20220905": {
+      "entry_observations": 7069,
+      "speed_254": 60,
+      "length_255": 62,
+      "joint_speed_254_length_255": 60,
+      "excluded_from_physical_trailer_bus": 67,
+      "excluded_from_physical_car_confirmed": 17,
+      "headway_3001": 17,
+      "headway_3001_with_preceding_obs": 17,
+      "headway_3001_preceding_gap_ge_30s": 17
+    },
+    "20220914": {
+      "entry_observations": 6343,
+      "speed_254": 24,
+      "length_255": 27,
+      "joint_speed_254_length_255": 24,
+      "excluded_from_physical_car_confirmed": 16,
+      "excluded_from_physical_trailer_bus": 34,
+      "headway_3001": 14,
+      "headway_3001_with_preceding_obs": 14,
+      "headway_3001_preceding_gap_ge_30s": 14
+    },
+    "20220916": {
+      "entry_observations": 5617,
+      "speed_254": 25,
+      "length_255": 43,
+      "joint_speed_254_length_255": 25,
+      "excluded_from_physical_car_confirmed": 25,
+      "excluded_from_physical_trailer_bus": 44,
+      "headway_3001": 50,
+      "headway_3001_with_preceding_obs": 50,
+      "headway_3001_preceding_gap_ge_30s": 50
+    },
+    "20220917": {
+      "entry_observations": 7933,
+      "speed_254": 30,
+      "length_255": 31,
+      "joint_speed_254_length_255": 30,
+      "headway_3001": 24,
+      "headway_3001_with_preceding_obs": 24,
+      "headway_3001_preceding_gap_ge_30s": 23
+    },
+    "20220919": {
+      "entry_observations": 7820,
+      "speed_254": 34,
+      "length_255": 35,
+      "joint_speed_254_length_255": 34,
+      "excluded_from_physical_trailer_bus": 40,
+      "excluded_from_physical_car_confirmed": 43,
+      "headway_3001": 23,
+      "headway_3001_with_preceding_obs": 23,
+      "headway_3001_preceding_gap_ge_30s": 23
+    }
+  }
+}

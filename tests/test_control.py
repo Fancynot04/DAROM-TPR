@@ -67,7 +67,7 @@ def test_controller():
         "ego", 0
     )
     conn.vehicle.setSpeedMode.assert_called_once_with(
-        "ego", 96
+        "ego", 32
     )
     conn.vehicle.changeLane.assert_called_once_with(
         "ego", 1, 4.0

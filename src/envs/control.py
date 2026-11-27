@@ -11,6 +11,7 @@ from .lane_change import ExitLaneChangeTracker
 MAX_ACCEL = 5.0
 MIN_ACCEL = -5.0
 MAX_SPEED = 120.0 / 3.6
+DEFAULT_SPEED_MODE = 32
 
 LANE_CHANGE_EDGES = frozenset(
     ("E75", "E76", "E77", "E78", "E82")
@@ -124,7 +125,7 @@ def limit_acceleration(command, speed, dt):
 class EgoController:
     """控制一辆 Ego，不负责推进 SUMO 时钟。"""
 
-    def __init__(self, conn, ego_id: str, speed_mode=96, lane_change_gate=None, *,
+    def __init__(self, conn, ego_id: str, speed_mode=DEFAULT_SPEED_MODE, lane_change_gate=None, *,
                  lane_change_request=LaneChangeRequest()):
         self.lane_change_request = lane_change_request
         self.conn = conn

@@ -460,7 +460,7 @@ def test_short_training_and_checkpoint_loading(work, monkeypatch, capsys, actor_
                 "mode": "linear_progress_v1", "reward_scale": 0.02,
                 "distance_scale_m": 1000.0, "reference_step_m": 1.0,
             }
-        assert report["environment"]["requested_speed_mode"] == 96
+        assert report["environment"]["requested_speed_mode"] == 32
         for key in AGENT_IDS:
             modes = report["environment"]["actual_speed_modes"][key]
             assert modes and all(isinstance(mode, int) for mode in modes)

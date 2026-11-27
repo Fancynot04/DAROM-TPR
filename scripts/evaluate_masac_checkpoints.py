@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.experiment_tracking import sha256, atomic_json, git_metadata, evaluation_fingerprint, runtime_versions
 from src.evaluation_results import validate_results, EVALUATION_PROTOCOL_VERSION
 from src.evaluation_metrics import REFERENCE_COMMIT
-from src.envs.control import LaneChangeRequest
+from src.envs.control import DEFAULT_SPEED_MODE, LaneChangeRequest
 from src.envs.stalled import stalled_block_grace_for_version
 from src.envs.sumo_world import DUAL_EGO_ROUTES, SUMO_DIR, checkpoint_scenario
 
@@ -61,7 +61,7 @@ def expected_environment(max_steps, stalled_terminate=False, masac_env_version=N
         scenario=scenario,
         lane_change_request=lane_change_request.settings(),
         agent_ids=list(AGENT_IDS),
-        requested_speed_mode=96,
+        requested_speed_mode=DEFAULT_SPEED_MODE,
         step_length_s=0.1,
         decision_interval_steps=decision_interval_steps,
         decision_clock="shared_with_activation_boundary" if decision_interval_steps > 1 else "per_ego",

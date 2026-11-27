@@ -1,0 +1,38 @@
+{
+  "name": "Antwerp Empirical Environment V1",
+  "paper_period": "P1",
+  "duration_s": 3600,
+  "sumo_version": "1.18.0",
+  "step_length_s": 0.1,
+  "lateral_resolution_m": 0.8,
+  "seed": 42,
+  "speed_cap_mps": "33.3333333333",
+  "ego": {"type": "ego", "depart_s": 120, "depart_speed_mps": 10, "depart_lane": 0, "speed_mode": 32, "lane_change_mode": 0},
+  "scenarios": {
+    "easy": {"scale": "0.3", "target": 2021},
+    "medium": {"scale": "0.6", "target": 4043},
+    "hard": {"scale": "1.0", "target": 6738}
+  },
+  "composition": {
+    "primary": "weekdays",
+    "high_quality_min_assignment_rate": "0.70",
+    "van_prior_sensitivity_delta": "0.10"
+  },
+  "length_policy": {
+    "motorbike_assumed_m": 2.0,
+    "car_confirmed_dm": [25, 40],
+    "light_overlap_dm": [41, 69],
+    "rigid_lorry_dm": [70, 120],
+    "trailer_bus_dm": [121, 220],
+    "exclude_speed_code_from_physical_length": 254,
+    "headway_censor_candidate_raw": 3001,
+    "length_boundary_raw": 255
+  },
+  "vehicle_types": {
+    "motorbike": {"paper_type": "Motorbike", "pcu": 0.5, "vClass": "motorcycle", "width": "0.8", "maxSpeed": "33.3333333333", "accel": "5.0", "decel": "7.0", "sigma": "0.5", "guiShape": "motorcycle"},
+    "car": {"paper_type": "Car", "pcu": 1, "vClass": "passenger", "width": "1.8", "maxSpeed": "33.3333333333", "accel": "2.6", "decel": "4.5", "sigma": "0.5", "guiShape": "passenger/sedan"},
+    "van": {"paper_type": "Van", "pcu": 1, "vClass": "passenger", "width": "2.0", "maxSpeed": "33.3333333333", "accel": "2.2", "decel": "4.5", "sigma": "0.5", "guiShape": "passenger/van"},
+    "rigid_lorry": {"paper_type": "Rigid lorry", "pcu": 1.5, "vClass": "truck", "width": "2.4", "maxSpeed": "25", "accel": "1.2", "decel": "3.5", "sigma": "0.5", "guiShape": "truck"},
+    "trailer_bus": {"paper_type": "Trailer/Bus", "pcu": 2, "vClass": "trailer", "width": "2.5", "maxSpeed": "22", "accel": "1.0", "decel": "3.0", "sigma": "0.5", "guiShape": "truck/trailer"}
+  }
+}

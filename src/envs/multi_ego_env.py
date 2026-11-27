@@ -5,9 +5,9 @@ from xml.etree import ElementTree
 
 import numpy as np
 
-from .sumo_world import DUAL_EGO_ROUTES, SumoWorld
+from .sumo_world import DUAL_EGO_ROUTES, EMPIRICAL_ROUTES, SumoWorld
 from .ego import Ego
-from .control import EgoController, LaneChangeRequest
+from .control import DEFAULT_SPEED_MODE, EgoController, LaneChangeRequest
 from .lane_change_gate import LaneChangeGate
 from .observation import RouteGoal, build_observation, leader_observation, remaining_goal_distance
 from .stalled import StalledDetector
@@ -29,6 +29,7 @@ class MultiEgoEnv:
     """双 Ego 环境的第一版交互接口。"""
 
     AGENTS = ("ego_1", "ego_2")
+    ROUTES = DUAL_EGO_ROUTES
     OBS_SHAPE = (31, 3)
     OBS_RADIUS_M = 50.0
     DEFAULT_MAX_ACTIVE_STEPS = 2500
@@ -36,7 +37,7 @@ class MultiEgoEnv:
     def __init__(
         self,
         scenario="easy",
-        speed_mode=96,
+        speed_mode=DEFAULT_SPEED_MODE,
         collect_metrics=False,
         usp_enabled=False,
         usp_penalty=0.02,
@@ -57,8 +58,8 @@ class MultiEgoEnv:
         lane_change_gate_egos=(),
         lane_change_request=LaneChangeRequest(),
     ):
-        if scenario not in DUAL_EGO_ROUTES:
-            raise ValueError(f"Unknown dual-Ego scenario: {scenario}")
+        if scenario not in self.ROUTES:
+            raise ValueError(f"Unknown {type(self).__name__} scenario: {scenario}")
 
         if max_active_steps <= 0:
             raise ValueError("max_active_steps must be positive")
@@ -76,7 +77,7 @@ class MultiEgoEnv:
         self.sumo_warning_log_dir = None
         self.sumo_lanechange_dir = None
         self.stall_detectors = {}
-        self.route_file = route_file if route_file is not None else DUAL_EGO_ROUTES[scenario]
+        self.route_file = route_file if route_file is not None else self.ROUTES[scenario]
         self.scenario = scenario
         self.speed_mode = speed_mode
         self.lane_change_request = lane_change_request
@@ -988,3 +989,16 @@ class MultiEgoEnv:
             self.world = None
 
         self.controllers = {}
+
+
+
+class EmpiricalSingleEgoEnv(MultiEgoEnv):
+    """One controlled Ego with the empirical V1 traffic scenarios."""
+
+    AGENTS = ("ego",)
+    ROUTES = EMPIRICAL_ROUTES
+
+    def __init__(self, scenario="empirical_easy", *, speed_mode=DEFAULT_SPEED_MODE, **kwargs):
+        if speed_mode != DEFAULT_SPEED_MODE:
+            raise ValueError("Empirical V1 requires SpeedMode=32")
+        super().__init__(scenario=scenario, speed_mode=speed_mode, **kwargs)

@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='utf-8'?>
+<configuration>
+  <input>
+    <net-file value="../Antwerp.net.xml" />
+    <route-files value="Antwerp_empirical_v1_medium.rou.xml" />
+  </input>
+  <time>
+    <step-length value="0.1" />
+    <end value="3600" />
+  </time>
+  <processing>
+    <lateral-resolution value="0.8" />
+    <collision.check-junctions value="true" />
+    <collision.action value="remove" />
+    <time-to-teleport value="-1" />
+  </processing>
+  <random_number>
+    <seed value="42" />
+  </random_number>
+</configuration>

@@ -1,0 +1,2567 @@
+{
+  "config_sha256": "aef1ac82ee4081f967cd3e583f02ee02137b189f1d0e25fbdca3494b2220b666",
+  "inputs_sha256": "53ec16042fcabb7577fa1455bfb6d29a972b3df5fd6d8b77711612923af02f58",
+  "network_sha256": "b246e9af5d2b5d8abec14b91a978de27d5582f29c45683cd169fd06a7d942459",
+  "seed": 42,
+  "target_period": "P1",
+  "cohorts": {
+    "all_days": {
+      "O1D1": {
+        "paper_od_total": 1679,
+        "paper_type_counts": {
+          "motorbike": 5,
+          "car": 741,
+          "van": 349,
+          "rigid_lorry": 89,
+          "trailer_bus": 488
+        },
+        "observed": {
+          "motorbike": 11,
+          "car_confirmed": 2107,
+          "rigid_lorry": 296,
+          "trailer_bus": 1425,
+          "light_overlap": 3073,
+          "invalid": 0
+        },
+        "matched_sample_size": 6912,
+        "van_prior_on_overlap": 0.3201834862385321,
+        "estimated_overlap_car_count": 2089.0761467889906,
+        "estimated_overlap_van_count": 983.9238532110091,
+        "estimate_weights": {
+          "motorbike": "5",
+          "car": "741",
+          "van": "349",
+          "rigid_lorry": "89",
+          "trailer_bus": "488"
+        },
+        "shares": {
+          "motorbike": 0.0029904306220095694,
+          "car": 0.4431818181818182,
+          "van": 0.20873205741626794,
+          "rigid_lorry": 0.053229665071770335,
+          "trailer_bus": 0.291866028708134
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.001591435185185185,
+            "car": 0.6515301138294257,
+            "van": 0.09789118246687054,
+            "rigid_lorry": 0.04282407407407408,
+            "trailer_bus": 0.20616319444444445
+          },
+          {
+            "motorbike": 0.001591435185185185,
+            "car": 0.5626122897553517,
+            "van": 0.18680900654094462,
+            "rigid_lorry": 0.04282407407407408,
+            "trailer_bus": 0.20616319444444445
+          }
+        ],
+        "composition_source": "Table 3"
+      },
+      "O1D2": {
+        "paper_od_total": 1782,
+        "paper_type_counts": {
+          "motorbike": 11,
+          "car": 1241,
+          "van": 182,
+          "rigid_lorry": 76,
+          "trailer_bus": 277
+        },
+        "observed": {
+          "motorbike": 24,
+          "car_confirmed": 2385,
+          "rigid_lorry": 398,
+          "trailer_bus": 1082,
+          "light_overlap": 3738,
+          "invalid": 0
+        },
+        "matched_sample_size": 7627,
+        "van_prior_on_overlap": 0.12789880534082923,
+        "estimated_overlap_car_count": 3259.9142656359804,
+        "estimated_overlap_van_count": 478.0857343640197,
+        "estimate_weights": {
+          "motorbike": "11",
+          "car": "1241",
+          "van": "182",
+          "rigid_lorry": "76",
+          "trailer_bus": "277"
+        },
+        "shares": {
+          "motorbike": 0.006155567991046447,
+          "car": 0.6944599888080581,
+          "van": 0.10184667039731393,
+          "rigid_lorry": 0.042529378847229994,
+          "trailer_bus": 0.15500839395635144
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0031467156155762423,
+            "car": 0.7891325902236764,
+            "van": 0.013673231200212362,
+            "rigid_lorry": 0.05218303395830602,
+            "trailer_bus": 0.14186442900222893
+          },
+          {
+            "motorbike": 0.0031467156155762423,
+            "car": 0.6911123987984765,
+            "van": 0.1116934226254123,
+            "rigid_lorry": 0.05218303395830602,
+            "trailer_bus": 0.14186442900222893
+          }
+        ],
+        "composition_source": "Table 3"
+      },
+      "O1D3": {
+        "paper_od_total": 231,
+        "paper_type_counts": {
+          "motorbike": 0,
+          "car": 202,
+          "van": 23,
+          "rigid_lorry": 5,
+          "trailer_bus": 1
+        },
+        "observed": {
+          "motorbike": 5,
+          "car_confirmed": 388,
+          "rigid_lorry": 53,
+          "trailer_bus": 67,
+          "light_overlap": 593,
+          "invalid": 0
+        },
+        "matched_sample_size": 1106,
+        "van_prior_on_overlap": 0.10222222222222223,
+        "estimated_overlap_car_count": 532.3822222222223,
+        "estimated_overlap_van_count": 60.617777777777775,
+        "estimate_weights": {
+          "motorbike": "0",
+          "car": "202",
+          "van": "23",
+          "rigid_lorry": "5",
+          "trailer_bus": "1"
+        },
+        "shares": {
+          "motorbike": 0.0,
+          "car": 0.8744588744588745,
+          "van": 0.09956709956709957,
+          "rigid_lorry": 0.021645021645021644,
+          "trailer_bus": 0.004329004329004329
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0045207956600361665,
+            "car": 0.8857886276873619,
+            "van": 0.0011914808117339762,
+            "rigid_lorry": 0.04792043399638336,
+            "trailer_bus": 0.06057866184448463
+          },
+          {
+            "motorbike": 0.0045207956600361665,
+            "car": 0.778555354631304,
+            "van": 0.10842475386779184,
+            "rigid_lorry": 0.04792043399638336,
+            "trailer_bus": 0.06057866184448463
+          }
+        ],
+        "composition_source": "Table 3"
+      },
+      "O2D1": {
+        "paper_od_total": 630,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 6,
+          "car_confirmed": 604,
+          "rigid_lorry": 159,
+          "trailer_bus": 818,
+          "light_overlap": 1239,
+          "invalid": 0
+        },
+        "matched_sample_size": 2826,
+        "van_prior_on_overlap": 0.3201834862385321,
+        "estimated_overlap_car_count": 842.2926605504587,
+        "estimated_overlap_van_count": 396.7073394495413,
+        "estimate_weights": {
+          "motorbike": "6",
+          "car": "1576459/1090",
+          "van": "432411/1090",
+          "rigid_lorry": "159",
+          "trailer_bus": "818"
+        },
+        "shares": {
+          "motorbike": 0.0021231422505307855,
+          "car": 0.511780842374543,
+          "van": 0.14037768558016323,
+          "rigid_lorry": 0.05626326963906582,
+          "trailer_bus": 0.2894550601556971
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0021231422505307855,
+            "car": 0.5556237298480038,
+            "van": 0.09653479810670251,
+            "rigid_lorry": 0.05626326963906582,
+            "trailer_bus": 0.2894550601556971
+          },
+          {
+            "motorbike": 0.0021231422505307855,
+            "car": 0.46793795490108236,
+            "van": 0.18422057305362394,
+            "rigid_lorry": 0.05626326963906582,
+            "trailer_bus": 0.2894550601556971
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O2D2": {
+        "paper_od_total": 1246,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 4,
+          "car_confirmed": 1687,
+          "rigid_lorry": 276,
+          "trailer_bus": 863,
+          "light_overlap": 3245,
+          "invalid": 0
+        },
+        "matched_sample_size": 6075,
+        "van_prior_on_overlap": 0.12789880534082923,
+        "estimated_overlap_car_count": 2829.968376669009,
+        "estimated_overlap_van_count": 415.03162333099084,
+        "estimate_weights": {
+          "motorbike": "4",
+          "car": "6427646/1423",
+          "van": "590590/1423",
+          "rigid_lorry": "276",
+          "trailer_bus": "863"
+        },
+        "shares": {
+          "motorbike": 0.0006584362139917696,
+          "car": 0.743533889163623,
+          "van": 0.06831796268822894,
+          "rigid_lorry": 0.0454320987654321,
+          "trailer_bus": 0.14205761316872428
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0006584362139917696,
+            "car": 0.7969495270237053,
+            "van": 0.014902324828146645,
+            "rigid_lorry": 0.0454320987654321,
+            "trailer_bus": 0.14205761316872428
+          },
+          {
+            "motorbike": 0.0006584362139917696,
+            "car": 0.6901182513035407,
+            "van": 0.12173360054831125,
+            "rigid_lorry": 0.0454320987654321,
+            "trailer_bus": 0.14205761316872428
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O2D3": {
+        "paper_od_total": 228,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 1,
+          "car_confirmed": 402,
+          "rigid_lorry": 59,
+          "trailer_bus": 95,
+          "light_overlap": 759,
+          "invalid": 0
+        },
+        "matched_sample_size": 1316,
+        "van_prior_on_overlap": 0.10222222222222223,
+        "estimated_overlap_car_count": 681.4133333333333,
+        "estimated_overlap_van_count": 77.58666666666667,
+        "estimate_weights": {
+          "motorbike": "1",
+          "car": "81256/75",
+          "van": "5819/75",
+          "rigid_lorry": "59",
+          "trailer_bus": "95"
+        },
+        "shares": {
+          "motorbike": 0.0007598784194528875,
+          "car": 0.8232624113475178,
+          "van": 0.0589564336372847,
+          "rigid_lorry": 0.044832826747720364,
+          "trailer_bus": 0.07218844984802432
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0007598784194528875,
+            "car": 0.8809371833839919,
+            "van": 0.001281661600810537,
+            "rigid_lorry": 0.044832826747720364,
+            "trailer_bus": 0.07218844984802432
+          },
+          {
+            "motorbike": 0.0007598784194528875,
+            "car": 0.7655876393110436,
+            "van": 0.11663120567375887,
+            "rigid_lorry": 0.044832826747720364,
+            "trailer_bus": 0.07218844984802432
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O3D1": {
+        "paper_od_total": 171,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 1,
+          "car_confirmed": 155,
+          "rigid_lorry": 21,
+          "trailer_bus": 29,
+          "light_overlap": 277,
+          "invalid": 0
+        },
+        "matched_sample_size": 483,
+        "van_prior_on_overlap": 0.3201834862385321,
+        "estimated_overlap_car_count": 188.3091743119266,
+        "estimated_overlap_van_count": 88.69082568807339,
+        "estimate_weights": {
+          "motorbike": "1",
+          "car": "374207/1090",
+          "van": "96673/1090",
+          "rigid_lorry": "21",
+          "trailer_bus": "29"
+        },
+        "shares": {
+          "motorbike": 0.002070393374741201,
+          "car": 0.7107850399832849,
+          "van": 0.18362489790491385,
+          "rigid_lorry": 0.043478260869565216,
+          "trailer_bus": 0.060041407867494824
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.002070393374741201,
+            "car": 0.7681349364636162,
+            "van": 0.1262750014245826,
+            "rigid_lorry": 0.043478260869565216,
+            "trailer_bus": 0.060041407867494824
+          },
+          {
+            "motorbike": 0.002070393374741201,
+            "car": 0.6534351435029536,
+            "van": 0.24097479438524513,
+            "rigid_lorry": 0.043478260869565216,
+            "trailer_bus": 0.060041407867494824
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O3D2": {
+        "paper_od_total": 574,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 3,
+          "car_confirmed": 732,
+          "rigid_lorry": 66,
+          "trailer_bus": 30,
+          "light_overlap": 1406,
+          "invalid": 0
+        },
+        "matched_sample_size": 2237,
+        "van_prior_on_overlap": 0.12789880534082923,
+        "estimated_overlap_car_count": 1226.174279690794,
+        "estimated_overlap_van_count": 179.8257203092059,
+        "estimate_weights": {
+          "motorbike": "3",
+          "car": "2786482/1423",
+          "van": "255892/1423",
+          "rigid_lorry": "66",
+          "trailer_bus": "30"
+        },
+        "shares": {
+          "motorbike": 0.0013410818059901655,
+          "car": 0.8753572998170738,
+          "van": 0.08038700058525074,
+          "rigid_lorry": 0.029503799731783638,
+          "trailer_bus": 0.013410818059901655
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0013410818059901655,
+            "car": 0.9382093337911462,
+            "van": 0.01753496661117832,
+            "rigid_lorry": 0.029503799731783638,
+            "trailer_bus": 0.013410818059901655
+          },
+          {
+            "motorbike": 0.0013410818059901655,
+            "car": 0.8125052658430014,
+            "van": 0.14323903455932316,
+            "rigid_lorry": 0.029503799731783638,
+            "trailer_bus": 0.013410818059901655
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O3D3": {
+        "paper_od_total": 197,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 2,
+          "car_confirmed": 304,
+          "rigid_lorry": 24,
+          "trailer_bus": 5,
+          "light_overlap": 639,
+          "invalid": 0
+        },
+        "matched_sample_size": 974,
+        "van_prior_on_overlap": 0.10222222222222223,
+        "estimated_overlap_car_count": 573.68,
+        "estimated_overlap_van_count": 65.32,
+        "estimate_weights": {
+          "motorbike": "2",
+          "car": "21942/25",
+          "van": "1633/25",
+          "rigid_lorry": "24",
+          "trailer_bus": "5"
+        },
+        "shares": {
+          "motorbike": 0.002053388090349076,
+          "car": 0.9011088295687885,
+          "van": 0.06706365503080082,
+          "rigid_lorry": 0.024640657084188913,
+          "trailer_bus": 0.00513347022587269
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.002053388090349076,
+            "car": 0.9667145790554414,
+            "van": 0.001457905544147844,
+            "rigid_lorry": 0.024640657084188913,
+            "trailer_bus": 0.00513347022587269
+          },
+          {
+            "motorbike": 0.002053388090349076,
+            "car": 0.8355030800821355,
+            "van": 0.1326694045174538,
+            "rigid_lorry": 0.024640657084188913,
+            "trailer_bus": 0.00513347022587269
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      }
+    },
+    "weekdays": {
+      "O1D1": {
+        "paper_od_total": 1679,
+        "paper_type_counts": {
+          "motorbike": 5,
+          "car": 741,
+          "van": 349,
+          "rigid_lorry": 89,
+          "trailer_bus": 488
+        },
+        "observed": {
+          "motorbike": 7,
+          "car_confirmed": 1571,
+          "rigid_lorry": 254,
+          "trailer_bus": 1315,
+          "light_overlap": 2139,
+          "invalid": 0
+        },
+        "matched_sample_size": 5286,
+        "van_prior_on_overlap": 0.3201834862385321,
+        "estimated_overlap_car_count": 1454.1275229357798,
+        "estimated_overlap_van_count": 684.8724770642202,
+        "estimate_weights": {
+          "motorbike": "5",
+          "car": "741",
+          "van": "349",
+          "rigid_lorry": "89",
+          "trailer_bus": "488"
+        },
+        "shares": {
+          "motorbike": 0.0029904306220095694,
+          "car": 0.4431818181818182,
+          "van": 0.20873205741626794,
+          "rigid_lorry": 0.053229665071770335,
+          "trailer_bus": 0.291866028708134
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0013242527430949679,
+            "car": 0.6127558688868293,
+            "van": 0.08909808495350363,
+            "rigid_lorry": 0.048051456678017405,
+            "trailer_bus": 0.24877033673855467
+          },
+          {
+            "motorbike": 0.0013242527430949679,
+            "car": 0.5318251083873968,
+            "van": 0.1700288454529361,
+            "rigid_lorry": 0.048051456678017405,
+            "trailer_bus": 0.24877033673855467
+          }
+        ],
+        "composition_source": "Table 3"
+      },
+      "O1D2": {
+        "paper_od_total": 1782,
+        "paper_type_counts": {
+          "motorbike": 11,
+          "car": 1241,
+          "van": 182,
+          "rigid_lorry": 76,
+          "trailer_bus": 277
+        },
+        "observed": {
+          "motorbike": 24,
+          "car_confirmed": 1933,
+          "rigid_lorry": 359,
+          "trailer_bus": 1036,
+          "light_overlap": 3037,
+          "invalid": 0
+        },
+        "matched_sample_size": 6389,
+        "van_prior_on_overlap": 0.12789880534082923,
+        "estimated_overlap_car_count": 2648.5713281799017,
+        "estimated_overlap_van_count": 388.4286718200984,
+        "estimate_weights": {
+          "motorbike": "11",
+          "car": "1241",
+          "van": "182",
+          "rigid_lorry": "76",
+          "trailer_bus": "277"
+        },
+        "shares": {
+          "motorbike": 0.006155567991046447,
+          "car": 0.6944599888080581,
+          "van": 0.10184667039731393,
+          "rigid_lorry": 0.042529378847229994,
+          "trailer_bus": 0.15500839395635144
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0037564564094537487,
+            "car": 0.7646378663609175,
+            "van": 0.013261648430129658,
+            "rigid_lorry": 0.056190327124745656,
+            "trailer_bus": 0.1621537016747535
+          },
+          {
+            "motorbike": 0.0037564564094537487,
+            "car": 0.6695682153983255,
+            "van": 0.10833129939272161,
+            "rigid_lorry": 0.056190327124745656,
+            "trailer_bus": 0.1621537016747535
+          }
+        ],
+        "composition_source": "Table 3"
+      },
+      "O1D3": {
+        "paper_od_total": 231,
+        "paper_type_counts": {
+          "motorbike": 0,
+          "car": 202,
+          "van": 23,
+          "rigid_lorry": 5,
+          "trailer_bus": 1
+        },
+        "observed": {
+          "motorbike": 5,
+          "car_confirmed": 329,
+          "rigid_lorry": 47,
+          "trailer_bus": 64,
+          "light_overlap": 488,
+          "invalid": 0
+        },
+        "matched_sample_size": 933,
+        "van_prior_on_overlap": 0.10222222222222223,
+        "estimated_overlap_car_count": 438.11555555555555,
+        "estimated_overlap_van_count": 49.88444444444445,
+        "estimate_weights": {
+          "motorbike": "0",
+          "car": "202",
+          "van": "23",
+          "rigid_lorry": "5",
+          "trailer_bus": "1"
+        },
+        "shares": {
+          "motorbike": 0.0,
+          "car": 0.8744588744588745,
+          "van": 0.09956709956709957,
+          "rigid_lorry": 0.021645021645021644,
+          "trailer_bus": 0.004329004329004329
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0053590568060021436,
+            "car": 0.874507562224604,
+            "van": 0.0011623198761462428,
+            "rigid_lorry": 0.05037513397642015,
+            "trailer_bus": 0.06859592711682744
+          },
+          {
+            "motorbike": 0.0053590568060021436,
+            "car": 0.7698987733714422,
+            "van": 0.10577110872930809,
+            "rigid_lorry": 0.05037513397642015,
+            "trailer_bus": 0.06859592711682744
+          }
+        ],
+        "composition_source": "Table 3"
+      },
+      "O2D1": {
+        "paper_od_total": 630,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 5,
+          "car_confirmed": 414,
+          "rigid_lorry": 134,
+          "trailer_bus": 738,
+          "light_overlap": 871,
+          "invalid": 0
+        },
+        "matched_sample_size": 2162,
+        "van_prior_on_overlap": 0.3201834862385321,
+        "estimated_overlap_car_count": 592.1201834862385,
+        "estimated_overlap_van_count": 278.87981651376145,
+        "estimate_weights": {
+          "motorbike": "5",
+          "car": "1096671/1090",
+          "van": "303979/1090",
+          "rigid_lorry": "134",
+          "trailer_bus": "738"
+        },
+        "shares": {
+          "motorbike": 0.002312673450508788,
+          "car": 0.46536548727393084,
+          "van": 0.12899158950682768,
+          "rigid_lorry": 0.061979648473635525,
+          "trailer_bus": 0.34135060129509714
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.002312673450508788,
+            "car": 0.505652258781794,
+            "van": 0.0887048179989646,
+            "rigid_lorry": 0.061979648473635525,
+            "trailer_bus": 0.34135060129509714
+          },
+          {
+            "motorbike": 0.002312673450508788,
+            "car": 0.42507871576606776,
+            "van": 0.1692783610146908,
+            "rigid_lorry": 0.061979648473635525,
+            "trailer_bus": 0.34135060129509714
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O2D2": {
+        "paper_od_total": 1246,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 3,
+          "car_confirmed": 1252,
+          "rigid_lorry": 241,
+          "trailer_bus": 836,
+          "light_overlap": 2478,
+          "invalid": 0
+        },
+        "matched_sample_size": 4810,
+        "van_prior_on_overlap": 0.12789880534082923,
+        "estimated_overlap_car_count": 2161.066760365425,
+        "estimated_overlap_van_count": 316.9332396345748,
+        "estimate_weights": {
+          "motorbike": "3",
+          "car": "4856794/1423",
+          "van": "450996/1423",
+          "rigid_lorry": "241",
+          "trailer_bus": "836"
+        },
+        "shares": {
+          "motorbike": 0.0006237006237006237,
+          "car": 0.7095772890572609,
+          "van": 0.06589048641051452,
+          "rigid_lorry": 0.05010395010395011,
+          "trailer_bus": 0.17380457380457381
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0006237006237006237,
+            "car": 0.7610949605749324,
+            "van": 0.014372814892843002,
+            "rigid_lorry": 0.05010395010395011,
+            "trailer_bus": 0.17380457380457381
+          },
+          {
+            "motorbike": 0.0006237006237006237,
+            "car": 0.6580596175395894,
+            "van": 0.11740815792818604,
+            "rigid_lorry": 0.05010395010395011,
+            "trailer_bus": 0.17380457380457381
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O2D3": {
+        "paper_od_total": 228,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 1,
+          "car_confirmed": 287,
+          "rigid_lorry": 49,
+          "trailer_bus": 87,
+          "light_overlap": 576,
+          "invalid": 0
+        },
+        "matched_sample_size": 1000,
+        "van_prior_on_overlap": 0.10222222222222223,
+        "estimated_overlap_car_count": 517.12,
+        "estimated_overlap_van_count": 58.88,
+        "estimate_weights": {
+          "motorbike": "1",
+          "car": "20103/25",
+          "van": "1472/25",
+          "rigid_lorry": "49",
+          "trailer_bus": "87"
+        },
+        "shares": {
+          "motorbike": 0.001,
+          "car": 0.80412,
+          "van": 0.05888,
+          "rigid_lorry": 0.049,
+          "trailer_bus": 0.087
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.001,
+            "car": 0.86172,
+            "van": 0.00128,
+            "rigid_lorry": 0.049,
+            "trailer_bus": 0.087
+          },
+          {
+            "motorbike": 0.001,
+            "car": 0.74652,
+            "van": 0.11648,
+            "rigid_lorry": 0.049,
+            "trailer_bus": 0.087
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O3D1": {
+        "paper_od_total": 171,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 1,
+          "car_confirmed": 107,
+          "rigid_lorry": 15,
+          "trailer_bus": 27,
+          "light_overlap": 199,
+          "invalid": 0
+        },
+        "matched_sample_size": 349,
+        "van_prior_on_overlap": 0.3201834862385321,
+        "estimated_overlap_car_count": 135.2834862385321,
+        "estimated_overlap_van_count": 63.71651376146789,
+        "estimate_weights": {
+          "motorbike": "1",
+          "car": "264089/1090",
+          "van": "69451/1090",
+          "rigid_lorry": "15",
+          "trailer_bus": "27"
+        },
+        "shares": {
+          "motorbike": 0.0028653295128939827,
+          "car": 0.6942220236061092,
+          "van": 0.18256880733944955,
+          "rigid_lorry": 0.04297994269340974,
+          "trailer_bus": 0.07736389684813753
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0028653295128939827,
+            "car": 0.7512420809126995,
+            "van": 0.12554875003285929,
+            "rigid_lorry": 0.04297994269340974,
+            "trailer_bus": 0.07736389684813753
+          },
+          {
+            "motorbike": 0.0028653295128939827,
+            "car": 0.637201966299519,
+            "van": 0.2395888646460398,
+            "rigid_lorry": 0.04297994269340974,
+            "trailer_bus": 0.07736389684813753
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O3D2": {
+        "paper_od_total": 574,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 2,
+          "car_confirmed": 571,
+          "rigid_lorry": 61,
+          "trailer_bus": 29,
+          "light_overlap": 1125,
+          "invalid": 0
+        },
+        "matched_sample_size": 1788,
+        "van_prior_on_overlap": 0.12789880534082923,
+        "estimated_overlap_car_count": 981.1138439915671,
+        "estimated_overlap_van_count": 143.8861560084329,
+        "estimate_weights": {
+          "motorbike": "2",
+          "car": "2208658/1423",
+          "van": "204750/1423",
+          "rigid_lorry": "61",
+          "trailer_bus": "29"
+        },
+        "shares": {
+          "motorbike": 0.0011185682326621924,
+          "car": 0.8680726196820845,
+          "van": 0.08047324161545463,
+          "rigid_lorry": 0.03411633109619687,
+          "trailer_bus": 0.01621923937360179
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0011185682326621924,
+            "car": 0.9309920827693329,
+            "van": 0.017553778528206315,
+            "rigid_lorry": 0.03411633109619687,
+            "trailer_bus": 0.01621923937360179
+          },
+          {
+            "motorbike": 0.0011185682326621924,
+            "car": 0.8051531565948362,
+            "van": 0.14339270470270296,
+            "rigid_lorry": 0.03411633109619687,
+            "trailer_bus": 0.01621923937360179
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O3D3": {
+        "paper_od_total": 197,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 0,
+          "car_confirmed": 250,
+          "rigid_lorry": 19,
+          "trailer_bus": 5,
+          "light_overlap": 517,
+          "invalid": 0
+        },
+        "matched_sample_size": 791,
+        "van_prior_on_overlap": 0.10222222222222223,
+        "estimated_overlap_car_count": 464.1511111111111,
+        "estimated_overlap_van_count": 52.84888888888889,
+        "estimate_weights": {
+          "motorbike": "0",
+          "car": "160684/225",
+          "van": "11891/225",
+          "rigid_lorry": "19",
+          "trailer_bus": "5"
+        },
+        "shares": {
+          "motorbike": 0.0,
+          "car": 0.9028459053237814,
+          "van": 0.06681275460036522,
+          "rigid_lorry": 0.02402022756005057,
+          "trailer_bus": 0.006321112515802781
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0,
+            "car": 0.9682062087371822,
+            "van": 0.0014524511869644613,
+            "rigid_lorry": 0.02402022756005057,
+            "trailer_bus": 0.006321112515802781
+          },
+          {
+            "motorbike": 0.0,
+            "car": 0.8374856019103807,
+            "van": 0.13217305801376597,
+            "rigid_lorry": 0.02402022756005057,
+            "trailer_bus": 0.006321112515802781
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      }
+    },
+    "high_quality": {
+      "O1D1": {
+        "paper_od_total": 1679,
+        "paper_type_counts": {
+          "motorbike": 5,
+          "car": 741,
+          "van": 349,
+          "rigid_lorry": 89,
+          "trailer_bus": 488
+        },
+        "observed": {
+          "motorbike": 7,
+          "car_confirmed": 1362,
+          "rigid_lorry": 178,
+          "trailer_bus": 858,
+          "light_overlap": 2077,
+          "invalid": 0
+        },
+        "matched_sample_size": 4482,
+        "van_prior_on_overlap": 0.3201834862385321,
+        "estimated_overlap_car_count": 1411.978899082569,
+        "estimated_overlap_van_count": 665.0211009174312,
+        "estimate_weights": {
+          "motorbike": "5",
+          "car": "741",
+          "van": "349",
+          "rigid_lorry": "89",
+          "trailer_bus": "488"
+        },
+        "shares": {
+          "motorbike": 0.0029904306220095694,
+          "car": 0.4431818181818182,
+          "van": 0.20873205741626794,
+          "rigid_lorry": 0.053229665071770335,
+          "trailer_bus": 0.291866028708134
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0015618027666220438,
+            "car": 0.6652563362522464,
+            "van": 0.10203505152106898,
+            "rigid_lorry": 0.03971441320838911,
+            "trailer_bus": 0.19143239625167335
+          },
+          {
+            "motorbike": 0.0015618027666220438,
+            "car": 0.5725744977872755,
+            "van": 0.19471688998603998,
+            "rigid_lorry": 0.03971441320838911,
+            "trailer_bus": 0.19143239625167335
+          }
+        ],
+        "composition_source": "Table 3"
+      },
+      "O1D2": {
+        "paper_od_total": 1782,
+        "paper_type_counts": {
+          "motorbike": 11,
+          "car": 1241,
+          "van": 182,
+          "rigid_lorry": 76,
+          "trailer_bus": 277
+        },
+        "observed": {
+          "motorbike": 8,
+          "car_confirmed": 1250,
+          "rigid_lorry": 182,
+          "trailer_bus": 477,
+          "light_overlap": 1959,
+          "invalid": 0
+        },
+        "matched_sample_size": 3876,
+        "van_prior_on_overlap": 0.12789880534082923,
+        "estimated_overlap_car_count": 1708.4462403373154,
+        "estimated_overlap_van_count": 250.55375966268446,
+        "estimate_weights": {
+          "motorbike": "11",
+          "car": "1241",
+          "van": "182",
+          "rigid_lorry": "76",
+          "trailer_bus": "277"
+        },
+        "shares": {
+          "motorbike": 0.006155567991046447,
+          "car": 0.6944599888080581,
+          "van": 0.10184667039731393,
+          "rigid_lorry": 0.042529378847229994,
+          "trailer_bus": 0.15500839395635144
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0020639834881320948,
+            "car": 0.8138148194884715,
+            "van": 0.014100557188515085,
+            "rigid_lorry": 0.04695562435500516,
+            "trailer_bus": 0.12306501547987617
+          },
+          {
+            "motorbike": 0.0020639834881320948,
+            "car": 0.7127312281572021,
+            "van": 0.11518414851978444,
+            "rigid_lorry": 0.04695562435500516,
+            "trailer_bus": 0.12306501547987617
+          }
+        ],
+        "composition_source": "Table 3"
+      },
+      "O1D3": {
+        "paper_od_total": 231,
+        "paper_type_counts": {
+          "motorbike": 0,
+          "car": 202,
+          "van": 23,
+          "rigid_lorry": 5,
+          "trailer_bus": 1
+        },
+        "observed": {
+          "motorbike": 0,
+          "car_confirmed": 190,
+          "rigid_lorry": 22,
+          "trailer_bus": 21,
+          "light_overlap": 299,
+          "invalid": 0
+        },
+        "matched_sample_size": 532,
+        "van_prior_on_overlap": 0.10222222222222223,
+        "estimated_overlap_car_count": 268.43555555555554,
+        "estimated_overlap_van_count": 30.564444444444444,
+        "estimate_weights": {
+          "motorbike": "0",
+          "car": "202",
+          "van": "23",
+          "rigid_lorry": "5",
+          "trailer_bus": "1"
+        },
+        "shares": {
+          "motorbike": 0.0,
+          "car": 0.8744588744588745,
+          "van": 0.09956709956709957,
+          "rigid_lorry": 0.021645021645021644,
+          "trailer_bus": 0.004329004329004329
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0,
+            "car": 0.9179239766081871,
+            "van": 0.001248955722639933,
+            "rigid_lorry": 0.041353383458646614,
+            "trailer_bus": 0.039473684210526314
+          },
+          {
+            "motorbike": 0.0,
+            "car": 0.8055179615705932,
+            "van": 0.11365497076023391,
+            "rigid_lorry": 0.041353383458646614,
+            "trailer_bus": 0.039473684210526314
+          }
+        ],
+        "composition_source": "Table 3"
+      },
+      "O2D1": {
+        "paper_od_total": 630,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 2,
+          "car_confirmed": 310,
+          "rigid_lorry": 62,
+          "trailer_bus": 294,
+          "light_overlap": 657,
+          "invalid": 0
+        },
+        "matched_sample_size": 1325,
+        "van_prior_on_overlap": 0.3201834862385321,
+        "estimated_overlap_car_count": 446.6394495412844,
+        "estimated_overlap_van_count": 210.3605504587156,
+        "estimate_weights": {
+          "motorbike": "2",
+          "car": "824737/1090",
+          "van": "229293/1090",
+          "rigid_lorry": "62",
+          "trailer_bus": "294"
+        },
+        "shares": {
+          "motorbike": 0.0015094339622641509,
+          "car": 0.5710486411632335,
+          "van": 0.15876267959148346,
+          "rigid_lorry": 0.04679245283018868,
+          "trailer_bus": 0.2218867924528302
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0015094339622641509,
+            "car": 0.6206335468236108,
+            "van": 0.10917777393110611,
+            "rigid_lorry": 0.04679245283018868,
+            "trailer_bus": 0.2218867924528302
+          },
+          {
+            "motorbike": 0.0015094339622641509,
+            "car": 0.5214637355028562,
+            "van": 0.20834758525186084,
+            "rigid_lorry": 0.04679245283018868,
+            "trailer_bus": 0.2218867924528302
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O2D2": {
+        "paper_od_total": 1246,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 2,
+          "car_confirmed": 737,
+          "rigid_lorry": 95,
+          "trailer_bus": 222,
+          "light_overlap": 1435,
+          "invalid": 0
+        },
+        "matched_sample_size": 2491,
+        "van_prior_on_overlap": 0.12789880534082923,
+        "estimated_overlap_car_count": 1251.46521433591,
+        "estimated_overlap_van_count": 183.53478566408995,
+        "estimate_weights": {
+          "motorbike": "2",
+          "car": "2829586/1423",
+          "van": "261170/1423",
+          "rigid_lorry": "95",
+          "trailer_bus": "222"
+        },
+        "shares": {
+          "motorbike": 0.0008028904054596548,
+          "car": 0.798259821090289,
+          "van": 0.07367915923889601,
+          "rigid_lorry": 0.0381372942593336,
+          "trailer_bus": 0.08912083500602168
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0008028904054596548,
+            "car": 0.8558672076820193,
+            "van": 0.016071772647165777,
+            "rigid_lorry": 0.0381372942593336,
+            "trailer_bus": 0.08912083500602168
+          },
+          {
+            "motorbike": 0.0008028904054596548,
+            "car": 0.7406524344985588,
+            "van": 0.13128654583062624,
+            "rigid_lorry": 0.0381372942593336,
+            "trailer_bus": 0.08912083500602168
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O2D3": {
+        "paper_od_total": 228,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 0,
+          "car_confirmed": 182,
+          "rigid_lorry": 17,
+          "trailer_bus": 24,
+          "light_overlap": 355,
+          "invalid": 0
+        },
+        "matched_sample_size": 578,
+        "van_prior_on_overlap": 0.10222222222222223,
+        "estimated_overlap_car_count": 318.7111111111111,
+        "estimated_overlap_van_count": 36.28888888888889,
+        "estimate_weights": {
+          "motorbike": "0",
+          "car": "22532/45",
+          "van": "1633/45",
+          "rigid_lorry": "17",
+          "trailer_bus": "24"
+        },
+        "shares": {
+          "motorbike": 0.0,
+          "car": 0.8662821991541715,
+          "van": 0.0627835447904652,
+          "rigid_lorry": 0.029411764705882353,
+          "trailer_bus": 0.04152249134948097
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0,
+            "car": 0.9277008842752787,
+            "van": 0.0013648596693579393,
+            "rigid_lorry": 0.029411764705882353,
+            "trailer_bus": 0.04152249134948097
+          },
+          {
+            "motorbike": 0.0,
+            "car": 0.8048635140330642,
+            "van": 0.12420222991157247,
+            "rigid_lorry": 0.029411764705882353,
+            "trailer_bus": 0.04152249134948097
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O3D1": {
+        "paper_od_total": 171,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 1,
+          "car_confirmed": 143,
+          "rigid_lorry": 21,
+          "trailer_bus": 28,
+          "light_overlap": 258,
+          "invalid": 0
+        },
+        "matched_sample_size": 451,
+        "van_prior_on_overlap": 0.3201834862385321,
+        "estimated_overlap_car_count": 175.39266055045871,
+        "estimated_overlap_van_count": 82.60733944954129,
+        "estimate_weights": {
+          "motorbike": "1",
+          "car": "173524/545",
+          "van": "45021/545",
+          "rigid_lorry": "21",
+          "trailer_bus": "28"
+        },
+        "shares": {
+          "motorbike": 0.0022172949002217295,
+          "car": 0.7059704225065604,
+          "van": 0.18316483248235318,
+          "rigid_lorry": 0.04656319290465632,
+          "trailer_bus": 0.06208425720620843
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0022172949002217295,
+            "car": 0.7631766309322809,
+            "van": 0.12595862405663255,
+            "rigid_lorry": 0.04656319290465632,
+            "trailer_bus": 0.06208425720620843
+          },
+          {
+            "motorbike": 0.0022172949002217295,
+            "car": 0.6487642140808397,
+            "van": 0.2403710409080738,
+            "rigid_lorry": 0.04656319290465632,
+            "trailer_bus": 0.06208425720620843
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O3D2": {
+        "paper_od_total": 574,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 3,
+          "car_confirmed": 631,
+          "rigid_lorry": 59,
+          "trailer_bus": 26,
+          "light_overlap": 1212,
+          "invalid": 0
+        },
+        "matched_sample_size": 1931,
+        "van_prior_on_overlap": 0.12789880534082923,
+        "estimated_overlap_car_count": 1056.9866479269149,
+        "estimated_overlap_van_count": 155.01335207308503,
+        "estimate_weights": {
+          "motorbike": "3",
+          "car": "2402005/1423",
+          "van": "220584/1423",
+          "rigid_lorry": "59",
+          "trailer_bus": "26"
+        },
+        "shares": {
+          "motorbike": 0.0015535991714137752,
+          "car": 0.8741515525255904,
+          "van": 0.08027620511293891,
+          "rigid_lorry": 0.030554117037804248,
+          "trailer_bus": 0.013464526152252718
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0015535991714137752,
+            "car": 0.9369169590507068,
+            "van": 0.01751079858782239,
+            "rigid_lorry": 0.030554117037804248,
+            "trailer_bus": 0.013464526152252718
+          },
+          {
+            "motorbike": 0.0015535991714137752,
+            "car": 0.8113861460004739,
+            "van": 0.14304161163805543,
+            "rigid_lorry": 0.030554117037804248,
+            "trailer_bus": 0.013464526152252718
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      },
+      "O3D3": {
+        "paper_od_total": 197,
+        "paper_type_counts": null,
+        "observed": {
+          "motorbike": 2,
+          "car_confirmed": 266,
+          "rigid_lorry": 21,
+          "trailer_bus": 5,
+          "light_overlap": 541,
+          "invalid": 0
+        },
+        "matched_sample_size": 835,
+        "van_prior_on_overlap": 0.10222222222222223,
+        "estimated_overlap_car_count": 485.6977777777778,
+        "estimated_overlap_van_count": 55.30222222222222,
+        "estimate_weights": {
+          "motorbike": "2",
+          "car": "169132/225",
+          "van": "12443/225",
+          "rigid_lorry": "21",
+          "trailer_bus": "5"
+        },
+        "shares": {
+          "motorbike": 0.0023952095808383233,
+          "car": 0.9002368596141052,
+          "van": 0.06623020625415835,
+          "rigid_lorry": 0.025149700598802394,
+          "trailer_bus": 0.005988023952095809
+        },
+        "overlap_prior_sensitivity": [
+          {
+            "motorbike": 0.0023952095808383233,
+            "car": 0.9650272787757818,
+            "van": 0.0014397870924817032,
+            "rigid_lorry": 0.025149700598802394,
+            "trailer_bus": 0.005988023952095809
+          },
+          {
+            "motorbike": 0.0023952095808383233,
+            "car": 0.8354464404524284,
+            "van": 0.131020625415835,
+            "rigid_lorry": 0.025149700598802394,
+            "trailer_bus": 0.005988023952095809
+          }
+        ],
+        "composition_source": "P1 matched entries + Table 3 Van prior"
+      }
+    }
+  },
+  "matching_bias": {
+    "all_days": {
+      "O1": {
+        "selected_dates": [
+          "20220901",
+          "20220905",
+          "20220914",
+          "20220916",
+          "20220917",
+          "20220919"
+        ],
+        "raw": {
+          "rigid_lorry": 1035,
+          "light_overlap": 10422,
+          "trailer_bus": 3649,
+          "car_confirmed": 7078,
+          "motorbike": 78
+        },
+        "assigned": {
+          "motorbike": 40,
+          "car_confirmed": 4880,
+          "rigid_lorry": 747,
+          "trailer_bus": 2574,
+          "light_overlap": 7404,
+          "invalid": 0
+        },
+        "assignment_rates_by_length_group": {
+          "motorbike": 0.5128205128205128,
+          "car_confirmed": 0.6894602995196383,
+          "light_overlap": 0.7104202648244099,
+          "rigid_lorry": 0.7217391304347827,
+          "trailer_bus": 0.7053987393806522
+        },
+        "raw_share_by_group": {
+          "motorbike": 0.00350372832629593,
+          "car_confirmed": 0.3179408858143922,
+          "light_overlap": 0.46815200790584854,
+          "rigid_lorry": 0.046491779714311385,
+          "trailer_bus": 0.1639115982391519
+        },
+        "assigned_share_by_group": {
+          "motorbike": 0.002556727388942154,
+          "car_confirmed": 0.3119207414509428,
+          "light_overlap": 0.4732502396931927,
+          "rigid_lorry": 0.04774688398849473,
+          "trailer_bus": 0.16452540747842762
+        }
+      },
+      "O2": {
+        "selected_dates": [
+          "20220901",
+          "20220905",
+          "20220914",
+          "20220916",
+          "20220917",
+          "20220919"
+        ],
+        "raw": {
+          "trailer_bus": 2698,
+          "rigid_lorry": 705,
+          "light_overlap": 7411,
+          "car_confirmed": 3929,
+          "motorbike": 22
+        },
+        "assigned": {
+          "motorbike": 11,
+          "car_confirmed": 2693,
+          "rigid_lorry": 494,
+          "trailer_bus": 1776,
+          "light_overlap": 5243,
+          "invalid": 0
+        },
+        "assignment_rates_by_length_group": {
+          "motorbike": 0.5,
+          "car_confirmed": 0.6854161364214812,
+          "light_overlap": 0.707461880987721,
+          "rigid_lorry": 0.700709219858156,
+          "trailer_bus": 0.6582653817642699
+        },
+        "raw_share_by_group": {
+          "motorbike": 0.001490010159160176,
+          "car_confirmed": 0.266102268879106,
+          "light_overlap": 0.5019302404334575,
+          "rigid_lorry": 0.04774805282763291,
+          "trailer_bus": 0.1827294277006434
+        },
+        "assigned_share_by_group": {
+          "motorbike": 0.0010766369775863757,
+          "car_confirmed": 0.2635803073309191,
+          "light_overlap": 0.5131643339532153,
+          "rigid_lorry": 0.048350787902515416,
+          "trailer_bus": 0.17382793383576392
+        }
+      },
+      "O3": {
+        "selected_dates": [
+          "20220901",
+          "20220905",
+          "20220914",
+          "20220916",
+          "20220917",
+          "20220919"
+        ],
+        "raw": {
+          "car_confirmed": 1576,
+          "light_overlap": 2977,
+          "motorbike": 10,
+          "trailer_bus": 97,
+          "rigid_lorry": 156
+        },
+        "assigned": {
+          "motorbike": 6,
+          "car_confirmed": 1191,
+          "rigid_lorry": 111,
+          "trailer_bus": 64,
+          "light_overlap": 2322,
+          "invalid": 0
+        },
+        "assignment_rates_by_length_group": {
+          "motorbike": 0.6,
+          "car_confirmed": 0.7557106598984772,
+          "light_overlap": 0.7799798454820289,
+          "rigid_lorry": 0.7115384615384616,
+          "trailer_bus": 0.6597938144329897
+        },
+        "raw_share_by_group": {
+          "motorbike": 0.0020764119601328905,
+          "car_confirmed": 0.3272425249169435,
+          "light_overlap": 0.6181478405315615,
+          "rigid_lorry": 0.03239202657807309,
+          "trailer_bus": 0.020141196013289037
+        },
+        "assigned_share_by_group": {
+          "motorbike": 0.0016242555495397943,
+          "car_confirmed": 0.32241472658364917,
+          "light_overlap": 0.6285868976719003,
+          "rigid_lorry": 0.030048727666486193,
+          "trailer_bus": 0.017325392528424473
+        }
+      }
+    },
+    "weekdays": {
+      "O1": {
+        "selected_dates": [
+          "20220901",
+          "20220905",
+          "20220914",
+          "20220916",
+          "20220919"
+        ],
+        "raw": {
+          "rigid_lorry": 925,
+          "light_overlap": 8059,
+          "trailer_bus": 3436,
+          "car_confirmed": 5643,
+          "motorbike": 68
+        },
+        "assigned": {
+          "motorbike": 36,
+          "car_confirmed": 3833,
+          "rigid_lorry": 660,
+          "trailer_bus": 2415,
+          "light_overlap": 5664,
+          "invalid": 0
+        },
+        "assignment_rates_by_length_group": {
+          "motorbike": 0.5294117647058824,
+          "car_confirmed": 0.6792486266170477,
+          "light_overlap": 0.7028167266410225,
+          "rigid_lorry": 0.7135135135135136,
+          "trailer_bus": 0.7028521536670547
+        },
+        "raw_share_by_group": {
+          "motorbike": 0.0037504825988638243,
+          "car_confirmed": 0.3112349015498318,
+          "light_overlap": 0.4444873421212288,
+          "rigid_lorry": 0.05101759417572114,
+          "trailer_bus": 0.1895096795543544
+        },
+        "assigned_share_by_group": {
+          "motorbike": 0.0028553299492385786,
+          "car_confirmed": 0.30401332487309646,
+          "light_overlap": 0.44923857868020306,
+          "rigid_lorry": 0.052347715736040606,
+          "trailer_bus": 0.1915450507614213
+        }
+      },
+      "O2": {
+        "selected_dates": [
+          "20220901",
+          "20220905",
+          "20220914",
+          "20220916",
+          "20220919"
+        ],
+        "raw": {
+          "trailer_bus": 2548,
+          "rigid_lorry": 619,
+          "light_overlap": 5731,
+          "car_confirmed": 2977,
+          "motorbike": 17
+        },
+        "assigned": {
+          "motorbike": 9,
+          "car_confirmed": 1953,
+          "rigid_lorry": 424,
+          "trailer_bus": 1661,
+          "light_overlap": 3925,
+          "invalid": 0
+        },
+        "assignment_rates_by_length_group": {
+          "motorbike": 0.5294117647058824,
+          "car_confirmed": 0.6560295599596909,
+          "light_overlap": 0.6848717501308672,
+          "rigid_lorry": 0.6849757673667205,
+          "trailer_bus": 0.651883830455259
+        },
+        "raw_share_by_group": {
+          "motorbike": 0.001429532458795829,
+          "car_confirmed": 0.2503363605785402,
+          "light_overlap": 0.4819206189034645,
+          "rigid_lorry": 0.05205179952909519,
+          "trailer_bus": 0.21426168853010427
+        },
+        "assigned_share_by_group": {
+          "motorbike": 0.0011289513296537882,
+          "car_confirmed": 0.24498243853487206,
+          "light_overlap": 0.49234821876567986,
+          "rigid_lorry": 0.053186151530356246,
+          "trailer_bus": 0.20835423983943804
+        }
+      },
+      "O3": {
+        "selected_dates": [
+          "20220901",
+          "20220905",
+          "20220914",
+          "20220916",
+          "20220919"
+        ],
+        "raw": {
+          "car_confirmed": 1248,
+          "light_overlap": 2404,
+          "motorbike": 7,
+          "trailer_bus": 94,
+          "rigid_lorry": 134
+        },
+        "assigned": {
+          "motorbike": 3,
+          "car_confirmed": 928,
+          "rigid_lorry": 95,
+          "trailer_bus": 61,
+          "light_overlap": 1841,
+          "invalid": 0
+        },
+        "assignment_rates_by_length_group": {
+          "motorbike": 0.42857142857142855,
+          "car_confirmed": 0.7435897435897436,
+          "light_overlap": 0.7658069883527454,
+          "rigid_lorry": 0.7089552238805971,
+          "trailer_bus": 0.648936170212766
+        },
+        "raw_share_by_group": {
+          "motorbike": 0.0018008747105737071,
+          "car_confirmed": 0.3210702341137124,
+          "light_overlap": 0.6184718291741703,
+          "rigid_lorry": 0.034473887316696684,
+          "trailer_bus": 0.024183174684846924
+        },
+        "assigned_share_by_group": {
+          "motorbike": 0.0010245901639344263,
+          "car_confirmed": 0.31693989071038253,
+          "light_overlap": 0.6287568306010929,
+          "rigid_lorry": 0.03244535519125683,
+          "trailer_bus": 0.020833333333333332
+        }
+      }
+    },
+    "high_quality": {
+      "O1": {
+        "selected_dates": [
+          "20220914",
+          "20220917",
+          "20220919"
+        ],
+        "raw": {
+          "trailer_bus": 1721,
+          "light_overlap": 5812,
+          "rigid_lorry": 471,
+          "car_confirmed": 3838,
+          "motorbike": 32
+        },
+        "assigned": {
+          "motorbike": 15,
+          "car_confirmed": 2802,
+          "rigid_lorry": 382,
+          "trailer_bus": 1356,
+          "light_overlap": 4335,
+          "invalid": 0
+        },
+        "assignment_rates_by_length_group": {
+          "motorbike": 0.46875,
+          "car_confirmed": 0.7300677436164669,
+          "light_overlap": 0.7458706125258087,
+          "rigid_lorry": 0.8110403397027601,
+          "trailer_bus": 0.7879140034863451
+        },
+        "raw_share_by_group": {
+          "motorbike": 0.00269496378642412,
+          "car_confirmed": 0.3232272191342429,
+          "light_overlap": 0.48947279770928076,
+          "rigid_lorry": 0.039666498231430015,
+          "trailer_bus": 0.1449385211386222
+        },
+        "assigned_share_by_group": {
+          "motorbike": 0.001687289088863892,
+          "car_confirmed": 0.315185601799775,
+          "light_overlap": 0.4876265466816648,
+          "rigid_lorry": 0.04296962879640045,
+          "trailer_bus": 0.15253093363329584
+        }
+      },
+      "O2": {
+        "selected_dates": [
+          "20220917",
+          "20220919"
+        ],
+        "raw": {
+          "trailer_bus": 699,
+          "car_confirmed": 1601,
+          "light_overlap": 3113,
+          "rigid_lorry": 218,
+          "motorbike": 9
+        },
+        "assigned": {
+          "motorbike": 4,
+          "car_confirmed": 1229,
+          "rigid_lorry": 174,
+          "trailer_bus": 540,
+          "light_overlap": 2447,
+          "invalid": 0
+        },
+        "assignment_rates_by_length_group": {
+          "motorbike": 0.4444444444444444,
+          "car_confirmed": 0.7676452217364147,
+          "light_overlap": 0.7860584645036942,
+          "rigid_lorry": 0.7981651376146789,
+          "trailer_bus": 0.7725321888412017
+        },
+        "raw_share_by_group": {
+          "motorbike": 0.0015957446808510637,
+          "car_confirmed": 0.28386524822695036,
+          "light_overlap": 0.551950354609929,
+          "rigid_lorry": 0.038652482269503546,
+          "trailer_bus": 0.12393617021276596
+        },
+        "assigned_share_by_group": {
+          "motorbike": 0.0009103322712790169,
+          "car_confirmed": 0.2796995903504779,
+          "light_overlap": 0.5568957669549386,
+          "rigid_lorry": 0.03959945380063723,
+          "trailer_bus": 0.12289485662266728
+        }
+      },
+      "O3": {
+        "selected_dates": [
+          "20220901",
+          "20220905",
+          "20220914",
+          "20220917",
+          "20220919"
+        ],
+        "raw": {
+          "car_confirmed": 1336,
+          "light_overlap": 2530,
+          "motorbike": 8,
+          "trailer_bus": 86,
+          "rigid_lorry": 138
+        },
+        "assigned": {
+          "motorbike": 6,
+          "car_confirmed": 1040,
+          "rigid_lorry": 101,
+          "trailer_bus": 59,
+          "light_overlap": 2011,
+          "invalid": 0
+        },
+        "assignment_rates_by_length_group": {
+          "motorbike": 0.75,
+          "car_confirmed": 0.7784431137724551,
+          "light_overlap": 0.7948616600790513,
+          "rigid_lorry": 0.7318840579710145,
+          "trailer_bus": 0.686046511627907
+        },
+        "raw_share_by_group": {
+          "motorbike": 0.0019521717911176184,
+          "car_confirmed": 0.3260126891166423,
+          "light_overlap": 0.6173743289409468,
+          "rigid_lorry": 0.03367496339677892,
+          "trailer_bus": 0.020985846754514398
+        },
+        "assigned_share_by_group": {
+          "motorbike": 0.0018650917003419335,
+          "car_confirmed": 0.3232825613926018,
+          "light_overlap": 0.6251165682312714,
+          "rigid_lorry": 0.03139571028908921,
+          "trailer_bus": 0.01834006838669568
+        }
+      }
+    }
+  },
+  "p1_boundary_codes_by_day": {
+    "20220901": {
+      "entry_observations": 7061,
+      "speed_254": 39,
+      "length_255": 40,
+      "joint_speed_254_length_255": 39,
+      "excluded_from_physical_trailer_bus": 42,
+      "excluded_from_physical_car_confirmed": 38,
+      "headway_3001": 25,
+      "headway_3001_with_preceding_obs": 24,
+      "headway_3001_preceding_gap_ge_30s": 24
+    },
+    "20220905": {
+      "entry_observations": 7069,
+      "speed_254": 60,
+      "length_255": 62,
+      "joint_speed_254_length_255": 60,
+      "excluded_from_physical_trailer_bus": 67,
+      "excluded_from_physical_car_confirmed": 17,
+      "headway_3001": 17,
+      "headway_3001_with_preceding_obs": 17,
+      "headway_3001_preceding_gap_ge_30s": 17
+    },
+    "20220914": {
+      "entry_observations": 6343,
+      "speed_254": 24,
+      "length_255": 27,
+      "joint_speed_254_length_255": 24,
+      "excluded_from_physical_car_confirmed": 16,
+      "excluded_from_physical_trailer_bus": 34,
+      "headway_3001": 14,
+      "headway_3001_with_preceding_obs": 14,
+      "headway_3001_preceding_gap_ge_30s": 14
+    },
+    "20220916": {
+      "entry_observations": 5617,
+      "speed_254": 25,
+      "length_255": 43,
+      "joint_speed_254_length_255": 25,
+      "excluded_from_physical_car_confirmed": 25,
+      "excluded_from_physical_trailer_bus": 44,
+      "headway_3001": 50,
+      "headway_3001_with_preceding_obs": 50,
+      "headway_3001_preceding_gap_ge_30s": 50
+    },
+    "20220917": {
+      "entry_observations": 7933,
+      "speed_254": 30,
+      "length_255": 31,
+      "joint_speed_254_length_255": 30,
+      "headway_3001": 24,
+      "headway_3001_with_preceding_obs": 24,
+      "headway_3001_preceding_gap_ge_30s": 23
+    },
+    "20220919": {
+      "entry_observations": 7820,
+      "speed_254": 34,
+      "length_255": 35,
+      "joint_speed_254_length_255": 34,
+      "excluded_from_physical_trailer_bus": 40,
+      "excluded_from_physical_car_confirmed": 43,
+      "headway_3001": 23,
+      "headway_3001_with_preceding_obs": 23,
+      "headway_3001_preceding_gap_ge_30s": 23
+    }
+  },
+  "scenarios": {
+    "easy": {
+      "scale": "0.3",
+      "background_total": 2021,
+      "od_type_counts": {
+        "O1D1": {
+          "motorbike": 2,
+          "car": 223,
+          "van": 105,
+          "rigid_lorry": 27,
+          "trailer_bus": 147
+        },
+        "O1D2": {
+          "motorbike": 3,
+          "car": 372,
+          "van": 54,
+          "rigid_lorry": 23,
+          "trailer_bus": 83
+        },
+        "O1D3": {
+          "motorbike": 0,
+          "car": 60,
+          "van": 7,
+          "rigid_lorry": 2,
+          "trailer_bus": 0
+        },
+        "O2D1": {
+          "motorbike": 0,
+          "car": 88,
+          "van": 24,
+          "rigid_lorry": 12,
+          "trailer_bus": 65
+        },
+        "O2D2": {
+          "motorbike": 0,
+          "car": 265,
+          "van": 25,
+          "rigid_lorry": 19,
+          "trailer_bus": 65
+        },
+        "O2D3": {
+          "motorbike": 0,
+          "car": 55,
+          "van": 4,
+          "rigid_lorry": 3,
+          "trailer_bus": 6
+        },
+        "O3D1": {
+          "motorbike": 0,
+          "car": 36,
+          "van": 9,
+          "rigid_lorry": 2,
+          "trailer_bus": 4
+        },
+        "O3D2": {
+          "motorbike": 0,
+          "car": 149,
+          "van": 14,
+          "rigid_lorry": 6,
+          "trailer_bus": 3
+        },
+        "O3D3": {
+          "motorbike": 0,
+          "car": 53,
+          "van": 4,
+          "rigid_lorry": 2,
+          "trailer_bus": 0
+        }
+      },
+      "rounding": {
+        "O1D1": {
+          "paper_target_scaled": 503.7,
+          "od_integer_total": 504,
+          "type_expected": {
+            "motorbike": 1.507177033492823,
+            "car": 223.36363636363637,
+            "van": 105.20095693779903,
+            "rigid_lorry": 26.827751196172247,
+            "trailer_bus": 147.10047846889952
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.49282296650717705,
+            "car": -0.36363636363637397,
+            "van": -0.20095693779903456,
+            "rigid_lorry": 0.17224880382775254,
+            "trailer_bus": -0.10047846889952439
+          }
+        },
+        "O1D2": {
+          "paper_target_scaled": 534.6,
+          "od_integer_total": 535,
+          "type_expected": {
+            "motorbike": 3.293228875209849,
+            "car": 371.5360940123111,
+            "van": 54.487968662562956,
+            "rigid_lorry": 22.753217683268048,
+            "trailer_bus": 82.92949076664802
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.2932288752098491,
+            "car": 0.4639059876889178,
+            "van": -0.487968662562956,
+            "rigid_lorry": 0.24678231673195228,
+            "trailer_bus": 0.07050923335198434
+          }
+        },
+        "O1D3": {
+          "paper_target_scaled": 69.3,
+          "od_integer_total": 69,
+          "type_expected": {
+            "motorbike": 0.0,
+            "car": 60.33766233766234,
+            "van": 6.87012987012987,
+            "rigid_lorry": 1.4935064935064934,
+            "trailer_bus": 0.2987012987012987
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.0,
+            "car": -0.3376623376623371,
+            "van": 0.12987012987013014,
+            "rigid_lorry": 0.5064935064935066,
+            "trailer_bus": -0.2987012987012987
+          }
+        },
+        "O2D1": {
+          "paper_target_scaled": 189.0,
+          "od_integer_total": 189,
+          "type_expected": {
+            "motorbike": 0.43709528214616095,
+            "car": 87.95407709477293,
+            "van": 24.37941041679043,
+            "rigid_lorry": 11.714153561517115,
+            "trailer_bus": 64.51526364477336
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.43709528214616095,
+            "car": 0.045922905227072874,
+            "van": -0.3794104167904315,
+            "rigid_lorry": 0.28584643848288493,
+            "trailer_bus": 0.4847363552266444
+          }
+        },
+        "O2D2": {
+          "paper_target_scaled": 373.8,
+          "od_integer_total": 374,
+          "type_expected": {
+            "motorbike": 0.23326403326403328,
+            "car": 265.3819061074156,
+            "van": 24.643041917532432,
+            "rigid_lorry": 18.73887733887734,
+            "trailer_bus": 65.0029106029106
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.23326403326403328,
+            "car": -0.3819061074156025,
+            "van": 0.35695808246756755,
+            "rigid_lorry": 0.26112266112265914,
+            "trailer_bus": -0.0029106029106031883
+          }
+        },
+        "O2D3": {
+          "paper_target_scaled": 68.4,
+          "od_integer_total": 68,
+          "type_expected": {
+            "motorbike": 0.068,
+            "car": 54.680159999999994,
+            "van": 4.00384,
+            "rigid_lorry": 3.3320000000000003,
+            "trailer_bus": 5.9159999999999995
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.068,
+            "car": 0.31984000000000634,
+            "van": -0.0038400000000002876,
+            "rigid_lorry": -0.3320000000000003,
+            "trailer_bus": 0.08400000000000052
+          }
+        },
+        "O3D1": {
+          "paper_target_scaled": 51.3,
+          "od_integer_total": 51,
+          "type_expected": {
+            "motorbike": 0.1461318051575931,
+            "car": 35.40532320391157,
+            "van": 9.311009174311927,
+            "rigid_lorry": 2.1919770773638967,
+            "trailer_bus": 3.945558739255014
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.1461318051575931,
+            "car": 0.5946767960884287,
+            "van": -0.311009174311927,
+            "rigid_lorry": -0.1919770773638967,
+            "trailer_bus": 0.05444126074498579
+          }
+        },
+        "O3D2": {
+          "paper_target_scaled": 172.2,
+          "od_integer_total": 172,
+          "type_expected": {
+            "motorbike": 0.19239373601789708,
+            "car": 149.30849058531854,
+            "van": 13.841397557858198,
+            "rigid_lorry": 5.868008948545862,
+            "trailer_bus": 2.7897091722595078
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.19239373601789708,
+            "car": -0.30849058531853757,
+            "van": 0.1586024421418024,
+            "rigid_lorry": 0.13199105145413803,
+            "trailer_bus": 0.21029082774049224
+          }
+        },
+        "O3D3": {
+          "paper_target_scaled": 59.1,
+          "od_integer_total": 59,
+          "type_expected": {
+            "motorbike": 0.0,
+            "car": 53.267908414103104,
+            "van": 3.941952521421548,
+            "rigid_lorry": 1.4171934260429837,
+            "trailer_bus": 0.37294563843236406
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.0,
+            "car": -0.26790841410310406,
+            "van": 0.05804747857845216,
+            "rigid_lorry": 0.5828065739570163,
+            "trailer_bus": -0.37294563843236406
+          }
+        }
+      },
+      "route": "Antwerp_empirical_v1_easy.rou.xml",
+      "route_sha256": "93f51d30b376f9ed4020e6445dfd55c737ab99cb1a914d54426cdf23a649ebf5",
+      "historical": {
+        "route": "Antwerp_easy_o3_d3.rou.xml",
+        "background_total": 1799,
+        "od_totals": {
+          "O1D1": 373,
+          "O1D2": 522,
+          "O1D3": 65,
+          "O2D1": 179,
+          "O2D2": 387,
+          "O2D3": 66,
+          "O3D1": 28,
+          "O3D2": 128,
+          "O3D3": 51
+        }
+      }
+    },
+    "medium": {
+      "scale": "0.6",
+      "background_total": 4043,
+      "od_type_counts": {
+        "O1D1": {
+          "motorbike": 3,
+          "car": 446,
+          "van": 210,
+          "rigid_lorry": 54,
+          "trailer_bus": 294
+        },
+        "O1D2": {
+          "motorbike": 7,
+          "car": 742,
+          "van": 109,
+          "rigid_lorry": 45,
+          "trailer_bus": 166
+        },
+        "O1D3": {
+          "motorbike": 0,
+          "car": 121,
+          "van": 14,
+          "rigid_lorry": 3,
+          "trailer_bus": 1
+        },
+        "O2D1": {
+          "motorbike": 1,
+          "car": 176,
+          "van": 49,
+          "rigid_lorry": 23,
+          "trailer_bus": 129
+        },
+        "O2D2": {
+          "motorbike": 0,
+          "car": 531,
+          "van": 49,
+          "rigid_lorry": 38,
+          "trailer_bus": 130
+        },
+        "O2D3": {
+          "motorbike": 0,
+          "car": 110,
+          "van": 8,
+          "rigid_lorry": 7,
+          "trailer_bus": 12
+        },
+        "O3D1": {
+          "motorbike": 0,
+          "car": 72,
+          "van": 19,
+          "rigid_lorry": 4,
+          "trailer_bus": 8
+        },
+        "O3D2": {
+          "motorbike": 0,
+          "car": 299,
+          "van": 28,
+          "rigid_lorry": 12,
+          "trailer_bus": 5
+        },
+        "O3D3": {
+          "motorbike": 0,
+          "car": 106,
+          "van": 8,
+          "rigid_lorry": 3,
+          "trailer_bus": 1
+        }
+      },
+      "rounding": {
+        "O1D1": {
+          "paper_target_scaled": 1007.4,
+          "od_integer_total": 1007,
+          "type_expected": {
+            "motorbike": 3.0113636363636362,
+            "car": 446.2840909090909,
+            "van": 210.1931818181818,
+            "rigid_lorry": 53.60227272727273,
+            "trailer_bus": 293.90909090909093
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.011363636363636243,
+            "car": -0.2840909090908781,
+            "van": -0.19318181818181301,
+            "rigid_lorry": 0.3977272727272734,
+            "trailer_bus": 0.09090909090906507
+          }
+        },
+        "O1D2": {
+          "paper_target_scaled": 1069.2,
+          "od_integer_total": 1069,
+          "type_expected": {
+            "motorbike": 6.580302182428651,
+            "car": 742.3777280358141,
+            "van": 108.87409065472859,
+            "rigid_lorry": 45.46390598768886,
+            "trailer_bus": 165.7039731393397
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.4196978175713486,
+            "car": -0.3777280358141297,
+            "van": 0.12590934527140973,
+            "rigid_lorry": -0.46390598768886093,
+            "trailer_bus": 0.29602686066030515
+          }
+        },
+        "O1D3": {
+          "paper_target_scaled": 138.6,
+          "od_integer_total": 139,
+          "type_expected": {
+            "motorbike": 0.0,
+            "car": 121.54978354978356,
+            "van": 13.83982683982684,
+            "rigid_lorry": 3.0086580086580086,
+            "trailer_bus": 0.6017316017316018
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.0,
+            "car": -0.5497835497835553,
+            "van": 0.1601731601731604,
+            "rigid_lorry": -0.008658008658008587,
+            "trailer_bus": 0.3982683982683982
+          }
+        },
+        "O2D1": {
+          "paper_target_scaled": 378.0,
+          "od_integer_total": 378,
+          "type_expected": {
+            "motorbike": 0.8741905642923219,
+            "car": 175.90815418954585,
+            "van": 48.75882083358086,
+            "rigid_lorry": 23.42830712303423,
+            "trailer_bus": 129.0305272895467
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.1258094357076781,
+            "car": 0.09184581045414575,
+            "van": 0.24117916641913695,
+            "rigid_lorry": -0.42830712303423013,
+            "trailer_bus": -0.030527289546711245
+          }
+        },
+        "O2D2": {
+          "paper_target_scaled": 747.6,
+          "od_integer_total": 748,
+          "type_expected": {
+            "motorbike": 0.46652806652806655,
+            "car": 530.7638122148312,
+            "van": 49.286083835064865,
+            "rigid_lorry": 37.47775467775468,
+            "trailer_bus": 130.0058212058212
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.46652806652806655,
+            "car": 0.23618778516879502,
+            "van": -0.2860838350648649,
+            "rigid_lorry": 0.5222453222453183,
+            "trailer_bus": -0.005821205821206377
+          }
+        },
+        "O2D3": {
+          "paper_target_scaled": 136.8,
+          "od_integer_total": 137,
+          "type_expected": {
+            "motorbike": 0.137,
+            "car": 110.16444,
+            "van": 8.06656,
+            "rigid_lorry": 6.713,
+            "trailer_bus": 11.918999999999999
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.137,
+            "car": -0.16443999999999903,
+            "van": -0.06656000000000084,
+            "rigid_lorry": 0.2869999999999999,
+            "trailer_bus": 0.0810000000000013
+          }
+        },
+        "O3D1": {
+          "paper_target_scaled": 102.6,
+          "od_integer_total": 103,
+          "type_expected": {
+            "motorbike": 0.2951289398280802,
+            "car": 71.50486843142924,
+            "van": 18.804587155963304,
+            "rigid_lorry": 4.426934097421203,
+            "trailer_bus": 7.968481375358166
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.2951289398280802,
+            "car": 0.4951315685707556,
+            "van": 0.1954128440366958,
+            "rigid_lorry": -0.4269340974212028,
+            "trailer_bus": 0.031518624641834414
+          }
+        },
+        "O3D2": {
+          "paper_target_scaled": 344.4,
+          "od_integer_total": 344,
+          "type_expected": {
+            "motorbike": 0.38478747203579416,
+            "car": 298.6169811706371,
+            "van": 27.682795115716395,
+            "rigid_lorry": 11.736017897091724,
+            "trailer_bus": 5.5794183445190155
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.38478747203579416,
+            "car": 0.38301882936292486,
+            "van": 0.3172048842836048,
+            "rigid_lorry": 0.26398210290827606,
+            "trailer_bus": -0.5794183445190155
+          }
+        },
+        "O3D3": {
+          "paper_target_scaled": 118.2,
+          "od_integer_total": 118,
+          "type_expected": {
+            "motorbike": 0.0,
+            "car": 106.53581682820621,
+            "van": 7.883905042843096,
+            "rigid_lorry": 2.8343868520859674,
+            "trailer_bus": 0.7458912768647281
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.0,
+            "car": -0.5358168282062081,
+            "van": 0.11609495715690432,
+            "rigid_lorry": 0.1656131479140326,
+            "trailer_bus": 0.2541087231352719
+          }
+        }
+      },
+      "route": "Antwerp_empirical_v1_medium.rou.xml",
+      "route_sha256": "a33d18b0286a5d9346caa1196e993eedbbc170cfb7027be7c1d28b4329981669",
+      "historical": {
+        "route": "Antwerp_medium_o3_d3.rou.xml",
+        "background_total": 3455,
+        "od_totals": {
+          "O1D1": 715,
+          "O1D2": 1002,
+          "O1D3": 125,
+          "O2D1": 343,
+          "O2D2": 745,
+          "O2D3": 126,
+          "O3D1": 56,
+          "O3D2": 245,
+          "O3D3": 98
+        }
+      }
+    },
+    "hard": {
+      "scale": "1.0",
+      "background_total": 6738,
+      "od_type_counts": {
+        "O1D1": {
+          "motorbike": 5,
+          "car": 744,
+          "van": 351,
+          "rigid_lorry": 89,
+          "trailer_bus": 490
+        },
+        "O1D2": {
+          "motorbike": 11,
+          "car": 1238,
+          "van": 181,
+          "rigid_lorry": 76,
+          "trailer_bus": 276
+        },
+        "O1D3": {
+          "motorbike": 0,
+          "car": 202,
+          "van": 23,
+          "rigid_lorry": 5,
+          "trailer_bus": 1
+        },
+        "O2D1": {
+          "motorbike": 2,
+          "car": 293,
+          "van": 81,
+          "rigid_lorry": 39,
+          "trailer_bus": 215
+        },
+        "O2D2": {
+          "motorbike": 1,
+          "car": 884,
+          "van": 82,
+          "rigid_lorry": 62,
+          "trailer_bus": 217
+        },
+        "O2D3": {
+          "motorbike": 0,
+          "car": 183,
+          "van": 14,
+          "rigid_lorry": 11,
+          "trailer_bus": 20
+        },
+        "O3D1": {
+          "motorbike": 1,
+          "car": 119,
+          "van": 31,
+          "rigid_lorry": 7,
+          "trailer_bus": 13
+        },
+        "O3D2": {
+          "motorbike": 1,
+          "car": 498,
+          "van": 46,
+          "rigid_lorry": 20,
+          "trailer_bus": 9
+        },
+        "O3D3": {
+          "motorbike": 0,
+          "car": 178,
+          "van": 13,
+          "rigid_lorry": 5,
+          "trailer_bus": 1
+        }
+      },
+      "rounding": {
+        "O1D1": {
+          "paper_target_scaled": 1679.0,
+          "od_integer_total": 1679,
+          "type_expected": {
+            "motorbike": 5.020933014354067,
+            "car": 744.1022727272727,
+            "van": 350.4611244019139,
+            "rigid_lorry": 89.37260765550239,
+            "trailer_bus": 490.04306220095697
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.020933014354066692,
+            "car": -0.10227272727274794,
+            "van": 0.538875598086122,
+            "rigid_lorry": -0.3726076555023923,
+            "trailer_bus": -0.043062200956967445
+          }
+        },
+        "O1D2": {
+          "paper_target_scaled": 1782.0,
+          "od_integer_total": 1782,
+          "type_expected": {
+            "motorbike": 10.969222160044769,
+            "car": 1237.5277000559597,
+            "van": 181.49076664801342,
+            "rigid_lorry": 75.78735310576386,
+            "trailer_bus": 276.22495803021826
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.0307778399552312,
+            "car": 0.4722999440402873,
+            "van": -0.4907666480134196,
+            "rigid_lorry": 0.21264689423614413,
+            "trailer_bus": -0.22495803021826077
+          }
+        },
+        "O1D3": {
+          "paper_target_scaled": 231.0,
+          "od_integer_total": 231,
+          "type_expected": {
+            "motorbike": 0.0,
+            "car": 202.0,
+            "van": 23.0,
+            "rigid_lorry": 5.0,
+            "trailer_bus": 1.0
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.0,
+            "car": 0.0,
+            "van": 0.0,
+            "rigid_lorry": 0.0,
+            "trailer_bus": 0.0
+          }
+        },
+        "O2D1": {
+          "paper_target_scaled": 630.0,
+          "od_integer_total": 630,
+          "type_expected": {
+            "motorbike": 1.4569842738205365,
+            "car": 293.18025698257645,
+            "van": 81.26470138930144,
+            "rigid_lorry": 39.04717853839038,
+            "trailer_bus": 215.0508788159112
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.5430157261794635,
+            "car": -0.18025698257645217,
+            "van": -0.26470138930143605,
+            "rigid_lorry": -0.04717853839038355,
+            "trailer_bus": -0.050878815911204356
+          }
+        },
+        "O2D2": {
+          "paper_target_scaled": 1246.0,
+          "od_integer_total": 1246,
+          "type_expected": {
+            "motorbike": 0.7771309771309771,
+            "car": 884.1333021653471,
+            "van": 82.0995460675011,
+            "rigid_lorry": 62.42952182952183,
+            "trailer_bus": 216.56049896049896
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.22286902286902288,
+            "car": -0.1333021653471178,
+            "van": -0.09954606750109463,
+            "rigid_lorry": -0.42952182952183193,
+            "trailer_bus": 0.4395010395010388
+          }
+        },
+        "O2D3": {
+          "paper_target_scaled": 228.0,
+          "od_integer_total": 228,
+          "type_expected": {
+            "motorbike": 0.228,
+            "car": 183.33936,
+            "van": 13.42464,
+            "rigid_lorry": 11.172,
+            "trailer_bus": 19.836
+          },
+          "type_delta_from_expected": {
+            "motorbike": -0.228,
+            "car": -0.3393599999999992,
+            "van": 0.5753599999999999,
+            "rigid_lorry": -0.1720000000000006,
+            "trailer_bus": 0.16400000000000148
+          }
+        },
+        "O3D1": {
+          "paper_target_scaled": 171.0,
+          "od_integer_total": 171,
+          "type_expected": {
+            "motorbike": 0.489971346704871,
+            "car": 118.71196603664467,
+            "van": 31.219266055045875,
+            "rigid_lorry": 7.349570200573066,
+            "trailer_bus": 13.229226361031518
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.510028653295129,
+            "car": 0.28803396335533193,
+            "van": -0.2192660550458747,
+            "rigid_lorry": -0.34957020057306565,
+            "trailer_bus": -0.22922636103151817
+          }
+        },
+        "O3D2": {
+          "paper_target_scaled": 574.0,
+          "od_integer_total": 574,
+          "type_expected": {
+            "motorbike": 0.6420581655480985,
+            "car": 498.2736836975165,
+            "van": 46.19164068727096,
+            "rigid_lorry": 19.582774049217004,
+            "trailer_bus": 9.309843400447427
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.35794183445190153,
+            "car": -0.27368369751650334,
+            "van": -0.1916406872709615,
+            "rigid_lorry": 0.4172259507829956,
+            "trailer_bus": -0.3098434004474271
+          }
+        },
+        "O3D3": {
+          "paper_target_scaled": 197.0,
+          "od_integer_total": 197,
+          "type_expected": {
+            "motorbike": 0.0,
+            "car": 177.86064334878495,
+            "van": 13.162112656271947,
+            "rigid_lorry": 4.731984829329963,
+            "trailer_bus": 1.2452591656131478
+          },
+          "type_delta_from_expected": {
+            "motorbike": 0.0,
+            "car": 0.1393566512150528,
+            "van": -0.1621126562719475,
+            "rigid_lorry": 0.26801517067003733,
+            "trailer_bus": -0.24525916561314776
+          }
+        }
+      },
+      "route": "Antwerp_empirical_v1_hard.rou.xml",
+      "route_sha256": "b0ceb89142d91d302f64ffa1d5eb983654d9d43683778dfaa1ff1b824df5eb89",
+      "historical": {
+        "route": "Antwerp_hard_o3_d3.rou.xml",
+        "background_total": 7107,
+        "od_totals": {
+          "O1D1": 1472,
+          "O1D2": 2062,
+          "O1D3": 257,
+          "O2D1": 706,
+          "O2D2": 1530,
+          "O2D3": 260,
+          "O3D1": 114,
+          "O3D2": 504,
+          "O3D3": 202
+        }
+      }
+    }
+  }
+}

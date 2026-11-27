@@ -106,7 +106,6 @@ def evaluate(args):
     env = MultiEgoEnv(
         lane_change_request=resolve_lane_change_request(args, trained_lane_change_request),
         scenario=getattr(args, "scenario", None) or checkpoint_scenario(reward_config),
-        speed_mode=96,
         collect_metrics=True,
         collect_control_trace=record_trajectory,
         stalled_shadow=record_trajectory,
@@ -466,7 +465,7 @@ def evaluate(args):
         "sumo_version": sumo_version,
         "environment": {
             "sumo_binary_sha256": sha256(checkBinary("sumo")),
-            "scenario": env.scenario, "agent_ids": list(AGENT_IDS), "requested_speed_mode": 96,
+            "scenario": env.scenario, "agent_ids": list(AGENT_IDS), "requested_speed_mode": env.speed_mode,
             "actual_speed_modes": {key: sorted({mode for record in records for mode in record["per_agent"][key]["speed_modes"]}) for key in AGENT_IDS},
             "step_length_s": STEP_LENGTH_S, "max_steps": args.max_steps,
             "decision_interval_steps": decision_interval,

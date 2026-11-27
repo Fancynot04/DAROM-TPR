@@ -1,0 +1,37 @@
+{
+  "name": "Antwerp empirical observed-entry background traffic V1",
+  "date": "20220919",
+  "period": "P1",
+  "entry_reference": "2022-09-19T11:30:00",
+  "sumo_version": "1.18.0",
+  "step_s": 0.1,
+  "lateral_resolution_m": 0.8,
+  "seed": 42,
+  "road_limit_kmh": 120,
+  "demand_end_s": 3600,
+  "warmup_end_s": 300,
+  "drain_end_s": 4800,
+  "time_stratum_s": 300,
+  "speed_boundary_kmh": 254,
+  "length_boundary_dm": 255,
+  "motorbike_physical_length_m": 2.0,
+  "physical_length_bounds_dm": {
+    "Car": [25, 40],
+    "Van": [41, 69],
+    "Car/Van 待判定": [41, 69],
+    "Rigid lorry": [70, 120],
+    "Trailer/Bus": [121, 220]
+  },
+  "entrances": {
+    "467": {"origin": "O1", "logical_lane": "L3", "lane": "O1_0", "next": "E74_2"},
+    "468": {"origin": "O1", "logical_lane": "L2", "lane": "O1_1", "next": "E74_3"},
+    "469": {"origin": "O1", "logical_lane": "L1", "lane": "O1_2", "next": "E74_4"},
+    "471": {"origin": "O2", "logical_lane": "L5", "lane": "O2_0", "next": "E74_0"},
+    "472": {"origin": "O2", "logical_lane": "L4", "lane": "O2_1", "next": "E74_1"},
+    "464": {"origin": "O3", "logical_lane": "L6", "lane": "O3_0", "next": "E75_0"}
+  },
+  "exit_detectors": {"D1": [3850, 3851, 3852], "D2": [2801, 2802, 2803], "D3": [458]},
+  "unresolved_exit_detector": 3849,
+  "vehicle_types_from": "../empirical_v1/config.json",
+  "scenarios": {"Easy": 2346, "Medium": 4692, "Hard": 7820}
+}

@@ -1,0 +1,1839 @@
+{
+  "origin_order": [
+    "O1",
+    "O2",
+    "O3"
+  ],
+  "destination_order": [
+    "D1",
+    "D2",
+    "D3"
+  ],
+  "config_sha256": "c38f36bf7aa1075f12bec3514f551f8f50d615af33e3c5c67b77f549098f8a5a",
+  "source_sha256": {
+    "reference-demand.json": "919ad2ebd8df61a9c00a51354ed635af594ef639fff4fc918d3cbca862741934",
+    "recovery.json": "25132a88f500a5c1f33773d5431b4c1078ce753a53b9b4a61c2746349066208a",
+    "entry-observations.csv.gz": "a25f1cc95308a7cc423e6cd05a12809839990397710164956becd44c79342a0e"
+  },
+  "vehicle_setup_source_sha256": "aef1ac82ee4081f967cd3e583f02ee02137b189f1d0e25fbdca3494b2220b666",
+  "provenance_sha256": "eefd3f02fa4b76a99ff51cdd23dd44438ba912f2de700de9af8b03f0726d4445",
+  "network_sha256": "b246e9af5d2b5d8abec14b91a978de27d5582f29c45683cd169fd06a7d942459",
+  "seed": 42,
+  "reference": "2022-09-19T11:30:00",
+  "entrance_mapping": {
+    "467": {
+      "origin": "O1",
+      "logical_lane": "L3",
+      "lane": "O1_0",
+      "next": "E74_2"
+    },
+    "468": {
+      "origin": "O1",
+      "logical_lane": "L2",
+      "lane": "O1_1",
+      "next": "E74_3"
+    },
+    "469": {
+      "origin": "O1",
+      "logical_lane": "L1",
+      "lane": "O1_2",
+      "next": "E74_4"
+    },
+    "471": {
+      "origin": "O2",
+      "logical_lane": "L5",
+      "lane": "O2_0",
+      "next": "E74_0"
+    },
+    "472": {
+      "origin": "O2",
+      "logical_lane": "L4",
+      "lane": "O2_1",
+      "next": "E74_1"
+    },
+    "464": {
+      "origin": "O3",
+      "logical_lane": "L6",
+      "lane": "O3_0",
+      "next": "E75_0"
+    }
+  },
+  "unresolved_detector": 3849,
+  "length_speed_repairs": {
+    "length_median_replacement_dm": {
+      "Trailer/Bus": 168,
+      "Car": 38,
+      "Car/Van 待判定": 44,
+      "Rigid lorry": 88
+    },
+    "speed_median_replacement_kmh": {
+      "471": 73.0,
+      "472": 83.0,
+      "468": 90,
+      "469": 99,
+      "467": 78.0,
+      "464": 71.0
+    }
+  },
+  "cleaning_flags_hard": {
+    "cap_speed_by_road_or_vehicle": 584,
+    "replace_boundary_length": 35,
+    "replace_speed_boundary_or_negative": 34,
+    "replace_outside_physical_length_bounds": 48,
+    "motorbike_detector_length_to_existing_physical_length": 26
+  },
+  "statistics_windows_s": {
+    "warmup": [
+      0,
+      300
+    ],
+    "main": [
+      300,
+      3600
+    ],
+    "drain": [
+      3600,
+      4800
+    ]
+  },
+  "scenarios": {
+    "Easy": {
+      "target": 2346,
+      "od": [
+        [
+          612,
+          589,
+          78
+        ],
+        [
+          250,
+          476,
+          104
+        ],
+        [
+          32,
+          145,
+          60
+        ]
+      ],
+      "destination_sources": {
+        "observed_match": 1798,
+        "furness_residual": 548
+      },
+      "length_categories": {
+        "Car/Van 待判定": 1172,
+        "Car": 643,
+        "Trailer/Bus": 417,
+        "Rigid lorry": 107,
+        "Motorbike": 7
+      },
+      "route": "Antwerp_observed_easy.rou.xml",
+      "route_sha256": "0722fe6e2ebd10f57422a95c30d7a852caf7fc0de3126da676e53e8267c31008",
+      "config": "Antwerp_observed_easy.sumocfg",
+      "config_sha256": "2be13f35ae5bfbaba170361ab994853feb3c3afb6d3847174c79e6c707f32671",
+      "stratification": {
+        "O1D1": {
+          "time_bin": {
+            "counts": {
+              "0": 52,
+              "1": 46,
+              "2": 52,
+              "3": 54,
+              "4": 55,
+              "5": 52,
+              "6": 51,
+              "7": 47,
+              "8": 52,
+              "9": 47,
+              "10": 49,
+              "11": 55
+            },
+            "hard_counts": {
+              "0": 172,
+              "1": 154,
+              "2": 172,
+              "3": 180,
+              "4": 183,
+              "5": 171,
+              "6": 171,
+              "7": 158,
+              "8": 175,
+              "9": 157,
+              "10": 163,
+              "11": 184
+            },
+            "max_abs_share_delta": 0.0011437908496732124
+          },
+          "entry_lane": {
+            "counts": {
+              "O1_0": 182,
+              "O1_1": 271,
+              "O1_2": 159
+            },
+            "hard_counts": {
+              "O1_0": 605,
+              "O1_1": 905,
+              "O1_2": 530
+            },
+            "max_abs_share_delta": 0.0008169934640522847
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 268,
+              "Car": 178,
+              "Trailer/Bus": 139,
+              "Rigid lorry": 25,
+              "Motorbike": 2
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 891,
+              "Car": 593,
+              "Trailer/Bus": 463,
+              "Rigid lorry": 84,
+              "Motorbike": 9
+            },
+            "max_abs_share_delta": 0.0011437908496732025
+          }
+        },
+        "O1D2": {
+          "time_bin": {
+            "counts": {
+              "0": 48,
+              "1": 47,
+              "2": 53,
+              "3": 46,
+              "4": 42,
+              "5": 45,
+              "6": 49,
+              "7": 50,
+              "8": 46,
+              "9": 55,
+              "10": 52,
+              "11": 56
+            },
+            "hard_counts": {
+              "0": 158,
+              "1": 155,
+              "2": 177,
+              "3": 154,
+              "4": 140,
+              "5": 148,
+              "6": 164,
+              "7": 165,
+              "8": 155,
+              "9": 185,
+              "10": 175,
+              "11": 188
+            },
+            "max_abs_share_delta": 0.0010459925518414709
+          },
+          "entry_lane": {
+            "counts": {
+              "O1_2": 159,
+              "O1_0": 219,
+              "O1_1": 211
+            },
+            "hard_counts": {
+              "O1_2": 530,
+              "O1_0": 730,
+              "O1_1": 704
+            },
+            "max_abs_share_delta": 0.00021784307691241622
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 286,
+              "Trailer/Bus": 103,
+              "Car": 167,
+              "Rigid lorry": 31,
+              "Motorbike": 2
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 951,
+              "Trailer/Bus": 344,
+              "Car": 555,
+              "Rigid lorry": 105,
+              "Motorbike": 9
+            },
+            "max_abs_share_delta": 0.0013528746641585654
+          }
+        },
+        "O1D3": {
+          "time_bin": {
+            "counts": {
+              "0": 8,
+              "1": 6,
+              "2": 7,
+              "3": 6,
+              "4": 7,
+              "5": 5,
+              "6": 7,
+              "7": 5,
+              "8": 8,
+              "9": 5,
+              "10": 6,
+              "11": 8
+            },
+            "hard_counts": {
+              "0": 25,
+              "1": 19,
+              "2": 23,
+              "3": 18,
+              "4": 24,
+              "5": 17,
+              "6": 24,
+              "7": 18,
+              "8": 26,
+              "9": 18,
+              "10": 21,
+              "11": 26
+            },
+            "max_abs_share_delta": 0.007425007425007429
+          },
+          "entry_lane": {
+            "counts": {
+              "O1_1": 32,
+              "O1_0": 28,
+              "O1_2": 18
+            },
+            "hard_counts": {
+              "O1_1": 107,
+              "O1_0": 91,
+              "O1_2": 61
+            },
+            "max_abs_share_delta": 0.007623007623007605
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 42,
+              "Trailer/Bus": 6,
+              "Rigid lorry": 4,
+              "Car": 26
+            },
+            "hard_counts": {
+              "Car": 85,
+              "Car/Van 待判定": 138,
+              "Trailer/Bus": 20,
+              "Rigid lorry": 14,
+              "Motorbike": 2
+            },
+            "max_abs_share_delta": 0.007722007722007722
+          }
+        },
+        "O2D1": {
+          "time_bin": {
+            "counts": {
+              "0": 22,
+              "1": 20,
+              "2": 20,
+              "3": 22,
+              "4": 20,
+              "5": 23,
+              "6": 24,
+              "7": 21,
+              "8": 17,
+              "9": 22,
+              "10": 20,
+              "11": 19
+            },
+            "hard_counts": {
+              "0": 71,
+              "1": 66,
+              "2": 65,
+              "3": 71,
+              "4": 67,
+              "5": 76,
+              "6": 80,
+              "7": 71,
+              "8": 57,
+              "9": 74,
+              "10": 69,
+              "11": 66
+            },
+            "max_abs_share_delta": 0.0032316926770708243
+          },
+          "entry_lane": {
+            "counts": {
+              "O2_0": 118,
+              "O2_1": 132
+            },
+            "hard_counts": {
+              "O2_0": 393,
+              "O2_1": 440
+            },
+            "max_abs_share_delta": 0.00021128451380547641
+          },
+          "length_category": {
+            "counts": {
+              "Trailer/Bus": 75,
+              "Car/Van 待判定": 113,
+              "Car": 48,
+              "Rigid lorry": 13,
+              "Motorbike": 1
+            },
+            "hard_counts": {
+              "Trailer/Bus": 250,
+              "Car/Van 待判定": 375,
+              "Car": 160,
+              "Rigid lorry": 46,
+              "Motorbike": 2
+            },
+            "max_abs_share_delta": 0.003222088835534216
+          }
+        },
+        "O2D2": {
+          "time_bin": {
+            "counts": {
+              "0": 40,
+              "1": 36,
+              "2": 36,
+              "3": 42,
+              "4": 46,
+              "5": 35,
+              "6": 42,
+              "7": 34,
+              "8": 44,
+              "9": 41,
+              "10": 42,
+              "11": 38
+            },
+            "hard_counts": {
+              "0": 134,
+              "1": 121,
+              "2": 120,
+              "3": 139,
+              "4": 153,
+              "5": 116,
+              "6": 140,
+              "7": 114,
+              "8": 146,
+              "9": 136,
+              "10": 138,
+              "11": 129
+            },
+            "max_abs_share_delta": 0.0015047633176852176
+          },
+          "entry_lane": {
+            "counts": {
+              "O2_1": 286,
+              "O2_0": 190
+            },
+            "hard_counts": {
+              "O2_1": 952,
+              "O2_0": 634
+            },
+            "max_abs_share_delta": 0.0005881293248699015
+          },
+          "length_category": {
+            "counts": {
+              "Car": 118,
+              "Car/Van 待判定": 254,
+              "Trailer/Bus": 80,
+              "Motorbike": 1,
+              "Rigid lorry": 23
+            },
+            "hard_counts": {
+              "Car": 394,
+              "Car/Van 待判定": 845,
+              "Trailer/Bus": 269,
+              "Rigid lorry": 76,
+              "Motorbike": 2
+            },
+            "max_abs_share_delta": 0.0015418525543887118
+          }
+        },
+        "O2D3": {
+          "time_bin": {
+            "counts": {
+              "0": 9,
+              "1": 9,
+              "2": 12,
+              "3": 9,
+              "4": 8,
+              "5": 9,
+              "6": 9,
+              "7": 9,
+              "8": 6,
+              "9": 7,
+              "10": 8,
+              "11": 9
+            },
+            "hard_counts": {
+              "0": 30,
+              "1": 32,
+              "2": 42,
+              "3": 28,
+              "4": 26,
+              "5": 29,
+              "6": 28,
+              "7": 32,
+              "8": 19,
+              "9": 23,
+              "10": 29,
+              "11": 30
+            },
+            "max_abs_share_delta": 0.006410256410256401
+          },
+          "entry_lane": {
+            "counts": {
+              "O2_1": 47,
+              "O2_0": 57
+            },
+            "hard_counts": {
+              "O2_1": 157,
+              "O2_0": 191
+            },
+            "max_abs_share_delta": 0.0007736516357206291
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 64,
+              "Trailer/Bus": 9,
+              "Car": 28,
+              "Rigid lorry": 3
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 213,
+              "Car": 95,
+              "Trailer/Bus": 30,
+              "Rigid lorry": 10
+            },
+            "max_abs_share_delta": 0.0037577365163572463
+          }
+        },
+        "O3D1": {
+          "time_bin": {
+            "counts": {
+              "0": 2,
+              "1": 4,
+              "2": 2,
+              "3": 4,
+              "4": 3,
+              "5": 3,
+              "6": 4,
+              "7": 3,
+              "8": 2,
+              "9": 3,
+              "10": 1,
+              "11": 1
+            },
+            "hard_counts": {
+              "0": 7,
+              "1": 11,
+              "2": 5,
+              "3": 12,
+              "4": 10,
+              "5": 9,
+              "6": 14,
+              "7": 11,
+              "8": 7,
+              "9": 11,
+              "10": 5,
+              "11": 5
+            },
+            "max_abs_share_delta": 0.022196261682242993
+          },
+          "entry_lane": {
+            "counts": {
+              "O3_0": 32
+            },
+            "hard_counts": {
+              "O3_0": 107
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 18,
+              "Rigid lorry": 1,
+              "Car": 10,
+              "Trailer/Bus": 3
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 58,
+              "Car": 33,
+              "Trailer/Bus": 10,
+              "Rigid lorry": 6
+            },
+            "max_abs_share_delta": 0.024824766355140186
+          }
+        },
+        "O3D2": {
+          "time_bin": {
+            "counts": {
+              "0": 12,
+              "1": 11,
+              "2": 11,
+              "3": 13,
+              "4": 11,
+              "5": 13,
+              "6": 11,
+              "7": 14,
+              "8": 10,
+              "9": 13,
+              "10": 14,
+              "11": 12
+            },
+            "hard_counts": {
+              "0": 39,
+              "1": 36,
+              "2": 36,
+              "3": 45,
+              "4": 36,
+              "5": 43,
+              "6": 35,
+              "7": 49,
+              "8": 33,
+              "9": 45,
+              "10": 48,
+              "11": 39
+            },
+            "max_abs_share_delta": 0.004687945283556566
+          },
+          "entry_lane": {
+            "counts": {
+              "O3_0": 145
+            },
+            "hard_counts": {
+              "O3_0": 484
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 91,
+              "Rigid lorry": 5,
+              "Car": 46,
+              "Trailer/Bus": 2,
+              "Motorbike": 1
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 304,
+              "Rigid lorry": 17,
+              "Car": 153,
+              "Motorbike": 2,
+              "Trailer/Bus": 8
+            },
+            "max_abs_share_delta": 0.002764320319179253
+          }
+        },
+        "O3D3": {
+          "time_bin": {
+            "counts": {
+              "0": 5,
+              "1": 4,
+              "2": 2,
+              "3": 7,
+              "4": 3,
+              "5": 6,
+              "6": 4,
+              "7": 6,
+              "8": 5,
+              "9": 6,
+              "10": 6,
+              "11": 6
+            },
+            "hard_counts": {
+              "0": 16,
+              "1": 13,
+              "2": 8,
+              "3": 23,
+              "4": 10,
+              "5": 19,
+              "6": 13,
+              "7": 21,
+              "8": 17,
+              "9": 20,
+              "10": 20,
+              "11": 19
+            },
+            "max_abs_share_delta": 0.006867671691792296
+          },
+          "entry_lane": {
+            "counts": {
+              "O3_0": 60
+            },
+            "hard_counts": {
+              "O3_0": 199
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 36,
+              "Car": 22,
+              "Rigid lorry": 2
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 119,
+              "Car": 71,
+              "Rigid lorry": 7,
+              "Trailer/Bus": 2
+            },
+            "max_abs_share_delta": 0.010050251256281407
+          }
+        }
+      }
+    },
+    "Medium": {
+      "target": 4692,
+      "od": [
+        [
+          1224,
+          1178,
+          156
+        ],
+        [
+          500,
+          951,
+          209
+        ],
+        [
+          64,
+          291,
+          119
+        ]
+      ],
+      "destination_sources": {
+        "observed_match": 3631,
+        "furness_residual": 1061
+      },
+      "length_categories": {
+        "Car/Van 待判定": 2338,
+        "Car": 1284,
+        "Trailer/Bus": 837,
+        "Rigid lorry": 219,
+        "Motorbike": 14
+      },
+      "route": "Antwerp_observed_medium.rou.xml",
+      "route_sha256": "136777bb8d2ecaf4e7f523bbcb81b8adcc348f426e0b620ff754970e6958d912",
+      "config": "Antwerp_observed_medium.sumocfg",
+      "config_sha256": "9cc1469ad11d82cff0f34e5d6506e1be01633d632d374d2bb4436bb06e5ea140",
+      "stratification": {
+        "O1D1": {
+          "time_bin": {
+            "counts": {
+              "0": 103,
+              "1": 92,
+              "2": 103,
+              "3": 108,
+              "4": 110,
+              "5": 103,
+              "6": 103,
+              "7": 95,
+              "8": 105,
+              "9": 94,
+              "10": 98,
+              "11": 110
+            },
+            "hard_counts": {
+              "0": 172,
+              "1": 154,
+              "2": 172,
+              "3": 180,
+              "4": 183,
+              "5": 171,
+              "6": 171,
+              "7": 158,
+              "8": 175,
+              "9": 157,
+              "10": 163,
+              "11": 184
+            },
+            "max_abs_share_delta": 0.00032679738562092775
+          },
+          "entry_lane": {
+            "counts": {
+              "O1_0": 363,
+              "O1_1": 543,
+              "O1_2": 318
+            },
+            "hard_counts": {
+              "O1_0": 605,
+              "O1_1": 905,
+              "O1_2": 530
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 535,
+              "Car": 356,
+              "Trailer/Bus": 278,
+              "Rigid lorry": 50,
+              "Motorbike": 5
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 891,
+              "Car": 593,
+              "Trailer/Bus": 463,
+              "Rigid lorry": 84,
+              "Motorbike": 9
+            },
+            "max_abs_share_delta": 0.00032679738562091474
+          }
+        },
+        "O1D2": {
+          "time_bin": {
+            "counts": {
+              "0": 95,
+              "1": 93,
+              "2": 106,
+              "3": 92,
+              "4": 84,
+              "5": 89,
+              "6": 98,
+              "7": 99,
+              "8": 93,
+              "9": 111,
+              "10": 105,
+              "11": 113
+            },
+            "hard_counts": {
+              "0": 158,
+              "1": 155,
+              "2": 177,
+              "3": 154,
+              "4": 140,
+              "5": 148,
+              "6": 164,
+              "7": 165,
+              "8": 155,
+              "9": 185,
+              "10": 175,
+              "11": 188
+            },
+            "max_abs_share_delta": 0.0003129333088980196
+          },
+          "entry_lane": {
+            "counts": {
+              "O1_2": 318,
+              "O1_0": 438,
+              "O1_1": 422
+            },
+            "hard_counts": {
+              "O1_2": 530,
+              "O1_0": 730,
+              "O1_1": 704
+            },
+            "max_abs_share_delta": 0.00021784307691241622
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 571,
+              "Trailer/Bus": 206,
+              "Car": 333,
+              "Rigid lorry": 63,
+              "Motorbike": 5
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 951,
+              "Trailer/Bus": 344,
+              "Car": 555,
+              "Rigid lorry": 105,
+              "Motorbike": 9
+            },
+            "max_abs_share_delta": 0.0005039782295236384
+          }
+        },
+        "O1D3": {
+          "time_bin": {
+            "counts": {
+              "0": 15,
+              "1": 11,
+              "2": 14,
+              "3": 11,
+              "4": 14,
+              "5": 10,
+              "6": 14,
+              "7": 11,
+              "8": 16,
+              "9": 11,
+              "10": 13,
+              "11": 16
+            },
+            "hard_counts": {
+              "0": 25,
+              "1": 19,
+              "2": 23,
+              "3": 18,
+              "4": 24,
+              "5": 17,
+              "6": 24,
+              "7": 18,
+              "8": 26,
+              "9": 18,
+              "10": 21,
+              "11": 26
+            },
+            "max_abs_share_delta": 0.0029205029205029154
+          },
+          "entry_lane": {
+            "counts": {
+              "O1_1": 64,
+              "O1_0": 55,
+              "O1_2": 37
+            },
+            "hard_counts": {
+              "O1_1": 107,
+              "O1_0": 91,
+              "O1_2": 61
+            },
+            "max_abs_share_delta": 0.0028710028710028923
+          },
+          "length_category": {
+            "counts": {
+              "Car": 51,
+              "Car/Van 待判定": 83,
+              "Trailer/Bus": 12,
+              "Rigid lorry": 9,
+              "Motorbike": 1
+            },
+            "hard_counts": {
+              "Car": 85,
+              "Car/Van 待判定": 138,
+              "Trailer/Bus": 20,
+              "Rigid lorry": 14,
+              "Motorbike": 2
+            },
+            "max_abs_share_delta": 0.0036382536382536385
+          }
+        },
+        "O2D1": {
+          "time_bin": {
+            "counts": {
+              "0": 43,
+              "1": 40,
+              "2": 39,
+              "3": 43,
+              "4": 40,
+              "5": 46,
+              "6": 48,
+              "7": 43,
+              "8": 34,
+              "9": 44,
+              "10": 41,
+              "11": 39
+            },
+            "hard_counts": {
+              "0": 71,
+              "1": 66,
+              "2": 65,
+              "3": 71,
+              "4": 67,
+              "5": 76,
+              "6": 80,
+              "7": 71,
+              "8": 57,
+              "9": 74,
+              "10": 69,
+              "11": 66
+            },
+            "max_abs_share_delta": 0.0012316926770708225
+          },
+          "entry_lane": {
+            "counts": {
+              "O2_0": 236,
+              "O2_1": 264
+            },
+            "hard_counts": {
+              "O2_0": 393,
+              "O2_1": 440
+            },
+            "max_abs_share_delta": 0.00021128451380547641
+          },
+          "length_category": {
+            "counts": {
+              "Trailer/Bus": 150,
+              "Car/Van 待判定": 225,
+              "Car": 96,
+              "Rigid lorry": 28,
+              "Motorbike": 1
+            },
+            "hard_counts": {
+              "Trailer/Bus": 250,
+              "Car/Van 待判定": 375,
+              "Car": 160,
+              "Rigid lorry": 46,
+              "Motorbike": 2
+            },
+            "max_abs_share_delta": 0.0007779111644657874
+          }
+        },
+        "O2D2": {
+          "time_bin": {
+            "counts": {
+              "0": 80,
+              "1": 73,
+              "2": 72,
+              "3": 83,
+              "4": 92,
+              "5": 70,
+              "6": 84,
+              "7": 68,
+              "8": 87,
+              "9": 82,
+              "10": 83,
+              "11": 77
+            },
+            "hard_counts": {
+              "0": 134,
+              "1": 121,
+              "2": 120,
+              "3": 139,
+              "4": 153,
+              "5": 116,
+              "6": 140,
+              "7": 114,
+              "8": 146,
+              "9": 136,
+              "10": 138,
+              "11": 129
+            },
+            "max_abs_share_delta": 0.0005728356558371561
+          },
+          "entry_lane": {
+            "counts": {
+              "O2_1": 571,
+              "O2_0": 380
+            },
+            "hard_counts": {
+              "O2_1": 952,
+              "O2_0": 634
+            },
+            "max_abs_share_delta": 0.00016840307474841332
+          },
+          "length_category": {
+            "counts": {
+              "Car": 236,
+              "Car/Van 待判定": 507,
+              "Trailer/Bus": 161,
+              "Rigid lorry": 46,
+              "Motorbike": 1
+            },
+            "hard_counts": {
+              "Car": 394,
+              "Car/Van 待判定": 845,
+              "Trailer/Bus": 269,
+              "Rigid lorry": 76,
+              "Motorbike": 2
+            },
+            "max_abs_share_delta": 0.0004508428772792422
+          }
+        },
+        "O2D3": {
+          "time_bin": {
+            "counts": {
+              "0": 18,
+              "1": 19,
+              "2": 25,
+              "3": 17,
+              "4": 16,
+              "5": 18,
+              "6": 17,
+              "7": 19,
+              "8": 11,
+              "9": 14,
+              "10": 17,
+              "11": 18
+            },
+            "hard_counts": {
+              "0": 30,
+              "1": 32,
+              "2": 42,
+              "3": 28,
+              "4": 26,
+              "5": 29,
+              "6": 28,
+              "7": 32,
+              "8": 19,
+              "9": 23,
+              "10": 29,
+              "11": 30
+            },
+            "max_abs_share_delta": 0.0027910685805422747
+          },
+          "entry_lane": {
+            "counts": {
+              "O2_1": 94,
+              "O2_0": 115
+            },
+            "hard_counts": {
+              "O2_1": 157,
+              "O2_0": 191
+            },
+            "max_abs_share_delta": 0.0013886597371171039
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 128,
+              "Trailer/Bus": 18,
+              "Car": 57,
+              "Rigid lorry": 6
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 213,
+              "Car": 95,
+              "Trailer/Bus": 30,
+              "Rigid lorry": 10
+            },
+            "max_abs_share_delta": 0.000371225870318459
+          }
+        },
+        "O3D1": {
+          "time_bin": {
+            "counts": {
+              "0": 4,
+              "1": 7,
+              "2": 3,
+              "3": 7,
+              "4": 6,
+              "5": 5,
+              "6": 8,
+              "7": 7,
+              "8": 4,
+              "9": 7,
+              "10": 3,
+              "11": 3
+            },
+            "hard_counts": {
+              "0": 7,
+              "1": 11,
+              "2": 5,
+              "3": 12,
+              "4": 10,
+              "5": 9,
+              "6": 14,
+              "7": 11,
+              "8": 7,
+              "9": 11,
+              "10": 5,
+              "11": 5
+            },
+            "max_abs_share_delta": 0.006571261682242993
+          },
+          "entry_lane": {
+            "counts": {
+              "O3_0": 64
+            },
+            "hard_counts": {
+              "O3_0": 107
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 35,
+              "Car": 20,
+              "Trailer/Bus": 6,
+              "Rigid lorry": 3
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 58,
+              "Car": 33,
+              "Trailer/Bus": 10,
+              "Rigid lorry": 6
+            },
+            "max_abs_share_delta": 0.009199766355140186
+          }
+        },
+        "O3D2": {
+          "time_bin": {
+            "counts": {
+              "0": 23,
+              "1": 22,
+              "2": 22,
+              "3": 27,
+              "4": 22,
+              "5": 26,
+              "6": 21,
+              "7": 29,
+              "8": 20,
+              "9": 27,
+              "10": 29,
+              "11": 23
+            },
+            "hard_counts": {
+              "0": 39,
+              "1": 36,
+              "2": 36,
+              "3": 45,
+              "4": 36,
+              "5": 43,
+              "6": 35,
+              "7": 49,
+              "8": 33,
+              "9": 45,
+              "10": 48,
+              "11": 39
+            },
+            "max_abs_share_delta": 0.0015833120331714412
+          },
+          "entry_lane": {
+            "counts": {
+              "O3_0": 291
+            },
+            "hard_counts": {
+              "O3_0": 484
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 183,
+              "Rigid lorry": 10,
+              "Car": 92,
+              "Trailer/Bus": 5,
+              "Motorbike": 1
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 304,
+              "Rigid lorry": 17,
+              "Car": 153,
+              "Motorbike": 2,
+              "Trailer/Bus": 8
+            },
+            "max_abs_share_delta": 0.0007668058277242595
+          }
+        },
+        "O3D3": {
+          "time_bin": {
+            "counts": {
+              "0": 10,
+              "1": 8,
+              "2": 5,
+              "3": 14,
+              "4": 6,
+              "5": 11,
+              "6": 8,
+              "7": 12,
+              "8": 10,
+              "9": 12,
+              "10": 12,
+              "11": 11
+            },
+            "hard_counts": {
+              "0": 16,
+              "1": 13,
+              "2": 8,
+              "3": 23,
+              "4": 10,
+              "5": 19,
+              "6": 13,
+              "7": 21,
+              "8": 17,
+              "9": 20,
+              "10": 20,
+              "11": 19
+            },
+            "max_abs_share_delta": 0.004687302056500989
+          },
+          "entry_lane": {
+            "counts": {
+              "O3_0": 119
+            },
+            "hard_counts": {
+              "O3_0": 199
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 71,
+              "Car": 43,
+              "Rigid lorry": 4,
+              "Trailer/Bus": 1
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 119,
+              "Car": 71,
+              "Rigid lorry": 7,
+              "Trailer/Bus": 2
+            },
+            "max_abs_share_delta": 0.004560618217136103
+          }
+        }
+      }
+    },
+    "Hard": {
+      "target": 7820,
+      "od": [
+        [
+          2040,
+          1964,
+          259
+        ],
+        [
+          833,
+          1586,
+          348
+        ],
+        [
+          107,
+          484,
+          199
+        ]
+      ],
+      "destination_sources": {
+        "observed_match": 6052,
+        "furness_residual": 1768
+      },
+      "length_categories": {
+        "Trailer/Bus": 1396,
+        "Car": 2139,
+        "Car/Van 待判定": 3894,
+        "Rigid lorry": 365,
+        "Motorbike": 26
+      },
+      "route": "Antwerp_observed_hard.rou.xml",
+      "route_sha256": "a33de3718ba5d2b4af5f9dda459f1262355031a9086ef51d9841d7c53c44f52e",
+      "config": "Antwerp_observed_hard.sumocfg",
+      "config_sha256": "c0b55f0f58dc3a8007261bc96be6557d42ef14f0bd07d58d9a756e7a405a661c",
+      "stratification": {
+        "O1D1": {
+          "time_bin": {
+            "counts": {
+              "0": 172,
+              "1": 154,
+              "2": 172,
+              "3": 180,
+              "4": 183,
+              "5": 171,
+              "6": 171,
+              "7": 158,
+              "8": 175,
+              "9": 157,
+              "10": 163,
+              "11": 184
+            },
+            "hard_counts": {
+              "0": 172,
+              "1": 154,
+              "2": 172,
+              "3": 180,
+              "4": 183,
+              "5": 171,
+              "6": 171,
+              "7": 158,
+              "8": 175,
+              "9": 157,
+              "10": 163,
+              "11": 184
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "entry_lane": {
+            "counts": {
+              "O1_0": 605,
+              "O1_1": 905,
+              "O1_2": 530
+            },
+            "hard_counts": {
+              "O1_0": 605,
+              "O1_1": 905,
+              "O1_2": 530
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 891,
+              "Car": 593,
+              "Trailer/Bus": 463,
+              "Rigid lorry": 84,
+              "Motorbike": 9
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 891,
+              "Car": 593,
+              "Trailer/Bus": 463,
+              "Rigid lorry": 84,
+              "Motorbike": 9
+            },
+            "max_abs_share_delta": 0.0
+          }
+        },
+        "O1D2": {
+          "time_bin": {
+            "counts": {
+              "0": 158,
+              "1": 155,
+              "2": 177,
+              "3": 154,
+              "4": 140,
+              "5": 148,
+              "6": 164,
+              "7": 165,
+              "8": 155,
+              "9": 185,
+              "10": 175,
+              "11": 188
+            },
+            "hard_counts": {
+              "0": 158,
+              "1": 155,
+              "2": 177,
+              "3": 154,
+              "4": 140,
+              "5": 148,
+              "6": 164,
+              "7": 165,
+              "8": 155,
+              "9": 185,
+              "10": 175,
+              "11": 188
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "entry_lane": {
+            "counts": {
+              "O1_2": 530,
+              "O1_0": 730,
+              "O1_1": 704
+            },
+            "hard_counts": {
+              "O1_2": 530,
+              "O1_0": 730,
+              "O1_1": 704
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 951,
+              "Trailer/Bus": 344,
+              "Car": 555,
+              "Rigid lorry": 105,
+              "Motorbike": 9
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 951,
+              "Trailer/Bus": 344,
+              "Car": 555,
+              "Rigid lorry": 105,
+              "Motorbike": 9
+            },
+            "max_abs_share_delta": 0.0
+          }
+        },
+        "O1D3": {
+          "time_bin": {
+            "counts": {
+              "0": 25,
+              "1": 19,
+              "2": 23,
+              "3": 18,
+              "4": 24,
+              "5": 17,
+              "6": 24,
+              "7": 18,
+              "8": 26,
+              "9": 18,
+              "10": 21,
+              "11": 26
+            },
+            "hard_counts": {
+              "0": 25,
+              "1": 19,
+              "2": 23,
+              "3": 18,
+              "4": 24,
+              "5": 17,
+              "6": 24,
+              "7": 18,
+              "8": 26,
+              "9": 18,
+              "10": 21,
+              "11": 26
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "entry_lane": {
+            "counts": {
+              "O1_1": 107,
+              "O1_0": 91,
+              "O1_2": 61
+            },
+            "hard_counts": {
+              "O1_1": 107,
+              "O1_0": 91,
+              "O1_2": 61
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car": 85,
+              "Car/Van 待判定": 138,
+              "Trailer/Bus": 20,
+              "Rigid lorry": 14,
+              "Motorbike": 2
+            },
+            "hard_counts": {
+              "Car": 85,
+              "Car/Van 待判定": 138,
+              "Trailer/Bus": 20,
+              "Rigid lorry": 14,
+              "Motorbike": 2
+            },
+            "max_abs_share_delta": 0.0
+          }
+        },
+        "O2D1": {
+          "time_bin": {
+            "counts": {
+              "0": 71,
+              "1": 66,
+              "2": 65,
+              "3": 71,
+              "4": 67,
+              "5": 76,
+              "6": 80,
+              "7": 71,
+              "8": 57,
+              "9": 74,
+              "10": 69,
+              "11": 66
+            },
+            "hard_counts": {
+              "0": 71,
+              "1": 66,
+              "2": 65,
+              "3": 71,
+              "4": 67,
+              "5": 76,
+              "6": 80,
+              "7": 71,
+              "8": 57,
+              "9": 74,
+              "10": 69,
+              "11": 66
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "entry_lane": {
+            "counts": {
+              "O2_0": 393,
+              "O2_1": 440
+            },
+            "hard_counts": {
+              "O2_0": 393,
+              "O2_1": 440
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Trailer/Bus": 250,
+              "Car/Van 待判定": 375,
+              "Car": 160,
+              "Rigid lorry": 46,
+              "Motorbike": 2
+            },
+            "hard_counts": {
+              "Trailer/Bus": 250,
+              "Car/Van 待判定": 375,
+              "Car": 160,
+              "Rigid lorry": 46,
+              "Motorbike": 2
+            },
+            "max_abs_share_delta": 0.0
+          }
+        },
+        "O2D2": {
+          "time_bin": {
+            "counts": {
+              "0": 134,
+              "1": 121,
+              "2": 120,
+              "3": 139,
+              "4": 153,
+              "5": 116,
+              "6": 140,
+              "7": 114,
+              "8": 146,
+              "9": 136,
+              "10": 138,
+              "11": 129
+            },
+            "hard_counts": {
+              "0": 134,
+              "1": 121,
+              "2": 120,
+              "3": 139,
+              "4": 153,
+              "5": 116,
+              "6": 140,
+              "7": 114,
+              "8": 146,
+              "9": 136,
+              "10": 138,
+              "11": 129
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "entry_lane": {
+            "counts": {
+              "O2_1": 952,
+              "O2_0": 634
+            },
+            "hard_counts": {
+              "O2_1": 952,
+              "O2_0": 634
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car": 394,
+              "Car/Van 待判定": 845,
+              "Trailer/Bus": 269,
+              "Rigid lorry": 76,
+              "Motorbike": 2
+            },
+            "hard_counts": {
+              "Car": 394,
+              "Car/Van 待判定": 845,
+              "Trailer/Bus": 269,
+              "Rigid lorry": 76,
+              "Motorbike": 2
+            },
+            "max_abs_share_delta": 0.0
+          }
+        },
+        "O2D3": {
+          "time_bin": {
+            "counts": {
+              "0": 30,
+              "1": 32,
+              "2": 42,
+              "3": 28,
+              "4": 26,
+              "5": 29,
+              "6": 28,
+              "7": 32,
+              "8": 19,
+              "9": 23,
+              "10": 29,
+              "11": 30
+            },
+            "hard_counts": {
+              "0": 30,
+              "1": 32,
+              "2": 42,
+              "3": 28,
+              "4": 26,
+              "5": 29,
+              "6": 28,
+              "7": 32,
+              "8": 19,
+              "9": 23,
+              "10": 29,
+              "11": 30
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "entry_lane": {
+            "counts": {
+              "O2_1": 157,
+              "O2_0": 191
+            },
+            "hard_counts": {
+              "O2_1": 157,
+              "O2_0": 191
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 213,
+              "Car": 95,
+              "Trailer/Bus": 30,
+              "Rigid lorry": 10
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 213,
+              "Car": 95,
+              "Trailer/Bus": 30,
+              "Rigid lorry": 10
+            },
+            "max_abs_share_delta": 0.0
+          }
+        },
+        "O3D1": {
+          "time_bin": {
+            "counts": {
+              "0": 7,
+              "1": 11,
+              "2": 5,
+              "3": 12,
+              "4": 10,
+              "5": 9,
+              "6": 14,
+              "7": 11,
+              "8": 7,
+              "9": 11,
+              "10": 5,
+              "11": 5
+            },
+            "hard_counts": {
+              "0": 7,
+              "1": 11,
+              "2": 5,
+              "3": 12,
+              "4": 10,
+              "5": 9,
+              "6": 14,
+              "7": 11,
+              "8": 7,
+              "9": 11,
+              "10": 5,
+              "11": 5
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "entry_lane": {
+            "counts": {
+              "O3_0": 107
+            },
+            "hard_counts": {
+              "O3_0": 107
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 58,
+              "Car": 33,
+              "Trailer/Bus": 10,
+              "Rigid lorry": 6
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 58,
+              "Car": 33,
+              "Trailer/Bus": 10,
+              "Rigid lorry": 6
+            },
+            "max_abs_share_delta": 0.0
+          }
+        },
+        "O3D2": {
+          "time_bin": {
+            "counts": {
+              "0": 39,
+              "1": 36,
+              "2": 36,
+              "3": 45,
+              "4": 36,
+              "5": 43,
+              "6": 35,
+              "7": 49,
+              "8": 33,
+              "9": 45,
+              "10": 48,
+              "11": 39
+            },
+            "hard_counts": {
+              "0": 39,
+              "1": 36,
+              "2": 36,
+              "3": 45,
+              "4": 36,
+              "5": 43,
+              "6": 35,
+              "7": 49,
+              "8": 33,
+              "9": 45,
+              "10": 48,
+              "11": 39
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "entry_lane": {
+            "counts": {
+              "O3_0": 484
+            },
+            "hard_counts": {
+              "O3_0": 484
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 304,
+              "Rigid lorry": 17,
+              "Car": 153,
+              "Motorbike": 2,
+              "Trailer/Bus": 8
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 304,
+              "Rigid lorry": 17,
+              "Car": 153,
+              "Motorbike": 2,
+              "Trailer/Bus": 8
+            },
+            "max_abs_share_delta": 0.0
+          }
+        },
+        "O3D3": {
+          "time_bin": {
+            "counts": {
+              "0": 16,
+              "1": 13,
+              "2": 8,
+              "3": 23,
+              "4": 10,
+              "5": 19,
+              "6": 13,
+              "7": 21,
+              "8": 17,
+              "9": 20,
+              "10": 20,
+              "11": 19
+            },
+            "hard_counts": {
+              "0": 16,
+              "1": 13,
+              "2": 8,
+              "3": 23,
+              "4": 10,
+              "5": 19,
+              "6": 13,
+              "7": 21,
+              "8": 17,
+              "9": 20,
+              "10": 20,
+              "11": 19
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "entry_lane": {
+            "counts": {
+              "O3_0": 199
+            },
+            "hard_counts": {
+              "O3_0": 199
+            },
+            "max_abs_share_delta": 0.0
+          },
+          "length_category": {
+            "counts": {
+              "Car/Van 待判定": 119,
+              "Car": 71,
+              "Rigid lorry": 7,
+              "Trailer/Bus": 2
+            },
+            "hard_counts": {
+              "Car/Van 待判定": 119,
+              "Car": 71,
+              "Rigid lorry": 7,
+              "Trailer/Bus": 2
+            },
+            "max_abs_share_delta": 0.0
+          }
+        }
+      }
+    }
+  }
+}

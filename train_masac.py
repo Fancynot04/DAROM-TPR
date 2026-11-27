@@ -692,7 +692,6 @@ def train_locked(args, device, output_dir):
     env = MultiEgoEnv(
         scenario=args.scenario,
         lane_change_request=lane_change_request,
-        speed_mode=96,
         collect_metrics=True,
         usp_enabled=args.usp,
         usp_penalty=args.usp_penalty,

@@ -1,0 +1,27 @@
+<?xml version='1.0' encoding='utf-8'?>
+<configuration>
+  <input>
+    <net-file value="../Antwerp.net.xml" />
+    <route-files value="Antwerp_observed_easy.rou.xml" />
+  </input>
+  <time>
+    <begin value="0" />
+    <step-length value="0.1" />
+    <end value="4800" />
+  </time>
+  <processing>
+    <lateral-resolution value="0.8" />
+    <collision.check-junctions value="true" />
+    <collision.action value="remove" />
+    <time-to-teleport value="-1" />
+    <time-to-teleport.highways value="-1" />
+    <time-to-teleport.disconnected value="-1" />
+    <time-to-teleport.bidi value="-1" />
+    <time-to-teleport.ride value="-1" />
+    <max-depart-delay value="-1" />
+    <sloppy-insert value="false" />
+  </processing>
+  <random_number>
+    <seed value="42" />
+  </random_number>
+</configuration>

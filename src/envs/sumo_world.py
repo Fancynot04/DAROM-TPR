@@ -5,14 +5,22 @@ import traci
 from sumolib import checkBinary
 
 from src.experiment_tracking import sha256
+from .sumo_detectors import prepare_detector_input
 
 
 # 项目根目录下的 SUMO 文件
 SUMO_DIR = Path(__file__).resolve().parents[2] / "sumo_new"
 STEP_LENGTH_S = 0.1
+DETECTOR_TEMPLATE = SUMO_DIR / "Antwerp.add.xml"
 DUAL_EGO_ROUTES = {
     scenario: SUMO_DIR / f"Antwerp_{scenario}_o3_d3_homogeneous_dual.rou.xml"
     for scenario in ("easy", "easy_speed18")
+}
+
+
+EMPIRICAL_ROUTES = {
+    f"empirical_{name}": SUMO_DIR / "empirical_v1" / f"Antwerp_empirical_v1_{name}.rou.xml"
+    for name in ("easy", "medium", "hard")
 }
 
 
@@ -29,8 +37,8 @@ class SumoWorld:
     """管理一个 SUMO 仿真世界，不负责具体 Ego 的决策。"""
 
     def __init__(self, scenario="easy", seed=42, gui=False, route_file=None, warning_log=None,
-                 lanechange_output=None):
-        if scenario not in ("easy", "medium", "hard", "easy_speed18"):
+                 lanechange_output=None, detector_output_dir=None):
+        if scenario not in ("easy", "medium", "hard", "easy_speed18") and scenario not in EMPIRICAL_ROUTES:
             raise ValueError(f"Unknown scenario: {scenario}")
 
         self.scenario = scenario
@@ -38,17 +46,22 @@ class SumoWorld:
         self.gui = gui
         self.warning_log = warning_log
         self.lanechange_output = lanechange_output
+        self.detector_additional_file = (
+            Path(detector_output_dir).resolve() / DETECTOR_TEMPLATE.name if detector_output_dir is not None else None
+        )
 
         self.step_length = STEP_LENGTH_S
         self.label = "o3_d3_world"
 
         self.net_file = SUMO_DIR / "Antwerp.net.xml"
-        self.route_file = (
-            Path(route_file)
-            if route_file is not None
-            else (DUAL_EGO_ROUTES[scenario] if scenario == "easy_speed18"
-                  else SUMO_DIR / f"Antwerp_{scenario}_o3_d3.rou.xml")
-        )
+        if route_file is not None:
+            self.route_file = Path(route_file)
+        elif scenario in EMPIRICAL_ROUTES:
+            self.route_file = EMPIRICAL_ROUTES[scenario]
+        elif scenario == "easy_speed18":
+            self.route_file = DUAL_EGO_ROUTES[scenario]
+        else:
+            self.route_file = SUMO_DIR / f"Antwerp_{scenario}_o3_d3.rou.xml"
 
         self.conn = None
 
@@ -80,6 +93,8 @@ class SumoWorld:
             command.append("--start")
         if self.warning_log is not None:
             command.extend(("--error-log", str(self.warning_log), "--aggregate-warnings", "-1"))
+        if self.detector_additional_file is not None:
+            command.extend(("--additional-files", str(self.detector_additional_file)))
         if self.lanechange_output is not None:
             command.extend((
                 "--lanechange-output", str(self.lanechange_output),
@@ -96,6 +111,8 @@ class SumoWorld:
         if not self.route_file.is_file():
             raise FileNotFoundError(self.route_file)
 
+        if self.detector_additional_file is not None:
+            prepare_detector_input(DETECTOR_TEMPLATE, self.detector_additional_file.parent)
         traci.start(self.launch_command(), label=self.label)
         self.conn = traci.getConnection(self.label)
 
