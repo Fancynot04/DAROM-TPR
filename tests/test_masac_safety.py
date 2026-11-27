@@ -230,7 +230,10 @@ def test_lane_change_actor_and_missed_exit_with_sumo(tmp_path, edge, goal, wrong
         actor, critic, _ = snapshot(env, obs)
         assert infos["ego_1"]["signed_min_lane_changes"] == changes
         assert actor[0, 1] == changes
-        assert critic[0, 1] == wrong_lane
+        np.testing.assert_array_equal(critic[0, :3], actor[0, :3])
+        _, legacy_critic, _ = snapshot(env, obs, critic_uses_actor_ego=False)
+        assert legacy_critic[0, 1] == wrong_lane
+        np.testing.assert_array_equal(legacy_critic[0, :93], obs["ego_1"].ravel())
 
         env.step({"ego_1": [0, 0]})
         conn = env.world.conn
@@ -478,7 +481,7 @@ def test_route_goal_observations_with_sumo(tmp_path, origin, goal, arrival):
                 info = infos[ego]
                 distance = info["remaining_goal_distance_m"]
                 assert actor[i, 0] == pytest.approx(distance)
-                assert critic[i, 0] == obs[ego][0, 0]
+                np.testing.assert_array_equal(critic[i, :3], actor[i, :3])
                 if ego in previous:
                     old_road, old_distance = previous[ego]
                     # SUMO uses estimated lengths for downstream internal connectors.
@@ -574,10 +577,12 @@ def test_real_leader_gap_and_ttc_beyond_old_lookahead(tmp_path, actor_leader_fea
         env._update_policy_observations(observations, {
             ego: {} for ego in env.AGENTS
         })
+        actor_obs, critic_obs, _ = snapshot(env, observations)
+        np.testing.assert_array_equal(critic_obs[:, :3], actor_obs[:, :3])
+        np.testing.assert_array_equal(critic_obs[0, 3:93], observations["ego_1"][1:].ravel())
+        np.testing.assert_array_equal(critic_obs[0, 93:], env.target_exit_features("ego_1"))
         if actor_leader_features:
-            actor_obs, critic_obs, _ = snapshot(env, observations)
             assert actor_obs[0, 93:96] == pytest.approx([60, 30, 2])
-            np.testing.assert_array_equal(critic_obs[0, :93], observations["ego_1"].ravel())
         _, _, _, _, infos = env.step(dict.fromkeys(env.AGENTS, [0, 0]))
         assert infos["ego_1"]["following_risks"] == pytest.approx({
             "gap_risk": 0, "ttc_risk": 1 / 3, "following_reward": -1 / 30,

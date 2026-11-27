@@ -63,7 +63,7 @@ RESUME_CONFIG_KEYS = (
 )
 
 
-def snapshot(env, observations):
+def snapshot(env, observations, *, critic_uses_actor_ego=True):
     """读取同一 SUMO 时刻的联合状态。"""
 
     policy_obs = np.stack([
@@ -75,6 +75,9 @@ def snapshot(env, observations):
         observations[ego_id].reshape(-1)
         for ego_id in AGENT_IDS
     ]).astype(np.float32)
+    if critic_uses_actor_ego:
+        # The delay buffer refreshes the Actor's ego row with the current step.
+        critic_obs[:, :3] = policy_obs[:, :3]
 
     if env.target_exit_dim:
         targets = np.stack([env.target_exit_features(ego_id) for ego_id in AGENT_IDS])
@@ -601,6 +604,10 @@ def train_locked(args, device, output_dir):
 
     checkpoint_dir = output_dir / "checkpoints"
     state, replay_path, checkpoint_index = find_resume_checkpoint(checkpoint_dir, args)
+    # Existing replay stores the old ego features with the same tensor shape.
+    args.critic_uses_actor_ego = (
+        state is None or state["config"].get("critic_uses_actor_ego", False)
+    )
     if state is not None:
         reward_protocol = MASACRewardProtocol(**args.reward_protocol)
     else:
@@ -753,8 +760,8 @@ def train_locked(args, device, output_dir):
         for global_step in range(start_step + 1, args.total_steps + 1):
 
             # A. 推进前快照
-            policy_obs, critic_obs, active_mask = (
-                snapshot(env, observations)
+            policy_obs, critic_obs, active_mask = snapshot(
+                env, observations, critic_uses_actor_ego=args.critic_uses_actor_ego,
             )
 
             # B. 随机探索或 Actor 决策
@@ -811,7 +818,9 @@ def train_locked(args, device, output_dir):
                 next_policy,
                 next_critic,
                 next_mask,
-            ) = snapshot(env, next_observations)
+            ) = snapshot(
+                env, next_observations, critic_uses_actor_ego=args.critic_uses_actor_ego,
+            )
 
             rewards_array = np.asarray([
                 rewards[ego_id]

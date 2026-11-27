@@ -653,6 +653,7 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     assert [row["global_step"] for row in index] == [12, 20]
     model = directory / "masac_seed42_step_20.pt"
     before = torch.load(model, weights_only=True, map_location="cpu")
+    assert before["config"]["critic_uses_actor_ego"] is True
     replay = before["resume_state"]["replay"]
     assert replay["size"] == 16
     with np.load(directory / replay["path"], allow_pickle=False) as data:
@@ -689,6 +690,7 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
     resolved = json.loads((work / "resolved_config.json").read_text())
     assert resolved == final["config"]
     assert resolved["total_steps"] == 28
+    assert resolved["critic_uses_actor_ego"] is True
     assert resolved["environment"]["initial_episode_seed"] == 43
     assert resolved["reward"]["protocol"]["merge_reward"] == 25.0
     assert resolved["reward"]["efficiency_reference_speed_mps"] == 20.0
@@ -710,6 +712,13 @@ def test_training_resumes_replay_and_updates_after_interruption(work):
         replay_rng.choice(16, size=4, replace=False)
     with np.load(directory / final["resume_state"]["replay"]["path"], allow_pickle=False) as data:
         assert json.loads(data["metadata"].item())["rng"] == replay_rng.bit_generator.state
+        for prefix in ("", "next_"):
+            active = data[prefix + "active_mask"].astype(bool)
+            assert active.any()
+            np.testing.assert_array_equal(
+                data[prefix + "critic_obs"][..., :3][active],
+                data[prefix + "policy_obs"][..., :3][active],
+            )
     assert [row["global_step"] for row in discover(work)] == [12, 20, 24, 28]
 
     metrics = [json.loads(line) for line in metrics_path.read_text().splitlines()]

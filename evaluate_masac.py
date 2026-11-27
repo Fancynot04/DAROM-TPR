@@ -190,7 +190,7 @@ def evaluate(args):
             previous_mask = np.zeros(len(AGENT_IDS), dtype=np.float32)
 
             for step in range(args.max_steps):
-                policy_obs, critic_obs, active_mask = snapshot(
+                policy_obs, _, active_mask = snapshot(
                     env, observations
                 )
 
@@ -241,11 +241,8 @@ def evaluate(args):
                         if active_mask[i] == 0:
                             continue
 
-                        # critic_obs 的前三维为：
-                        # 累计行驶距离、车道索引、速度
-                        distance = float(critic_obs[i, 0])
-                        lane = int(critic_obs[i, 1])
-                        speed = float(critic_obs[i, 2])
+                        # 控制台诊断沿用累计行驶距离、车道索引、速度。
+                        distance, lane, speed = observations[ego_id][0]
 
                         acc, lateral = actions[ego_id]
 
@@ -253,7 +250,7 @@ def evaluate(args):
                             f"TRACE step={step} "
                             f"ego={ego_id} "
                             f"distance={distance:.1f} "
-                            f"lane={lane} "
+                            f"lane={int(lane)} "
                             f"speed={speed:.2f} "
                             f"acc={acc:+.2f} "
                             f"lateral={lateral:+.2f}",

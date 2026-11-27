@@ -28,7 +28,7 @@
 - **分散 Actor**：每辆 Ego 使用独立的 `GaussianActor`（DAROM `DelayAwareGRUEncoder` + tanh-Gaussian 策略）；仅使用本车观测，默认 136 维。
 - **Actor 输入（136）**：当前 Ego 状态及最多 30 辆邻车的 31×3 基础观测（93）＋目标出口编码（2）＋20×2 自身动作历史（40）＋观测年龄（1）。邻车状态带通信延迟；Ego 自身状态实时更新。新动作位于历史开头，按实际观测年龄决定保留数量。
 - **前车特征消融（139 维）**：训练时加 `--actor-leader-features`。从 TraCI 采集 120 m 范围内的前车净间距、带符号的闭合速度（Ego 速度减前车速度）和 TTC。TTC 封顶 10 s，无前车时使用 `[120 m, 0 m/s, 10 s]`，有前车但未逼近时 TTC 同样取 10 s。三个量与邻车共用同一数据包、延迟和观测年龄。Critic 和奖励输入沿用原定义。checkpoint 保存该开关，评估自动继承，旧 checkpoint 缺少该字段时为关闭。
-- **集中 Critic**：`CentralizedTwinQ` 接收两辆 Ego 的当前真实交通观测与目标出口（每车 95 维）、联合请求动作及 active mask，拼接为 196 维输入；两套 Q 网络分别对两辆车输出 Q 值。**Critic 不使用 Actor 的 256 维 GRU 特征。**
+- **集中 Critic**：`CentralizedTwinQ` 接收两辆车的实时自车状态、实时周车观测和目标出口（每车 95 维），与联合请求动作及 active mask 拼接为 196 维输入。新训练中每车的自车三维与该车 Actor 一致。两套 Q 网络分别对两辆车输出 Q 值。
 - **联合 Replay**：每个 SUMO 全局步对应一条双 Ego 联合经验，分别保存奖励、done、active/acted/next-active mask。`JointTransitionCollector` 延迟一个全局步提交，以正确归因 pre-step Missed Exit。
 - **优化**：SAC Twin-Q 目标、Polyak 目标网络、分 Ego Actor 优化器和独立自动熵系数 α；Critic 使用真实联合状态，执行时只需各自 Actor。
 
@@ -85,9 +85,11 @@ Actor 与 Critic 均收到各车自己的目标出口编码（D1 为 [0,0]，D2 
 
 例如，追加 `--no-reward-comfort --no-reward-team` 可关闭舒适度和团队奖励。前后车共用 `--reward-ttc-threshold` 和 `--reward-following-lookahead`。新训练的换道风险扣分权重默认为 `0.5`，可用 `--reward-lane-change-weight` 设置。评估和续训复用存档的换道权重，缺少该字段时按历史值 `1.0`。旧 checkpoint 缺少 `rear_following` 开关时，评估按关闭处理。单步信息分别提供 `gap_risk`、`ttc_risk`、`following_reward` 和 `rear_gap_risk`、`rear_ttc_risk`、`rear_following_reward`，训练可用 `--trace-controls` 记录。换道事件写入回合训练日志和评估 JSON，包含开始、完成或中断时刻、目标车道、风险峰值与累计扣分。
 
-每辆 Actor 的首维是到该车任务终点的沿路线剩余米数，沿用编码器固定的 1000 m 缩放。环境从双 Ego 路线文件中各自的 `<trip>` 读取目标 Edge 和 `arrivalPos`，默认取末端，支持 `max`、`center` 和数值位置。可用 `MultiEgoEnv(route_file=...)` 指定同一路网的其他双 Ego 路线。活动 Ego 的无效距离会报告车辆、道路、路线和目标。Critic 仍使用实时累计行驶距离。
+每辆 Actor 的首维是到该车任务终点的沿路线剩余米数，沿用编码器固定的 1000 m 缩放。环境从双 Ego 路线文件中各自的 `<trip>` 读取目标 Edge 和 `arrivalPos`，默认取末端，支持 `max`、`center` 和数值位置。可用 `MultiEgoEnv(route_file=...)` 指定同一路网的其他双 Ego 路线。活动 Ego 的无效距离会报告车辆、道路、路线和目标。
 
-Actor 的第二维是沿该车指定路线到目标出口最少还需主动换几条车道，沿用除以 5 的缩放。右为负、左为正，符号表示某条最优走法的第一次主动换道方向。自然车道连接计 0，合法的相邻横移计 1。路口内部车道按已进入的连接对应的下游车道查表。调试字段 `signed_min_lane_changes` 记录当前未延迟值，拓扑不可达时为 `None`，Actor 对仍被采样的不可达状态使用原始值 `+6`。Critic 的第二维仍是实时车道编号。
+Actor 的第二维是沿该车指定路线到目标出口最少还需主动换几条车道，沿用除以 5 的缩放。右为负、左为正，符号表示某条最优走法的第一次主动换道方向。自然车道连接计 0，合法的相邻横移计 1。路口内部车道按已进入的连接对应的下游车道查表。调试字段 `signed_min_lane_changes` 记录当前未延迟值，拓扑不可达时为 `None`，Actor 对仍被采样的不可达状态使用原始值 `+6`。
+
+`critic_uses_actor_ego` 随训练配置写入 checkpoint。新训练启用该设置，个人和团队 Critic 复用同一步 Actor 的实时自车三维及原有缩放。续训继承存档设置，缺少该字段的 checkpoint 沿用历史 replay 的累计行驶距离、车道索引和速度。
 
 Missed Exit 使用同一张路线车道图。车辆进入无法通往目标的连接或偏离指定路线时，按错过出口结算。距必须通过的路段末端 10 m 内，若当前车道无法继续沿路线前进、车辆无法在末端前停下，且没有正在横移到可通行的相邻车道，也会触发终止。这条预判沿用制动距离近似。Ego 首次控制时在步后判定，以便 Replay 将终止归给本步动作。后续的制动预判在步前执行。
 
